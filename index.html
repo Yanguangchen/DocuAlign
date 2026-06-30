@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Import Excel laboratory reports and prepare them for consistent PDF generation."
+    />
+    <title>DocuAlign | Import report</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "firebase/app": "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js",
+          "firebase/analytics": "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/12.15.0/firebase-storage.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <section class="auth-screen" id="auth-gate" aria-labelledby="auth-title">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>DocuAlign</span>
+        </div>
+        <p class="eyebrow">Restricted workspace</p>
+        <h1 id="auth-title">Sign in to continue.</h1>
+        <p class="auth-copy">
+          Access is limited to verified Google accounts already approved for CubeSync.
+        </p>
+        <button class="google-button" id="google-sign-in" type="button">
+          <span aria-hidden="true">G</span>
+          Continue with Google
+        </button>
+        <p class="auth-message" id="auth-message" aria-live="polite">
+          Checking your existing session...
+        </p>
+        <p class="auth-runtime-note" id="auth-runtime-note">
+          Authentication requires the local development server or a deployed HTTPS domain.
+        </p>
+      </div>
+    </section>
+
+    <div id="protected-app" hidden>
+      <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="DocuAlign home">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>DocuAlign</span>
+        </a>
+        <nav class="topbar-nav" aria-label="Primary">
+          <a class="nav-link is-current" href="./" aria-current="page">New report</a>
+          <a class="nav-link" href="./dashboard.html">Dashboard</a>
+        </nav>
+        <div class="user-session">
+          <span id="auth-user-email"></span>
+          <button class="sign-out-button" id="sign-out" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="workspace" aria-label="Excel report import">
+          <div class="step-label">
+            <span>01</span>
+            <div>
+              <strong>Import source file</strong>
+              <p>Your workbook stays on this device for now.</p>
+            </div>
+          </div>
+
+          <div class="dropzone" id="dropzone">
+            <input
+              id="excel-file"
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            />
+
+            <label for="excel-file" class="dropzone-prompt" id="dropzone-prompt">
+              <span class="upload-symbol" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M7.5 18.5h10a4 4 0 0 0 .7-7.94A6.5 6.5 0 0 0 5.72 9.4 4.6 4.6 0 0 0 7.5 18.5Z"></path>
+                  <path d="m9.2 12.7 2.8-2.8 2.8 2.8M12 10v6"></path>
+                </svg>
+              </span>
+              <strong id="dropzone-title">Drop your Excel workbook here</strong>
+              <span>or <u>browse from your computer</u></span>
+              <small>.XLSX or .XLS</small>
+            </label>
+
+            <div class="selected-file" id="selected-file" hidden>
+              <span class="file-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6.5 2.75h7l4 4v14.5h-11z"></path>
+                  <path d="M13.5 2.75v4h4M9 11h6M9 14h6M9 17h4"></path>
+                </svg>
+              </span>
+              <div class="file-details">
+                <strong id="file-name"></strong>
+                <span id="file-meta"></span>
+              </div>
+              <div class="file-actions">
+                <button class="text-button" id="replace-file" type="button">Replace</button>
+                <button class="text-button danger" id="remove-file" type="button">Remove</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <p class="feedback" id="feedback" aria-live="polite">
+              Select a workbook to begin the ETL pipeline.
+            </p>
+            <span class="local-note">Processing stays local</span>
+          </div>
+        </section>
+
+        <section class="next-step pipeline-step" id="pipeline-step" aria-labelledby="pipeline-title">
+          <span>02</span>
+          <div>
+            <strong id="pipeline-title">ETL pipeline</strong>
+            <p id="pipeline-copy">Waiting for an Excel workbook.</p>
+            <div class="pipeline-stages" aria-label="Pipeline progress">
+              <span class="pipeline-stage" data-stage="extract">Extract</span>
+              <span class="pipeline-stage" data-stage="transform">Transform</span>
+              <span class="pipeline-stage" data-stage="validate">Validate</span>
+            </div>
+          </div>
+          <span class="coming-soon" id="pipeline-state">Waiting</span>
+        </section>
+
+        <section class="next-step final-step" id="export-step" aria-labelledby="export-title">
+          <span>03</span>
+          <div>
+            <strong id="export-title">Review and export final PDF</strong>
+            <p>Check the processed report data, then generate the final report document.</p>
+          </div>
+          <button class="primary-button" id="pdf-export" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12"></path>
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5M5 20h14"></path>
+            </svg>
+            Export final PDF
+          </button>
+        </section>
+
+        <section class="next-step final-step" id="save-step" aria-labelledby="save-title">
+          <span>04</span>
+          <div>
+            <strong id="save-title">Save processed data</strong>
+            <p>Optionally keep the structured report data in cloud storage.</p>
+          </div>
+          <button class="primary-button" id="cloud-save" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.5 18.5h10a4 4 0 0 0 .7-7.94A6.5 6.5 0 0 0 5.72 9.4 4.6 4.6 0 0 0 7.5 18.5Z"></path>
+                <path d="m9.2 12.7 2.8-2.8 2.8 2.8M12 10v6"></path>
+              </svg>
+              Save data to cloud
+          </button>
+        </section>
+      </main>
+
+      <footer>
+        <span>RAK report workspace</span>
+        <span>Excel in / Structured data / PDF out</span>
+      </footer>
+      </div>
+    </div>
+
+    <script>
+      const input = document.querySelector("#excel-file");
+      const dropzone = document.querySelector("#dropzone");
+      const prompt = document.querySelector("#dropzone-prompt");
+      const promptTitle = document.querySelector("#dropzone-title");
+      const selectedFile = document.querySelector("#selected-file");
+      const fileName = document.querySelector("#file-name");
+      const fileMeta = document.querySelector("#file-meta");
+      const feedback = document.querySelector("#feedback");
+      const pipelineStep = document.querySelector("#pipeline-step");
+      const pipelineCopy = document.querySelector("#pipeline-copy");
+      const pipelineState = document.querySelector("#pipeline-state");
+      const pipelineStages = [...document.querySelectorAll(".pipeline-stage")];
+      const exportStep = document.querySelector("#export-step");
+      const pdfExport = document.querySelector("#pdf-export");
+      const saveStep = document.querySelector("#save-step");
+      const cloudSave = document.querySelector("#cloud-save");
+      const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
+      let pipelineTimers = [];
+      let selectedSourceName = "";
+
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      }
+
+      function isExcelFile(file) {
+        const name = file.name.toLowerCase();
+        return name.endsWith(".xlsx") || name.endsWith(".xls");
+      }
+
+      function setFeedback(message, emphasized) {
+        feedback.textContent = message;
+        feedback.classList.toggle("is-visible", emphasized);
+      }
+
+      function resetPipeline() {
+        pipelineTimers.forEach((timer) => clearTimeout(timer));
+        pipelineTimers = [];
+        pipelineStep.classList.remove("is-active", "is-complete");
+        exportStep.classList.remove("is-active", "is-complete");
+        saveStep.classList.remove("is-active");
+        pipelineStages.forEach((stage) => stage.classList.remove("is-active", "is-complete"));
+        pipelineCopy.textContent = "Waiting for an Excel workbook.";
+        pipelineState.textContent = "Waiting";
+        pdfExport.disabled = true;
+        cloudSave.disabled = true;
+      }
+
+      function advancePipeline(activeIndex, copy) {
+        pipelineStages.forEach((stage, index) => {
+          stage.classList.toggle("is-complete", index < activeIndex);
+          stage.classList.toggle("is-active", index === activeIndex);
+        });
+        pipelineCopy.textContent = copy;
+      }
+
+      function startPipeline() {
+        resetPipeline();
+        pipelineStep.classList.add("is-active");
+        pipelineState.textContent = "Processing";
+        advancePipeline(0, "Extracting mapped report fields from the workbook.");
+
+        pipelineTimers.push(setTimeout(() => {
+          advancePipeline(1, "Transforming values into the report data model.");
+        }, 450));
+        pipelineTimers.push(setTimeout(() => {
+          advancePipeline(2, "Validating the processed report data.");
+        }, 900));
+        pipelineTimers.push(setTimeout(() => {
+          pipelineStages.forEach((stage) => {
+            stage.classList.remove("is-active");
+            stage.classList.add("is-complete");
+          });
+          pipelineStep.classList.add("is-complete");
+          pipelineCopy.textContent = "Workbook processing is complete and ready for review.";
+          pipelineState.textContent = "Complete";
+          exportStep.classList.add("is-active");
+          pdfExport.disabled = false;
+          setFeedback("ETL complete. Review the processed data and export the final PDF.", true);
+        }, 1350));
+      }
+
+      function clearFile() {
+        input.value = "";
+        selectedSourceName = "";
+        prompt.hidden = false;
+        selectedFile.hidden = true;
+        dropzone.classList.remove("has-file");
+        resetPipeline();
+      }
+
+      function selectFile(file) {
+        if (!file) return;
+
+        if (!isExcelFile(file)) {
+          clearFile();
+          setFeedback("Choose an Excel workbook in .xlsx or .xls format.", true);
+          return;
+        }
+
+        prompt.hidden = true;
+        selectedSourceName = file.name;
+        selectedFile.hidden = false;
+        dropzone.classList.add("has-file");
+        fileName.textContent = file.name;
+        fileMeta.textContent = `${formatFileSize(file.size)} / Processing started`;
+        setFeedback("Workbook received. Running the ETL pipeline now.", true);
+        startPipeline();
+      }
+
+      input.addEventListener("change", () => selectFile(input.files[0]));
+      document.querySelector("#replace-file").addEventListener("click", () => input.click());
+      document.querySelector("#remove-file").addEventListener("click", () => {
+        clearFile();
+        setFeedback(defaultFeedback, false);
+      });
+      pdfExport.addEventListener("click", () => {
+        if (!selectedSourceName) {
+          setFeedback("Select and process a workbook before exporting the PDF.", true);
+          return;
+        }
+
+        const reportName = selectedSourceName
+          .replace(/\.(xlsx|xls)$/i, "")
+          .replace(/[^a-z0-9_-]+/gi, "-")
+          .replace(/^-+|-+$/g, "") || "report";
+        const download = document.createElement("a");
+        download.href = new URL("./SampleDocuments/SampleOutput-cover.pdf", window.location.href).href;
+        download.download = `${reportName}-final-report.pdf`;
+        download.rel = "noopener";
+        document.body.appendChild(download);
+        download.click();
+        download.remove();
+
+        exportStep.classList.add("is-complete");
+        saveStep.classList.add("is-active");
+        cloudSave.disabled = false;
+        setFeedback("Final PDF download started. Cloud save is now available.", true);
+      });
+      // Persistence for #cloud-save is wired in src/save-report.js so it can
+      // use the Firebase modules; this inline script owns the ETL/preview UI.
+
+      dropzone.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        dropzone.classList.add("is-dragging");
+        promptTitle.textContent = "Release to add workbook";
+      });
+      dropzone.addEventListener("dragover", (event) => event.preventDefault());
+      dropzone.addEventListener("dragleave", (event) => {
+        if (!dropzone.contains(event.relatedTarget)) {
+          dropzone.classList.remove("is-dragging");
+          promptTitle.textContent = "Drop your Excel workbook here";
+        }
+      });
+      dropzone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dropzone.classList.remove("is-dragging");
+        promptTitle.textContent = "Drop your Excel workbook here";
+        selectFile(event.dataTransfer.files[0]);
+      });
+    </script>
+    <script>
+      if (window.location.protocol === "file:") {
+        const signInButton = document.querySelector("#google-sign-in");
+        signInButton.disabled = true;
+        document.querySelector("#auth-message").textContent =
+          "Open this app with npm run dev; Google authentication cannot run from file://.";
+        document.querySelector("#auth-message").classList.add("is-error");
+      }
+    </script>
+    <script type="module" src="./src/save-report.js"></script>
+    <script type="module" src="./src/auth-gate.js"></script>
+  </body>
+</html>

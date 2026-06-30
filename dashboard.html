@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Browse every saved DocuAlign report and filter the list by date."
+    />
+    <title>DocuAlign | Saved reports</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "firebase/app": "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js",
+          "firebase/analytics": "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/12.15.0/firebase-storage.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <section class="auth-screen" id="auth-gate" aria-labelledby="auth-title">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>DocuAlign</span>
+        </div>
+        <p class="eyebrow">Restricted workspace</p>
+        <h1 id="auth-title">Sign in to continue.</h1>
+        <p class="auth-copy">
+          Access is limited to verified Google accounts already approved for CubeSync.
+        </p>
+        <button class="google-button" id="google-sign-in" type="button">
+          <span aria-hidden="true">G</span>
+          Continue with Google
+        </button>
+        <p class="auth-message" id="auth-message" aria-live="polite">
+          Checking your existing session...
+        </p>
+        <p class="auth-runtime-note" id="auth-runtime-note">
+          Authentication requires the local development server or a deployed HTTPS domain.
+        </p>
+      </div>
+    </section>
+
+    <div id="protected-app" hidden>
+      <div class="app-shell">
+        <header class="topbar">
+          <a class="brand" href="./" aria-label="DocuAlign home">
+            <span class="brand-mark" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </span>
+            <span>DocuAlign</span>
+          </a>
+          <nav class="topbar-nav" aria-label="Primary">
+            <a class="nav-link" href="./">New report</a>
+            <a class="nav-link is-current" href="./dashboard.html" aria-current="page">Dashboard</a>
+          </nav>
+          <div class="user-session">
+            <span id="auth-user-email"></span>
+            <button class="sign-out-button" id="sign-out" type="button">Sign out</button>
+          </div>
+        </header>
+
+        <main>
+          <section class="intro" aria-labelledby="dashboard-title">
+            <p class="eyebrow">Saved reports</p>
+            <h1 id="dashboard-title">Every report you've saved, in one place.</h1>
+            <p class="intro-copy">
+              Browse the structured reports saved to the cloud. Narrow the list to a
+              specific period using the date range below.
+            </p>
+          </section>
+
+          <section class="dashboard-toolbar" aria-label="Filter saved reports">
+            <form class="date-filter" id="date-filter">
+              <div class="field">
+                <label for="filter-from">From</label>
+                <input type="date" id="filter-from" name="from" />
+              </div>
+              <div class="field">
+                <label for="filter-to">To</label>
+                <input type="date" id="filter-to" name="to" />
+              </div>
+              <button class="text-button" type="reset" id="filter-clear">Clear</button>
+            </form>
+            <p class="result-count" id="result-count" aria-live="polite"></p>
+          </section>
+
+          <section class="dashboard-list" aria-label="Saved reports">
+            <p class="dashboard-status" id="dashboard-status">Loading saved reports…</p>
+            <ul class="report-grid" id="report-grid" hidden></ul>
+          </section>
+        </main>
+
+        <footer>
+          <span>RAK report workspace</span>
+          <span>Excel in / Structured data / PDF out</span>
+        </footer>
+      </div>
+    </div>
+
+    <script type="module" src="./src/dashboard.js"></script>
+    <script type="module" src="./src/auth-gate.js"></script>
+  </body>
+</html>

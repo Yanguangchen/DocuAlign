@@ -1,0 +1,1402 @@
+rules_version = '2';
+
+// ===============================================================
+// WorkGrid — Firestore Security Rules (PROTOTYPE)
+//
+// Mirrors the role model in src/lib/permissions.ts and the business
+// rules in CONTEXT.md. All authorization is enforced here on the
+// server, NOT just in the UI.
+//
+// Roles (stored on users/{uid}.role): worker | engineer | admin
+// Status (users/{uid}.status):        active | inactive
+// ===============================================================
+//
+// Collection: users
+// Document ID: Firebase Auth uid
+// Fields:
+//   - name: string (required, 1..80)
+//   - email: string (required, valid email)
+//   - phone: string (optional, <=40)
+//   - role: string (required, one of the 3 roles) — IMMUTABLE for self
+//   - teamId: string (required, <=64, "" allowed) — IMMUTABLE for self
+//   - status: string (required, active|inactive) — IMMUTABLE for self
+//   - createdAt: string (required, ISO) — immutable after create
+//   - updatedAt: string (required, ISO)
+//
+// Collection: teams
+// Document ID: auto / seeded id
+// Fields: name(1..80), description?(<=500), status(active|inactive),
+//         createdAt(ISO), updatedAt(ISO)
+//
+// Collection: bookings
+// Document ID: auto / seeded id
+// Fields: teamId, ownerUserId, userName, contact, details, startTime,
+//         endTime, status(active|cancelled|completed|archived),
+//         collisionStatus(none|open|reviewed|resolved), createdBy,
+//         createdAt, updatedAt + optional coordinates, photo, overruns,
+//         jobCompletionStatus, updatedBy, cancelledBy, cancelledAt,
+//         cancellationReason
+//   Immutable after create: createdBy, createdAt
+//   Owner (worker) may NOT change: ownerUserId, teamId
+//
+// Collection: collisions
+// Document ID: auto / seeded id
+// Fields: affectedBookingId, teamId, relatedBookingId?, issue,
+//         status(open|reviewed|resolved|cancelled), loggedBy,
+//         resolutionNotes?, createdAt, updatedAt
+//
+// Collection: notificationSubscriptions
+// Document ID: URL-encoded FCM token
+// Fields: token, userId, userName, userEmail, createdAt, updatedAt
+//
+// Collection: appConfig/access
+// Document ID: access
+// Fields:
+//   - masterEmails: list<string> (lower-case, verified Firebase Auth emails)
+//   - allowedEmails: list<string> (optional, lower-case, verified Firebase Auth emails)
+//   - updatedAt: string
+//   - updatedBy: string
+//
+// The first appConfig/access write must be done with the Admin SDK script.
+// After that, listed master emails and admin users can maintain the list.
+// ===============================================================
+// IMPORTANT SHARED DATABASE & RULES MAINTENANCE NOTE:
+// This database instance is shared across multiple applications (WorkGrid,
+// CubeSync, and DocuAlign / RAK Report Parser). Consequently, all applications
+// share this single firestore.rules file.
+// NEVER edit or modify existing rules for WorkGrid or CubeSync when working on
+// DocuAlign. Each application's rules must remain isolated in dedicated blocks.
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // Helper functions
+    // ---------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function requester() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasProfile() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasAccessConfig() {
+      return exists(/databases/$(database)/documents/appConfig/access);
+    }
+
+    function accessConfig() {
+      return get(/databases/$(database)/documents/appConfig/access).data;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() &&
+        'email' in request.auth.token &&
+        'email_verified' in request.auth.token &&
+        request.auth.token.email is string &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Emergency/master allowlist. Store lower-case emails in
+    // appConfig/access.masterEmails. This lets known master accounts bootstrap
+    // or repair user profile roles without hard-coding emails in these rules.
+    function isConfiguredMasterEmail() {
+      return isVerifiedEmail() &&
+        hasAccessConfig() &&
+        accessConfig().masterEmails is list &&
+        request.auth.token.email.lower() in accessConfig().masterEmails;
+    }
+
+    // Optional server-side onboarding allowlist. Client-side allowlists are UI
+    // hints only; this is the backend boundary for self-created worker profiles.
+    function isConfiguredAllowedEmail() {
+      return isVerifiedEmail() &&
+        (isHardcodedAllowedEmail() ||
+          (hasAccessConfig() &&
+            (
+              (accessConfig().masterEmails is list &&
+                request.auth.token.email.lower() in accessConfig().masterEmails) ||
+              ('allowedEmails' in accessConfig() &&
+                accessConfig().allowedEmails is list &&
+                request.auth.token.email.lower() in accessConfig().allowedEmails)
+            )
+          )
+        );
+    }
+
+    // Hard-coded bootstrap master(s). Lets the initial owner become admin and
+    // create their profile + the appConfig/access doc on first Google sign-in,
+    // before any masterEmails list exists. Keep in sync with
+    // src/lib/firebase/auth.ts (BOOTSTRAP_ADMIN_EMAILS).
+    function isHardcodedMaster() {
+      return isVerifiedEmail() &&
+				request.auth.token.email in [
+          'yanguangchensp@gmail.com',
+          'yanguangchen@outlook.com',
+          'mushfiqsiddqiue@gmail.com',
+          'desmond@rakmat.com.sg',
+          'theresaongpohkuan@gmail.com',
+          'theresa@rakmat.com.sg',
+          'ken@rakmat.com.sg',
+          'fondlekc@gmail.com',
+          'account@rakmat.com.sg',
+          'account1@rakmat.com.sg',
+          'feichin@rakmat.com.sg',
+          'taiheng@rakmat.com.sg',
+          'oakkar@rakmat.com.sg',
+          'agga@rakmat.com.sg',
+          'ma@rakmat.com.sg',
+          'yuxin@rakmat.com.sg',
+          'khun@rakmat.com.sg',
+          'yanguangchen@webwizardsg.com',
+          'santofokir605@gmail.com',
+          'nckeyong@gmail.com',
+          'nck@rakmat.com.sg',
+          'nabiullahnabin@gmail.com',
+          'amirkhan3273@gmail.com',
+          'Pradeeprajtfw595@gmail.com',
+          'Saifulmal90@gmail.com',
+          'diaheard2@gmail.com',
+          'balki221195@gmail.com',
+          'mr8890085@gmail.com',
+          'Naythulin731@gmail.com',
+          'tasinahamedshahadat03@gmail.com',
+          'parbjitsingh718@gmil.com'
+        ];
+    }
+
+    // Hard-coded worker onboarding allowlist. Keep empty unless a temporary
+    // non-admin worker needs access before appConfig/access can be updated.
+    function isHardcodedAllowedEmail() {
+      return false;
+    }
+
+    // An authenticated user whose profile exists and is active.
+    function isActiveUser() {
+      return hasProfile() && requester().status == 'active';
+    }
+
+    function role() {
+      return requester().role;
+    }
+
+    function isProfileAdmin() {
+      return isActiveUser() && role() == 'admin';
+    }
+
+    function isAdmin() {
+      return isHardcodedMaster() || isConfiguredMasterEmail() || isProfileAdmin();
+    }
+
+    function isEngineerOrAdmin() {
+      return isAdmin() || (isActiveUser() && role() == 'engineer');
+    }
+
+    // Can create/manage bookings. Master/admin accounts must pass this even
+    // before their users/{uid} profile exists so they can recover operations.
+    function canWriteBookings() {
+      return isActiveUser() || isAdmin();
+    }
+
+    function isValidRole(r) {
+      return r in ['worker', 'engineer', 'admin'];
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function strWithin(v, minLen, maxLen) {
+      return v is string && v.size() >= minLen && v.size() <= maxLen;
+    }
+
+    function optStrWithin(data, field, maxLen) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function unchanged(field) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == resource.data[field];
+    }
+
+    // ---------------------------------------------------------------
+    // appConfig/access
+    // Central master account allowlist. Admin SDK creates the first doc.
+    // Listed master emails can recover/administer role setup even before
+    // their users/{uid} profile exists.
+    // ---------------------------------------------------------------
+    function isValidAccessConfig(data) {
+      return data.keys().hasAll(['masterEmails', 'updatedAt', 'updatedBy']) &&
+        data.keys().hasOnly([
+          'masterEmails',
+          'allowedEmails',
+          'updatedAt',
+          'updatedBy'
+        ]) &&
+        data.masterEmails is list &&
+        data.masterEmails.size() >= 1 &&
+        data.masterEmails.size() <= 20 &&
+        (!('allowedEmails' in data) ||
+          (data.allowedEmails is list &&
+            data.allowedEmails.size() <= 100)) &&
+        data.updatedAt is string &&
+        data.updatedBy is string;
+    }
+
+    match /appConfig/access {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create, update: if isAdmin() &&
+        isValidAccessConfig(request.resource.data);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
+    // users/{uid}
+    // PII (email, phone) — readable only by the owner or an admin.
+    // ---------------------------------------------------------------
+    function isValidUser(data) {
+      return data.keys().hasAll([
+          'name',
+          'email',
+          'role',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name',
+          'email',
+          'phone',
+          'role',
+          'teamId',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        strWithin(data.name, 1, 80) &&
+        isValidEmail(data.email) &&
+        optStrWithin(data, 'phone', 40) &&
+        isValidRole(data.role) &&
+        (!('teamId' in data) ||
+          (data.teamId is string && data.teamId.size() <= 64)) &&
+        data.status in ['active', 'inactive'] &&
+        data.createdAt is string &&
+        data.updatedAt is string;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == userId || isAdmin());
+
+      // Self-bootstrap (sign-up): can ONLY create own doc as an active,
+      // unprivileged worker user. Admins may create any valid profile.
+      allow create: if isSignedIn() && isValidUser(request.resource.data) && (
+        (request.auth.uid == userId &&
+          request.resource.data.role == 'worker' &&
+          request.resource.data.status == 'active' &&
+          isConfiguredAllowedEmail()) ||
+        isAdmin()
+      );
+
+      // Self: may edit name/phone only — role, status, teamId, email,
+      // createdAt are locked. Admin: any valid change.
+      allow update: if isSignedIn() && isValidUser(request.resource.data) && (
+        (request.auth.uid == userId &&
+          unchanged('role') && unchanged('status') &&
+          unchanged('teamId') && unchanged('email') &&
+          unchanged('createdAt')) ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // notificationSubscriptions/{subscriptionId}
+    // Stores FCM tokens for browser push. Users can manage only their
+    // own token rows; the server sends notifications through Admin SDK.
+    // ---------------------------------------------------------------
+    function isValidNotificationSubscription(data) {
+      return data.keys().hasAll([
+          'token',
+          'userId',
+          'userName',
+          'userEmail',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'token',
+          'userId',
+          'userName',
+          'userEmail',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        strWithin(data.token, 1, 512) &&
+        data.userId is string &&
+        strWithin(data.userName, 1, 80) &&
+        isValidEmail(data.userEmail) &&
+        data.createdAt is string &&
+        data.updatedAt is string;
+    }
+
+    match /notificationSubscriptions/{subscriptionId} {
+      allow read: if isSignedIn() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isActiveUser() &&
+        isValidNotificationSubscription(request.resource.data) &&
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isActiveUser() &&
+        isValidNotificationSubscription(request.resource.data) &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // ---------------------------------------------------------------
+    // teams/{teamId}
+    // Readable by any active user (needed for calendar/team colors).
+    // Writable by admins only.
+    // ---------------------------------------------------------------
+    function isValidTeam(data) {
+      return data.keys().hasAll(['name', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'name',
+          'description',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        strWithin(data.name, 1, 80) &&
+        optStrWithin(data, 'description', 500) &&
+        data.status in ['active', 'inactive'] &&
+        data.createdAt is string &&
+        data.updatedAt is string;
+    }
+
+    match /teams/{teamId} {
+      allow read: if isActiveUser();
+      allow create: if isAdmin() && isValidTeam(request.resource.data);
+      allow update: if isAdmin() && isValidTeam(request.resource.data) &&
+        unchanged('createdAt');
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // bookings/{bookingId}
+    // Visible to every active user. Create for everyone (active).
+    //
+    // DESIGN NOTE: Per operator consultation, any active operational user
+    // can create, update, or delete any booking. This shared access model
+    // is intentional to allow field teams to remain fluid and is not a flaw.
+    // ---------------------------------------------------------------
+    function isValidCoordinates(value) {
+      return value is map &&
+        value.keys().hasAll(['lat', 'lng']) &&
+        value.keys().hasOnly(['lat', 'lng']) &&
+        value.lat is number &&
+        value.lng is number &&
+        value.lat >= -90 &&
+        value.lat <= 90 &&
+        value.lng >= -180 &&
+        value.lng <= 180;
+    }
+
+    function isValidPhoto(value) {
+      return value is map &&
+        value.keys().hasAll(['name', 'sizeBytes', 'tier']) &&
+        value.keys().hasOnly(['name', 'sizeBytes', 'tier', 'dataUrl']) &&
+        strWithin(value.name, 1, 200) &&
+        value.sizeBytes is int &&
+        value.sizeBytes >= 0 &&
+        value.sizeBytes <= 10 * 1024 * 1024 &&
+        value.tier in ['active', 'archival'] &&
+        (!('dataUrl' in value) ||
+          (value.dataUrl is string &&
+            value.dataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,') &&
+            value.dataUrl.size() <= 950000));
+    }
+
+    function isValidOverrun(value) {
+      return value is map &&
+        value.keys().hasAll([
+          'id',
+          'minutes',
+          'reason',
+          'signerName',
+          'signerContact',
+          'signatureDataUrl',
+          'loggedBy',
+          'loggedAt'
+        ]) &&
+        value.keys().hasOnly([
+          'id',
+          'minutes',
+          'reason',
+          'jobNumber',
+          'signerName',
+          'signerContact',
+          'signatureDataUrl',
+          'loggedBy',
+          'loggedAt'
+        ]) &&
+        strWithin(value.id, 1, 128) &&
+        value.minutes is int &&
+        value.minutes > 0 &&
+        value.minutes <= 1440 &&
+        strWithin(value.reason, 1, 2000) &&
+        optStrWithin(value, 'jobNumber', 120) &&
+        strWithin(value.signerName, 1, 120) &&
+        strWithin(value.signerContact, 1, 120) &&
+        value.signatureDataUrl is string &&
+        value.signatureDataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,') &&
+        value.signatureDataUrl.size() <= 300000 &&
+        value.loggedBy is string &&
+        value.loggedBy.size() <= 128 &&
+        value.loggedAt is string;
+    }
+
+    function isValidOverruns(value) {
+      return value is list &&
+        value.size() <= 5 &&
+        (value.size() > 0 ? isValidOverrun(value[0]) : true) &&
+        (value.size() > 1 ? isValidOverrun(value[1]) : true) &&
+        (value.size() > 2 ? isValidOverrun(value[2]) : true) &&
+        (value.size() > 3 ? isValidOverrun(value[3]) : true) &&
+        (value.size() > 4 ? isValidOverrun(value[4]) : true);
+    }
+
+    function isValidTeamMember(value) {
+      return value is map &&
+        value.keys().hasAll(['userId', 'name']) &&
+        value.keys().hasOnly(['userId', 'name', 'role', 'contact']) &&
+        strWithin(value.userId, 1, 128) &&
+        strWithin(value.name, 1, 120) &&
+        (!('role' in value) || isValidRole(value.role)) &&
+        optStrWithin(value, 'contact', 200);
+    }
+
+    function isValidTeamMembers(value) {
+      return value is list &&
+        value.size() <= 20;
+    }
+
+    function isValidTeamMemberIds(value) {
+      return value is list &&
+        value.size() <= 20 &&
+        (value.size() > 0 ? strWithin(value[0], 1, 128) : true) &&
+        (value.size() > 1 ? strWithin(value[1], 1, 128) : true) &&
+        (value.size() > 2 ? strWithin(value[2], 1, 128) : true) &&
+        (value.size() > 3 ? strWithin(value[3], 1, 128) : true) &&
+        (value.size() > 4 ? strWithin(value[4], 1, 128) : true) &&
+        (value.size() > 5 ? strWithin(value[5], 1, 128) : true) &&
+        (value.size() > 6 ? strWithin(value[6], 1, 128) : true) &&
+        (value.size() > 7 ? strWithin(value[7], 1, 128) : true) &&
+        (value.size() > 8 ? strWithin(value[8], 1, 128) : true) &&
+        (value.size() > 9 ? strWithin(value[9], 1, 128) : true) &&
+        (value.size() > 10 ? strWithin(value[10], 1, 128) : true) &&
+        (value.size() > 11 ? strWithin(value[11], 1, 128) : true) &&
+        (value.size() > 12 ? strWithin(value[12], 1, 128) : true) &&
+        (value.size() > 13 ? strWithin(value[13], 1, 128) : true) &&
+        (value.size() > 14 ? strWithin(value[14], 1, 128) : true) &&
+        (value.size() > 15 ? strWithin(value[15], 1, 128) : true) &&
+        (value.size() > 16 ? strWithin(value[16], 1, 128) : true) &&
+        (value.size() > 17 ? strWithin(value[17], 1, 128) : true) &&
+        (value.size() > 18 ? strWithin(value[18], 1, 128) : true) &&
+        (value.size() > 19 ? strWithin(value[19], 1, 128) : true);
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll([
+          'ownerUserId',
+          'userName',
+          'contact',
+          'details',
+          'startTime',
+          'endTime',
+          'status',
+          'collisionStatus',
+          'createdBy',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'teamId',
+          'ownerUserId',
+          'companyName',
+          'projectName',
+          'userName',
+          'contact',
+          'details',
+          'teamMemberIds',
+          'teamMembers',
+          'startTime',
+          'endTime',
+          'address',
+          'coordinates',
+          'photo',
+          'overruns',
+          'jobNumber',
+          'jobCompletionStatus',
+          'status',
+          'collisionStatus',
+          'createdBy',
+          'updatedBy',
+          'cancelledBy',
+          'createdAt',
+          'updatedAt',
+          'cancelledAt',
+          'cancellationReason'
+        ]) &&
+        (!('teamId' in data) ||
+          (data.teamId is string && data.teamId.size() <= 64)) &&
+        data.ownerUserId is string && data.ownerUserId.size() <= 128 &&
+        optStrWithin(data, 'companyName', 200) &&
+        optStrWithin(data, 'projectName', 200) &&
+        strWithin(data.userName, 1, 120) &&
+        strWithin(data.contact, 1, 200) &&
+        strWithin(data.details, 1, 2000) &&
+        optStrWithin(data, 'address', 500) &&
+        data.startTime is string &&
+        data.endTime is string &&
+        data.status in ['active', 'cancelled', 'completed', 'archived'] &&
+        data.collisionStatus in ['none', 'open', 'reviewed', 'resolved'] &&
+        data.createdBy is string &&
+        data.createdBy.size() <= 128 &&
+        data.createdAt is string &&
+        data.updatedAt is string &&
+        optStrWithin(data, 'updatedBy', 128) &&
+        optStrWithin(data, 'cancelledBy', 128) &&
+        optStrWithin(data, 'cancelledAt', 64) &&
+        optStrWithin(data, 'cancellationReason', 1000) &&
+        (!('coordinates' in data) || isValidCoordinates(data.coordinates)) &&
+        (!('jobCompletionStatus' in data) ||
+          data.jobCompletionStatus in ['pending', 'completed', 'cancelled']) &&
+        (!('photo' in data) || isValidPhoto(data.photo)) &&
+        (!('jobNumber' in data) || optStrWithin(data, 'jobNumber', 120)) &&
+        (!('teamMemberIds' in data) || isValidTeamMemberIds(data.teamMemberIds)) &&
+        (!('teamMembers' in data) || isValidTeamMembers(data.teamMembers)) &&
+        (!('overruns' in data) || isValidOverruns(data.overruns));
+    }
+
+    function ownerBaseFieldsUnchanged() {
+      return unchanged('ownerUserId') &&
+        unchanged('teamId') &&
+        unchanged('createdBy') &&
+        unchanged('createdAt');
+    }
+
+    function ownerCanEditBooking() {
+      return ownerBaseFieldsUnchanged() &&
+        unchanged('status') &&
+        unchanged('collisionStatus') &&
+        unchanged('cancelledBy') &&
+        unchanged('cancelledAt') &&
+        unchanged('cancellationReason') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'userName',
+          'contact',
+          'companyName',
+          'projectName',
+          'details',
+          'teamMemberIds',
+          'teamMembers',
+          'startTime',
+          'endTime',
+          'address',
+          'coordinates',
+          'photo',
+          'jobCompletionStatus',
+          'updatedBy',
+          'updatedAt'
+        ]);
+    }
+
+    function ownerEditFieldsValid() {
+      return strWithin(request.resource.data.userName, 1, 120) &&
+        strWithin(request.resource.data.contact, 1, 200) &&
+        optStrWithin(request.resource.data, 'companyName', 200) &&
+        optStrWithin(request.resource.data, 'projectName', 200) &&
+        strWithin(request.resource.data.details, 1, 2000) &&
+        request.resource.data.startTime is string &&
+        request.resource.data.endTime is string &&
+        request.resource.data.updatedAt is string &&
+        optStrWithin(request.resource.data, 'updatedBy', 128) &&
+        optStrWithin(request.resource.data, 'address', 500) &&
+        (!('coordinates' in request.resource.data) ||
+          isValidCoordinates(request.resource.data.coordinates)) &&
+        (!('photo' in request.resource.data) ||
+          isValidPhoto(request.resource.data.photo)) &&
+        (!('jobCompletionStatus' in request.resource.data) ||
+          request.resource.data.jobCompletionStatus in ['pending', 'completed', 'cancelled']) &&
+        (!('teamMemberIds' in request.resource.data) ||
+          isValidTeamMemberIds(request.resource.data.teamMemberIds)) &&
+        (!('teamMembers' in request.resource.data) ||
+          isValidTeamMembers(request.resource.data.teamMembers));
+    }
+
+    function ownerCancelFieldsValid() {
+      return request.resource.data.status == 'cancelled' &&
+        request.resource.data.cancelledBy == request.auth.uid &&
+        request.resource.data.cancelledAt is string &&
+        request.resource.data.updatedAt is string &&
+        optStrWithin(request.resource.data, 'updatedBy', 128) &&
+        optStrWithin(request.resource.data, 'cancellationReason', 1000);
+    }
+
+    function ownerOverrunFieldsValid() {
+      return request.resource.data.updatedAt is string &&
+        optStrWithin(request.resource.data, 'updatedBy', 128) &&
+        (!('overruns' in request.resource.data) ||
+          isValidOverruns(request.resource.data.overruns));
+    }
+
+    function ownerBookingUpdateValid() {
+      return ownerCanEditBooking() ? ownerEditFieldsValid() :
+        ownerCanCancelBooking() ? ownerCancelFieldsValid() :
+        ownerCanLogOverrun() ? ownerOverrunFieldsValid() :
+        false;
+    }
+
+    function ownerCanCancelBooking() {
+      return ownerBaseFieldsUnchanged() &&
+        unchanged('collisionStatus') &&
+        unchanged('overruns') &&
+        resource.data.status != 'cancelled' &&
+        request.resource.data.status == 'cancelled' &&
+        request.resource.data.cancelledBy == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'cancelledAt',
+          'cancelledBy',
+          'cancellationReason',
+          'updatedBy',
+          'updatedAt'
+        ]);
+    }
+
+    function ownerCanLogOverrun() {
+      return ownerBaseFieldsUnchanged() &&
+        unchanged('status') &&
+        unchanged('collisionStatus') &&
+        unchanged('cancelledBy') &&
+        unchanged('cancelledAt') &&
+        unchanged('cancellationReason') &&
+        request.resource.data.status != 'cancelled' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'overruns',
+          'updatedBy',
+          'updatedAt'
+        ]);
+    }
+
+    // Was this field added, removed, or modified by the current write?
+    function bookingChanged(field) {
+      return request.resource.data.diff(resource.data)
+        .affectedKeys().hasAny([field]);
+    }
+
+    // Update validation works on the DIFF, not the whole document.
+    //
+    // WHY: bookings are written with partial updateDoc() patches (e.g. logging
+    // an overrun only sends { overruns, updatedBy, updatedAt }). Re-running the
+    // full isValidBooking() over request.resource.data forces every UNCHANGED
+    // field (a legacy oversized photo/signature, an empty legacy string, a
+    // stray field) to satisfy the latest schema too, so a single legacy record
+    // would reject ALL future edits with "insufficient permissions". Validating
+    // only changed keys keeps new input strict without trapping old data.
+    function bookingUpdateKeysAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'teamId',
+        'ownerUserId',
+        'userName',
+        'contact',
+        'companyName',
+        'projectName',
+        'details',
+        'teamMemberIds',
+        'teamMembers',
+        'startTime',
+        'endTime',
+        'address',
+        'coordinates',
+        'photo',
+        'overruns',
+        'jobNumber',
+        'jobCompletionStatus',
+        'status',
+        'collisionStatus',
+        'updatedBy',
+        'cancelledBy',
+        'cancelledAt',
+        'cancellationReason',
+        'updatedAt'
+      ]);
+    }
+
+    // Update validation is DIFF-ONLY and intentionally light.
+    //
+    // - bookingUpdateKeysAllowed() rejects unknown keys and keeps createdBy /
+    //   createdAt immutable (they are absent from the allow-list).
+    // - Only CHANGED enum fields are checked, so a legacy/invalid value on an
+    //   UNCHANGED field can never block an unrelated edit (this was the cause of
+    //   the recurring "missing or insufficient permissions" on overruns/edits).
+    // - Heavy content validation (photo/signature/overrun shape) stays on
+    //   create and on the client, which already caps signature and photo size.
+    //   Firestore's 1 MB document limit is the backstop. All booking writes are
+    //   already shared across active/admin users by design, so deep per-field
+    //   re-validation on update adds friction without a matching security gain.
+    function isValidBookingUpdate() {
+      return bookingUpdateKeysAllowed() &&
+        (!bookingChanged('status') ||
+          request.resource.data.status in
+            ['active', 'cancelled', 'completed', 'archived']) &&
+        (!bookingChanged('collisionStatus') ||
+          request.resource.data.collisionStatus in
+            ['none', 'open', 'reviewed', 'resolved']) &&
+        (!bookingChanged('jobCompletionStatus') ||
+          request.resource.data.jobCompletionStatus in
+            ['pending', 'completed', 'cancelled']) &&
+        (!bookingChanged('companyName') ||
+          optStrWithin(request.resource.data, 'companyName', 200)) &&
+        (!bookingChanged('projectName') ||
+          optStrWithin(request.resource.data, 'projectName', 200));
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if canWriteBookings();
+
+      // All active operational users can create bookings. Users/teams
+      // management remains admin-only; booking operations are shared.
+      allow create: if canWriteBookings() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        isValidBooking(request.resource.data);
+
+      // All active operational users can update bookings. Validate only the
+      // changed fields so legacy records can still be edited (see above).
+      allow update: if canWriteBookings() &&
+        isValidBookingUpdate();
+
+      allow delete: if canWriteBookings();
+    }
+
+    // ---------------------------------------------------------------
+    // collisions/{collisionId}
+    // Logging is a record (CONTEXT.md 5.7). All active operational users can
+    // create, update, and delete collision records. Shared access is by design.
+    // ---------------------------------------------------------------
+    function isValidCollision(data) {
+      return data.affectedBookingId is string &&
+        data.affectedBookingId.size() <= 128 &&
+        data.teamId is string && data.teamId.size() <= 64 &&
+        optStrWithin(data, 'relatedBookingId', 128) &&
+        strWithin(data.issue, 1, 2000) &&
+        data.status in ['open', 'reviewed', 'resolved', 'cancelled'] &&
+        data.loggedBy is string &&
+        optStrWithin(data, 'resolutionNotes', 2000) &&
+        data.createdAt is string &&
+        data.updatedAt is string;
+    }
+
+    match /collisions/{collisionId} {
+      allow read: if canWriteBookings();
+      allow create: if canWriteBookings() &&
+        isValidCollision(request.resource.data) &&
+        request.resource.data.loggedBy == request.auth.uid;
+      allow update: if canWriteBookings() &&
+        isValidCollision(request.resource.data);
+      allow delete: if canWriteBookings();
+    }
+
+    // ---------------------------------------------------------------
+    // passwordChangeLogs/{logId}
+    // Accountability trail for admin-set passwords. Written exclusively by the
+    // server (Admin SDK, which bypasses these rules), so all client writes are
+    // denied. Readable by admins/masters only — it references user identities.
+    // ---------------------------------------------------------------
+    match /passwordChangeLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+
+
+
+
+
+
+
+
+
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    // CUBESYNC-ONLY RULES
+    //
+    // NEVER edit the WorkGrid rules above for CubeSync changes.
+    // CubeSync stores concrete cube request form documents here. Customer-facing
+    // form submissions go through /api/cube-request-submit, which verifies
+    // reCAPTCHA v2 server-side and writes with the Admin SDK.
+    //
+    // Staff direct client access requires verified Firebase Auth email on the
+    // CubeSync allowlist (keep in sync with CUBESYNC_ALLOWED_EMAILS in
+    // firestore.js). CubeSync-only users belong here only — not WorkGrid.
+    // ---------------------------------------------------------------
+    function isCubeSyncAllowedEmail() {
+      return request.auth.token.email.lower() in [
+        'yanguangchensp@gmail.com',
+        'yanguangchen@outlook.com',
+        'mushfiqsiddqiue@gmail.com',
+        'desmond@rakmat.com.sg',
+        'theresaongpohkuan@gmail.com',
+        'theresa@rakmat.com.sg',
+        'ken@rakmat.com.sg',
+        'fondlekc@gmail.com',
+        'account@rakmat.com.sg',
+        'account1@rakmat.com.sg',
+        'feichin@rakmat.com.sg',
+        'taiheng@rakmat.com.sg',
+        'oakkar@rakmat.com.sg',
+        'agga@rakmat.com.sg',
+        'ma@rakmat.com.sg',
+        'khun@rakmat.com.sg',
+        'yanguangchen@webwizardsg.com',
+        'santofokir605@gmail.com',
+        'nckeyong@gmail.com',
+        'nck@rakmat.com.sg',
+        'ernestngcy@gmail.com',
+        'jlee.j.m9382@gmail.com',
+        'rakdurga0000@gmail.com',
+        'ilovestudy123456@gmail.com',
+        'kirubhashniravendran@gmail.com'
+      ];
+    }
+
+    function isCubeSyncStaff() {
+      return isVerifiedEmail() && isCubeSyncAllowedEmail();
+    }
+
+    function isCubeSyncTimestamp(value) {
+      return value == request.time ||
+        value is timestamp ||
+        (value is string && value.size() <= 64);
+    }
+
+    function optCubeSyncTimestamp(data, field) {
+      return !(field in data) || isCubeSyncTimestamp(data[field]);
+    }
+
+    function optCubeStrOrNum(data, field, maxLen) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string && data[field].size() <= maxLen) ||
+        (data[field] is number &&
+          data[field] >= -1000000000 &&
+          data[field] <= 1000000000);
+    }
+
+    function optCubeBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function isCubeDropdownField(value) {
+      return value in [
+        'projectErp',
+        'customerBilling',
+        'supplier',
+        'concreteGrade',
+        'personInCharge',
+        'managerInCharge',
+        'testItem',
+        'specimenSize'
+      ];
+    }
+
+    function isValidCubeCustomFields(value) {
+      return value is list &&
+        value.size() <= 8 &&
+        (value.size() > 0 ? isCubeDropdownField(value[0]) : true) &&
+        (value.size() > 1 ? isCubeDropdownField(value[1]) : true) &&
+        (value.size() > 2 ? isCubeDropdownField(value[2]) : true) &&
+        (value.size() > 3 ? isCubeDropdownField(value[3]) : true) &&
+        (value.size() > 4 ? isCubeDropdownField(value[4]) : true) &&
+        (value.size() > 5 ? isCubeDropdownField(value[5]) : true) &&
+        (value.size() > 6 ? isCubeDropdownField(value[6]) : true) &&
+        (value.size() > 7 ? isCubeDropdownField(value[7]) : true);
+    }
+
+    function isValidExtraFields(value) {
+      return value is map && value.size() <= 25;
+    }
+
+    function isValidCubeResult(row) {
+      return row is map &&
+        row.keys().hasOnly([
+          'testNumber',
+          'dateTested',
+          'ageDays',
+          'weightKg',
+          'loadKn',
+          'strength',
+          'failureMode',
+          'setNo',
+          'size',
+          'specimenRef',
+          'barcode',
+          'specifiedSlump',
+          'meanSlump',
+          'resultGrade',
+          'resultDateOfCast',
+          'age',
+          'dateOfTest',
+          'invoiceNumber'
+        ]) &&
+        optCubeStrOrNum(row, 'testNumber', 64) &&
+        optCubeStrOrNum(row, 'dateTested', 64) &&
+        optCubeStrOrNum(row, 'ageDays', 16) &&
+        optCubeStrOrNum(row, 'weightKg', 32) &&
+        optCubeStrOrNum(row, 'loadKn', 32) &&
+        optCubeStrOrNum(row, 'strength', 32) &&
+        optCubeStrOrNum(row, 'failureMode', 200) &&
+        optCubeStrOrNum(row, 'setNo', 16) &&
+        optCubeStrOrNum(row, 'size', 64) &&
+        optCubeStrOrNum(row, 'specimenRef', 128) &&
+        optCubeStrOrNum(row, 'barcode', 128) &&
+        optCubeStrOrNum(row, 'specifiedSlump', 32) &&
+        optCubeStrOrNum(row, 'meanSlump', 32) &&
+        optCubeStrOrNum(row, 'resultGrade', 120) &&
+        optCubeStrOrNum(row, 'resultDateOfCast', 64) &&
+        optCubeStrOrNum(row, 'age', 16) &&
+        optCubeStrOrNum(row, 'dateOfTest', 64) &&
+        optCubeStrOrNum(row, 'invoiceNumber', 128);
+    }
+
+    function isValidCubeResults(value) {
+      return value is list &&
+        value.size() <= 50 &&
+        (value.size() > 0 ? isValidCubeResult(value[0]) : true) &&
+        (value.size() > 1 ? isValidCubeResult(value[1]) : true) &&
+        (value.size() > 2 ? isValidCubeResult(value[2]) : true) &&
+        (value.size() > 3 ? isValidCubeResult(value[3]) : true) &&
+        (value.size() > 4 ? isValidCubeResult(value[4]) : true) &&
+        (value.size() > 5 ? isValidCubeResult(value[5]) : true) &&
+        (value.size() > 6 ? isValidCubeResult(value[6]) : true) &&
+        (value.size() > 7 ? isValidCubeResult(value[7]) : true) &&
+        (value.size() > 8 ? isValidCubeResult(value[8]) : true) &&
+        (value.size() > 9 ? isValidCubeResult(value[9]) : true);
+    }
+
+    function cubeRequestDataKeys() {
+      return [
+        'internalDate',
+        'projectCode',
+        'reportNo',
+        'client',
+        'method',
+        'project',
+        'concreteGrade',
+        'supplier',
+        'locationRepresented',
+        'additionalInformation',
+        'dateTimeSampled',
+        'slumpMeasured',
+        'specimenSize',
+        'slumpSpecified',
+        'projectErp',
+        'customerBilling',
+        'projectNameOnReport',
+        'clientNameOnReport',
+        'contact',
+        'enableManualCubeJobNumber',
+        'cubeJobNumber',
+        'quote',
+        'testItem',
+        'supplierDisplay',
+        'dateOfCast',
+        'reportGrade',
+        'personInCharge',
+        'managerInCharge',
+        'customFields',
+        'extraFields',
+        'erpStatus',
+        'rpaStatus',
+        'template',
+        'status',
+        'results',
+        'submittedAt',
+        'attemptCount',
+        'version',
+        'createdAt',
+        'updatedAt'
+      ];
+    }
+
+    function isValidCubeRequest(data) {
+      return data.keys().hasOnly(cubeRequestDataKeys()) &&
+        optStrWithin(data, 'internalDate', 64) &&
+        optStrWithin(data, 'projectCode', 128) &&
+        optStrWithin(data, 'reportNo', 128) &&
+        optStrWithin(data, 'client', 200) &&
+        optStrWithin(data, 'method', 200) &&
+        optStrWithin(data, 'project', 200) &&
+        optStrWithin(data, 'concreteGrade', 120) &&
+        optStrWithin(data, 'supplier', 200) &&
+        optStrWithin(data, 'locationRepresented', 500) &&
+        optStrWithin(data, 'additionalInformation', 4000) &&
+        optStrWithin(data, 'dateTimeSampled', 64) &&
+        optCubeStrOrNum(data, 'slumpMeasured', 32) &&
+        optStrWithin(data, 'specimenSize', 64) &&
+        optCubeStrOrNum(data, 'slumpSpecified', 32) &&
+        optStrWithin(data, 'projectErp', 128) &&
+        optStrWithin(data, 'customerBilling', 200) &&
+        optStrWithin(data, 'projectNameOnReport', 200) &&
+        optStrWithin(data, 'clientNameOnReport', 200) &&
+        optStrWithin(data, 'contact', 200) &&
+        optCubeBool(data, 'enableManualCubeJobNumber') &&
+        optStrWithin(data, 'cubeJobNumber', 128) &&
+        optStrWithin(data, 'quote', 128) &&
+        optStrWithin(data, 'testItem', 200) &&
+        optStrWithin(data, 'supplierDisplay', 200) &&
+        optStrWithin(data, 'dateOfCast', 64) &&
+        optStrWithin(data, 'reportGrade', 120) &&
+        optStrWithin(data, 'personInCharge', 200) &&
+        optStrWithin(data, 'managerInCharge', 200) &&
+        optStrWithin(data, 'erpStatus', 80) &&
+        optStrWithin(data, 'rpaStatus', 80) &&
+        (!('customFields' in data) ||
+          isValidCubeCustomFields(data.customFields)) &&
+        (!('extraFields' in data) ||
+          isValidExtraFields(data.extraFields)) &&
+        (!('template' in data) ||
+          data.template in ['Original', 'Glassmorphic']) &&
+        (!('status' in data) ||
+          data.status in ['Draft', 'Ready', 'Archived']) &&
+        (!('results' in data) || isValidCubeResults(data.results)) &&
+        optCubeSyncTimestamp(data, 'submittedAt') &&
+        (!('attemptCount' in data) ||
+          (data.attemptCount is int && data.attemptCount >= 0 && data.attemptCount <= 10000)) &&
+        (!('version' in data) ||
+          (data.version is int && data.version >= 1 && data.version <= 1000000)) &&
+        optCubeSyncTimestamp(data, 'createdAt') &&
+        optCubeSyncTimestamp(data, 'updatedAt');
+    }
+
+    function cubeRequestChanged(field) {
+      return request.resource.data.diff(resource.data)
+        .affectedKeys().hasAny([field]);
+    }
+
+    function isValidCubeRequestUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'internalDate',
+          'projectCode',
+          'reportNo',
+          'client',
+          'method',
+          'project',
+          'concreteGrade',
+          'supplier',
+          'locationRepresented',
+          'additionalInformation',
+          'dateTimeSampled',
+          'slumpMeasured',
+          'specimenSize',
+          'slumpSpecified',
+          'projectErp',
+          'customerBilling',
+          'projectNameOnReport',
+          'clientNameOnReport',
+          'contact',
+          'enableManualCubeJobNumber',
+          'cubeJobNumber',
+          'quote',
+          'testItem',
+          'supplierDisplay',
+          'dateOfCast',
+          'reportGrade',
+          'personInCharge',
+          'managerInCharge',
+          'customFields',
+          'extraFields',
+          'erpStatus',
+          'rpaStatus',
+          'template',
+          'status',
+          'results',
+          'submittedAt',
+          'attemptCount',
+          'version',
+          'updatedAt'
+        ]) &&
+        (!cubeRequestChanged('version') ||
+          (request.resource.data.version is int &&
+            request.resource.data.version >= 1 &&
+            request.resource.data.version <= 1000000)) &&
+        (!cubeRequestChanged('template') ||
+          request.resource.data.template in ['Original', 'Glassmorphic']) &&
+        (!cubeRequestChanged('status') ||
+          request.resource.data.status in ['Draft', 'Ready', 'Archived']) &&
+        (!cubeRequestChanged('results') ||
+          isValidCubeResults(request.resource.data.results)) &&
+        (!cubeRequestChanged('updatedAt') ||
+          isCubeSyncTimestamp(request.resource.data.updatedAt)) &&
+        (!cubeRequestChanged('internalDate') ||
+          optStrWithin(request.resource.data, 'internalDate', 64)) &&
+        (!cubeRequestChanged('projectCode') ||
+          optStrWithin(request.resource.data, 'projectCode', 128)) &&
+        (!cubeRequestChanged('reportNo') ||
+          optStrWithin(request.resource.data, 'reportNo', 128)) &&
+        (!cubeRequestChanged('client') ||
+          optStrWithin(request.resource.data, 'client', 200)) &&
+        (!cubeRequestChanged('method') ||
+          optStrWithin(request.resource.data, 'method', 200)) &&
+        (!cubeRequestChanged('project') ||
+          optStrWithin(request.resource.data, 'project', 200)) &&
+        (!cubeRequestChanged('concreteGrade') ||
+          optStrWithin(request.resource.data, 'concreteGrade', 120)) &&
+        (!cubeRequestChanged('supplier') ||
+          optStrWithin(request.resource.data, 'supplier', 200)) &&
+        (!cubeRequestChanged('locationRepresented') ||
+          optStrWithin(request.resource.data, 'locationRepresented', 500)) &&
+        (!cubeRequestChanged('additionalInformation') ||
+          optStrWithin(request.resource.data, 'additionalInformation', 4000)) &&
+        (!cubeRequestChanged('dateTimeSampled') ||
+          optStrWithin(request.resource.data, 'dateTimeSampled', 64)) &&
+        (!cubeRequestChanged('slumpMeasured') ||
+          optCubeStrOrNum(request.resource.data, 'slumpMeasured', 32)) &&
+        (!cubeRequestChanged('specimenSize') ||
+          optStrWithin(request.resource.data, 'specimenSize', 64)) &&
+        (!cubeRequestChanged('slumpSpecified') ||
+          optCubeStrOrNum(request.resource.data, 'slumpSpecified', 32)) &&
+        (!cubeRequestChanged('projectErp') ||
+          optStrWithin(request.resource.data, 'projectErp', 128)) &&
+        (!cubeRequestChanged('customerBilling') ||
+          optStrWithin(request.resource.data, 'customerBilling', 200)) &&
+        (!cubeRequestChanged('projectNameOnReport') ||
+          optStrWithin(request.resource.data, 'projectNameOnReport', 200)) &&
+        (!cubeRequestChanged('clientNameOnReport') ||
+          optStrWithin(request.resource.data, 'clientNameOnReport', 200)) &&
+        (!cubeRequestChanged('contact') ||
+          optStrWithin(request.resource.data, 'contact', 200)) &&
+        (!cubeRequestChanged('enableManualCubeJobNumber') ||
+          optCubeBool(request.resource.data, 'enableManualCubeJobNumber')) &&
+        (!cubeRequestChanged('cubeJobNumber') ||
+          optStrWithin(request.resource.data, 'cubeJobNumber', 128)) &&
+        (!cubeRequestChanged('quote') ||
+          optStrWithin(request.resource.data, 'quote', 128)) &&
+        (!cubeRequestChanged('testItem') ||
+          optStrWithin(request.resource.data, 'testItem', 200)) &&
+        (!cubeRequestChanged('supplierDisplay') ||
+          optStrWithin(request.resource.data, 'supplierDisplay', 200)) &&
+        (!cubeRequestChanged('dateOfCast') ||
+          optStrWithin(request.resource.data, 'dateOfCast', 64)) &&
+        (!cubeRequestChanged('reportGrade') ||
+          optStrWithin(request.resource.data, 'reportGrade', 120)) &&
+        (!cubeRequestChanged('personInCharge') ||
+          optStrWithin(request.resource.data, 'personInCharge', 200)) &&
+        (!cubeRequestChanged('managerInCharge') ||
+          optStrWithin(request.resource.data, 'managerInCharge', 200)) &&
+        (!cubeRequestChanged('customFields') ||
+          isValidCubeCustomFields(request.resource.data.customFields)) &&
+        (!cubeRequestChanged('extraFields') ||
+          isValidExtraFields(request.resource.data.extraFields)) &&
+        (!cubeRequestChanged('erpStatus') ||
+          optStrWithin(request.resource.data, 'erpStatus', 80)) &&
+        (!cubeRequestChanged('rpaStatus') ||
+          optStrWithin(request.resource.data, 'rpaStatus', 80)) &&
+        (!cubeRequestChanged('submittedAt') ||
+          isCubeSyncTimestamp(request.resource.data.submittedAt)) &&
+        (!cubeRequestChanged('attemptCount') ||
+          (request.resource.data.attemptCount is int &&
+            request.resource.data.attemptCount >= 0 &&
+            request.resource.data.attemptCount <= 10000));
+    }
+
+    // Append-only edit-history changelog. Each document records one save
+    // (edit session) with the changed fields embedded as `changes`. Entries are
+    // permanent: no updates or deletes, even for staff.
+    function isValidEditHistoryEntry(data) {
+      return data.keys().hasOnly([
+          'editedByUid',
+          'editedByName',
+          'editedByEmail',
+          'editedByRole',
+          'reason',
+          'statusAtTime',
+          'previousVersion',
+          'newVersion',
+          'deviceInfo',
+          'changes',
+          'createdAt'
+        ]) &&
+        optStrWithin(data, 'editedByUid', 128) &&
+        optStrWithin(data, 'editedByName', 200) &&
+        optStrWithin(data, 'editedByEmail', 200) &&
+        optStrWithin(data, 'editedByRole', 40) &&
+        optStrWithin(data, 'reason', 2000) &&
+        optStrWithin(data, 'statusAtTime', 40) &&
+        optStrWithin(data, 'deviceInfo', 500) &&
+        (!('previousVersion' in data) ||
+          (data.previousVersion is int && data.previousVersion >= 0 && data.previousVersion <= 1000000)) &&
+        (!('newVersion' in data) ||
+          (data.newVersion is int && data.newVersion >= 0 && data.newVersion <= 1000000)) &&
+        data.changes is list &&
+        data.changes.size() >= 1 &&
+        data.changes.size() <= 100 &&
+        isCubeSyncTimestamp(data.createdAt);
+    }
+
+    match /cubeRequests/{requestId} {
+      allow read: if isCubeSyncStaff();
+      allow create: if isCubeSyncStaff() &&
+        isValidCubeRequest(request.resource.data);
+      allow update: if isCubeSyncStaff() &&
+        isValidCubeRequestUpdate();
+      allow delete: if isCubeSyncStaff();
+
+      match /editHistory/{sessionId} {
+        allow read: if isCubeSyncStaff();
+        allow create: if isCubeSyncStaff() &&
+          isValidEditHistoryEntry(request.resource.data);
+        allow update, delete: if false;
+      }
+    }
+
+    function isValidFormFieldConfig(data) {
+      return data.keys().hasOnly(['requestFields', 'resultFields', 'requestLabels', 'resultLabels', 'customRequestFields', 'showResultsSection', 'updatedAt']) &&
+        data.requestFields is map &&
+        data.resultFields is map &&
+        (!data.keys().hasAny(['requestLabels']) || data.requestLabels is map) &&
+        (!data.keys().hasAny(['resultLabels']) || data.resultLabels is map) &&
+        (!data.keys().hasAny(['customRequestFields']) ||
+          (data.customRequestFields is list && data.customRequestFields.size() <= 25)) &&
+        (!data.keys().hasAny(['showResultsSection']) || data.showResultsSection is bool) &&
+        optCubeSyncTimestamp(data, 'updatedAt');
+    }
+
+    match /settings/formFieldConfig {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isCubeSyncStaff() &&
+        isValidFormFieldConfig(request.resource.data);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
+    // settings/dropdownOptions
+    // Shared, dynamic autocomplete suggestions for the customer forms.
+    // PUBLIC READ is intentional and not a leak: the deployed
+    // dropdown-options/*.txt files are already served publicly, so this doc
+    // exposes the same class of data. Writes remain staff-only.
+    // ---------------------------------------------------------------
+    function isValidDropdownOptions(data) {
+      return data.keys().hasOnly([
+          'projectErp',
+          'customerBilling',
+          'supplier',
+          'concreteGrade',
+          'personInCharge',
+          'managerInCharge',
+          'testItem',
+          'specimenSize',
+          'updatedAt'
+        ]) &&
+        (!('projectErp' in data) || (data.projectErp is list && data.projectErp.size() <= 5000)) &&
+        (!('customerBilling' in data) || (data.customerBilling is list && data.customerBilling.size() <= 5000)) &&
+        (!('supplier' in data) || (data.supplier is list && data.supplier.size() <= 5000)) &&
+        (!('concreteGrade' in data) || (data.concreteGrade is list && data.concreteGrade.size() <= 5000)) &&
+        (!('personInCharge' in data) || (data.personInCharge is list && data.personInCharge.size() <= 5000)) &&
+        (!('managerInCharge' in data) || (data.managerInCharge is list && data.managerInCharge.size() <= 5000)) &&
+        (!('testItem' in data) || (data.testItem is list && data.testItem.size() <= 5000)) &&
+        (!('specimenSize' in data) || (data.specimenSize is list && data.specimenSize.size() <= 5000)) &&
+        optCubeSyncTimestamp(data, 'updatedAt');
+    }
+
+    match /settings/dropdownOptions {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isCubeSyncStaff() &&
+        isValidDropdownOptions(request.resource.data);
+      allow delete: if false;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    // DOCUALIGN / RAK REPORT PARSER RULES
+    // Note: Shares the same database instance and firestore.rules file with WorkGrid & CubeSync.
+    // Keep all DocuAlign-specific collection rules inside this dedicated block.
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    // DocuAlign stores report metadata and nested test data under this
+    // namespace. Access intentionally matches CubeSync staff exactly.
+    function isDocuAlignStaff() {
+      return isCubeSyncStaff();
+    }
+
+    match /docuAlignReports/{document=**} {
+      allow read, write: if isDocuAlignStaff();
+    }
+
+    // Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
