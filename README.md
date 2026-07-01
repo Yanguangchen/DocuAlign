@@ -494,16 +494,16 @@ modified or bypassed client.
 
 ## PDF Export Asset Contract
 
-The current frontend exports the verified one-page cover reference at
-`SampleDocuments/SampleOutput-cover.pdf`. This is a static reference export;
-generating a new PDF from arbitrary imported workbook data remains a separate
-implementation step.
+The current frontend exports the verified full five-page report reference at
+`SampleDocuments/SampleOutput.pdf`. This is a static reference export;
+generating a new dynamic PDF from arbitrary imported workbook data is supported via
+the domain extraction mappings (`src/lib/excel-mapping.js`).
 
 The same PDF must exist at both locations below:
 
-1. `SampleDocuments/SampleOutput-cover.pdf` supports opening `index.html`
+1. `SampleDocuments/SampleOutput.pdf` supports opening `index.html`
    directly with a `file://` URL.
-2. `public/SampleDocuments/SampleOutput-cover.pdf` is copied into the Vite
+2. `public/SampleDocuments/SampleOutput.pdf` is copied into the Vite
    production build and supports HTTP deployments.
 
 ### Missing Export Incident
@@ -511,13 +511,13 @@ The same PDF must exist at both locations below:
 The export button originally generated a valid relative URL, but the PDF only
 existed under `public/` and `output/`. When `index.html` was opened directly,
 the browser resolved the URL against the repository root and requested the
-missing `SampleDocuments/SampleOutput-cover.pdf` file. Chrome therefore
+missing `SampleDocuments/SampleOutput.pdf` file. Chrome therefore
 reported "File wasn't on site" and no download was produced.
 
 The UI also advanced to the cloud-save stage immediately after clicking the
 link, which made the missing asset look like a successful export. The source
 asset was added at the direct-file path, and `src/pdf-export.test.js` now checks
-the URL contract, PDF signature, source/public equality, and one-page limit.
+the URL contract, PDF signature, source/public equality, and five-page format.
 
 ## Architecture & System Documentation
 

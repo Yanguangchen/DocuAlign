@@ -39,7 +39,7 @@ describe("excel-mapping domain module (Full 5-page report format)", () => {
   it("extracts a structured report dictionary from raw cell lookup values", () => {
     const rawCells = {
       "'CV1 (2)'!K5": "Xinsha Holding Pte Ltd",
-      "'CV1 (2)'!K15": "X-2026-522-3",
+      "'CV1 (2)'!K28": "X-2026-522-3",
       "'TR1 (4)'!AE2": "X-2026-522-4",
     };
 

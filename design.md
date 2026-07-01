@@ -41,8 +41,8 @@ graph TD
     end
 
     subgraph StaticAssets [Dual Asset Directory Contract]
-        RootSample["/SampleDocuments/SampleOutput-cover.pdf (file:// fallback)"]
-        PublicSample["/public/SampleDocuments/SampleOutput-cover.pdf (HTTP bundle)"]
+        RootSample["/SampleDocuments/SampleOutput.pdf (file:// fallback)"]
+        PublicSample["/public/SampleDocuments/SampleOutput.pdf (HTTP bundle)"]
     end
 
     subgraph FirebaseCloud [Firebase Cloud Ecosystem crewhub-43647]
@@ -161,8 +161,8 @@ sequenceDiagram
     ETL-->>UI: Enable "Export final PDF" button
 
     User->>UI: Click "Export final PDF"
-    UI->>Asset: Request ./SampleDocuments/SampleOutput-cover.pdf
-    Asset-->>UI: Stream exact 1-page PDF binary
+    UI->>Asset: Request ./SampleDocuments/SampleOutput.pdf
+    Asset-->>UI: Stream full 5-page PDF binary
     UI-->>User: Download report PDF
     UI->>UI: Enable "Save data to cloud" button
 
@@ -310,12 +310,13 @@ To ensure seamless execution across both local filesystem development (`file://`
 ```text
 DocuAlign/
 ├── SampleDocuments/
-│   ├── SampleOutput-cover.pdf         <-- Serves direct index.html file:// opening
-│   ├── SampleOutput.pdf
+│   ├── SampleOutput.pdf               <-- Serves direct index.html file:// opening
+│   ├── SampleOutput-cover.pdf
 │   └── SampleInput.xlsx
 ├── public/
 │   └── SampleDocuments/
-│       └── SampleOutput-cover.pdf     <-- Copied by Vite into dist/ for HTTP servers
+│       ├── SampleOutput.pdf           <-- Copied by Vite into dist/ for HTTP servers
+│       └── SampleOutput-cover.pdf
 ```
 
-Vitest automated verification (`src/pdf-export.test.js`) verifies that both PDF assets exist, share the exact same SHA-256 cryptographic hash, and contain exactly one page (`%PDF-` signature check).
+Vitest automated verification (`src/pdf-export.test.js`) verifies that both PDF assets exist, share the exact same SHA-256 cryptographic hash, and contain the full five pages (`%PDF-` signature check).
