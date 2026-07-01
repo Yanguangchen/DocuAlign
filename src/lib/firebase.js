@@ -1,3 +1,10 @@
+/**
+ * @file firebase.js
+ * @description Core Firebase SDK initialization for DocuAlign.
+ * Configures the shared crewhub-43647 Firebase app instance and exports singletons
+ * for Cloud Firestore (`db`), Firebase Authentication (`auth`), Cloud Storage (`storage`),
+ * and conditional Analytics (`getAppAnalytics`). Safe for Vite HMR and Vitest environments.
+ */
 import { initializeApp, getApps, getApp } from "firebase/app";
 import * as analytics from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";

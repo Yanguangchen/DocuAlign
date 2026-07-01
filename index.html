@@ -306,7 +306,7 @@
           .replace(/[^a-z0-9_-]+/gi, "-")
           .replace(/^-+|-+$/g, "") || "report";
         const download = document.createElement("a");
-        download.href = new URL("./SampleDocuments/SampleOutput-cover.pdf", window.location.href).href;
+        download.href = new URL("./SampleDocuments/SampleOutput.pdf", window.location.href).href;
         download.download = `${reportName}-final-report.pdf`;
         download.rel = "noopener";
         document.body.appendChild(download);

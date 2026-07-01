@@ -1,3 +1,8 @@
+/**
+ * DocuAlign Global Design System & CSS Tokens
+ * Implements rich aesthetics, accessible contrast, responsive layout grids,
+ * auth gate styling, dashboard reporting cards, and interactive drag-and-drop feedback.
+ */
 :root {
   color: #152d32;
   background: #f2efe7;

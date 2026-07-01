@@ -87,6 +87,11 @@ describe("filterReportsByDate", () => {
     const stamped = [report("ts", { toDate: () => new Date("2026-06-15T10:00:00") })];
     expect(filterReportsByDate(stamped, { from: "2026-06-10", to: "2026-06-20" })).toHaveLength(1);
   });
+
+  it("handles invalid date strings in bounds gracefully returning null bounds", () => {
+    const result = filterReportsByDate(reports, { from: "invalid-date", to: "invalid-date" });
+    expect(result).toHaveLength(reports.length);
+  });
 });
 
 describe("saveReport", () => {

@@ -1,3 +1,9 @@
+/**
+ * @file App.jsx
+ * @description React-based workspace component for interactive Excel workbook ingestion.
+ * Implements local drag-and-drop file selection, validation against `.xlsx`/`.xls` formats,
+ * and user action controls for file replacement and cloud save wiring.
+ */
 import { useRef, useState } from "react";
 
 const EXCEL_EXTENSIONS = [".xlsx", ".xls"];

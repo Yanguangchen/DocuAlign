@@ -1,11 +1,12 @@
+/**
+ * @file save-report.js
+ * @description Cloud persistence controller for the primary ETL workspace (`index.html`).
+ * Connects the "Save data to cloud" action to Firestore, creating structured report
+ * records (`docuAlignReports`) linked to the authenticated user's session.
+ */
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { saveReport } from "./lib/reports.js";
-
-// Wires the existing "Save data to cloud" button to actually persist the
-// processed report into Firestore so it shows up on the dashboard. The inline
-// script in index.html still owns the ETL/preview UI; this module only adds
-// real persistence on top of it.
 const cloudSave = document.querySelector("#cloud-save");
 const fileName = document.querySelector("#file-name");
 const feedback = document.querySelector("#feedback");

@@ -1,3 +1,9 @@
+/**
+ * @file dashboard.js
+ * @description Controller logic for the saved reports cloud dashboard (`dashboard.html`).
+ * Fetches all persisted reports from Firestore upon authentication, renders interactive
+ * report cards, and provides real-time date filtering and status feedback.
+ */
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { fetchReports, filterReportsByDate } from "./lib/reports.js";

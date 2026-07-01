@@ -102,6 +102,27 @@ describe("save-report module", () => {
     expect(btn.disabled).toBe(true);
   });
 
+  it("handles cloudSave click when user has no email property (falls back to null)", async () => {
+    document.body.innerHTML = `
+      <button id="cloud-save"></button>
+      <span id="file-name">no_email.xlsx</span>
+      <div id="feedback"></div>
+    `;
+    mockSaveReport.mockResolvedValueOnce({ id: "456" });
+    await import("./save-report.js");
+    if (authStateCallback) authStateCallback({});
+
+    const btn = document.querySelector("#cloud-save");
+    btn.click();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockSaveReport).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ createdBy: null })
+    );
+  });
+
   it("handles saveReport failure and re-enables button", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     document.body.innerHTML = `

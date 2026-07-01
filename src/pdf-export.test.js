@@ -14,7 +14,7 @@ function sha256(buffer) {
 }
 
 describe("PDF export asset", () => {
-  it("resolves to identical one-page PDFs for direct-file and Vite deployments", () => {
+  it("resolves to identical full five-page PDFs for direct-file and Vite deployments", () => {
     expect(exportUrlMatch, "index.html must declare a relative PDF export URL").not.toBeNull();
 
     const relativeAssetPath = exportUrlMatch[1].replace(/^\.\//, "");
@@ -31,6 +31,6 @@ describe("PDF export asset", () => {
     expect(sha256(directPdf)).toBe(sha256(publicPdf));
 
     const pageObjects = directPdf.toString("latin1").match(/\/Type\s*\/Page\b/g) ?? [];
-    expect(pageObjects).toHaveLength(1);
+    expect(pageObjects).toHaveLength(5);
   });
 });

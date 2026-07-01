@@ -1,3 +1,9 @@
+/**
+ * @file reports.js
+ * @description Pure domain logic for CRUD operations and client-side date filtering
+ * against the `docuAlignReports` Firestore collection. Handles server timestamp
+ * stamping and normalization of various timestamp formats into JavaScript Date objects.
+ */
 import {
   addDoc,
   collection,

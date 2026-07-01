@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
+    "sast": "npm run lint && npm audit --audit-level=moderate",
     "test": "vitest run",
     "test:rules": "RUN_FIRESTORE_RULE_TESTS=1 vitest run src/firestore.rules.test.js",
     "coverage": "vitest run --coverage"
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9.39.2",
+    "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.7.0",

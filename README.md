@@ -519,6 +519,43 @@ link, which made the missing asset look like a successful export. The source
 asset was added at the direct-file path, and `src/pdf-export.test.js` now checks
 the URL contract, PDF signature, source/public equality, and one-page limit.
 
+## Architecture & System Documentation
+
+For detailed technical design specifications, UML diagrams, E/R diagrams, and developer guidelines, see:
+* **[design.md](./design.md)** — Complete architectural specification containing:
+  - **UML System Architecture & Component Diagram**
+  - **UML State Machine Diagram (ETL Pipeline)**
+  - **UML End-to-End Sequence Diagram**
+  - **Entity-Relationship (E/R) Diagram & Schema Design**
+  - **Security Rules & Access Gate Architecture**
+* **[AGENTS.md](./AGENTS.md)** — AI agent coding standards, shared database rules constraints, and testing protocols.
+* **[rak_pdf_excel_field_mapping.json](./rak_pdf_excel_field_mapping.json)** — Detailed cell-to-logical-key mapping dictionary.
+
+### Project Repository Structure
+
+```text
+DocuAlign/
+├── SampleDocuments/                 # Static source assets for file:// execution
+│   ├── SampleInput.xlsx             # Source geotechnical laboratory workbook
+│   ├── SampleOutput-cover.pdf       # Verified 1-page cover PDF reference
+│   └── SampleOutput.pdf             # Legacy full report reference
+├── public/SampleDocuments/          # Copied assets for Vite HTTP deployment
+├── src/
+│   ├── lib/
+│   │   ├── firebase.js              # Firebase SDK v12 singleton initialization
+│   │   └── reports.js               # Domain layer: Firestore CRUD & date filtering
+│   ├── App.jsx                      # React workspace shell prototype
+│   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
+│   ├── dashboard.js                 # Dashboard report grid & date filtering controller
+│   ├── save-report.js               # Cloud persistence wiring for ETL workspace
+│   └── styles.css                   # Premium vanilla CSS tokenized design system
+├── index.html                       # Primary ingestion & ETL pipeline workspace
+├── dashboard.html                   # Cloud dashboard for saved reports
+├── firestore.rules                  # Shared Firestore security rules (WorkGrid, CubeSync, DocuAlign)
+├── design.md                        # Technical design specification (UML & E/R diagrams)
+└── AGENTS.md                        # Developer and agent behavioral rules
+```
+
 ## Future Enhancements
 
 1. Batch import multiple Excel files
@@ -531,3 +568,4 @@ the URL contract, PDF signature, source/public equality, and one-page limit.
 8. Template version control
 9. Auto generated charts
 10. Search by client, vessel, job reference, or sample ID
+

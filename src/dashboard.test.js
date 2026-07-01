@@ -172,4 +172,40 @@ describe("dashboard module", () => {
     form.dispatchEvent(new Event("input"));
     form.dispatchEvent(new Event("reset"));
   });
+
+  it("skips loading if reports are already loaded for the same user", async () => {
+    mockFetchReports.mockResolvedValue([
+      { id: "1", reportName: "Report 1", matchFilter: true }
+    ]);
+    const { loadReports } = await import("./dashboard.js");
+    await loadReports({ uid: "user-repeat" });
+    const callsCount = mockFetchReports.mock.calls.length;
+    await loadReports({ uid: "user-repeat" });
+    expect(mockFetchReports.mock.calls.length).toBe(callsCount);
+  });
+
+  it("renders filtered count X of Y reports when active filter matches subset", async () => {
+    mockFetchReports.mockResolvedValueOnce([
+      { id: "1", reportName: "Report 1", matchFilter: true },
+      { id: "2", reportName: "Report 2", matchFilter: false },
+    ]);
+    const { render } = await import("./dashboard.js");
+    if (authStateCallback) authStateCallback({ uid: "user-subset" });
+    await new Promise((r) => setTimeout(r, 15));
+
+    document.querySelector("#filter-from").value = "2026-06-01";
+    render();
+
+    expect(document.querySelector("#result-count").textContent).toBe("1 of 2 reports");
+  });
+
+  it("renders fallback empty message when filtered is empty without active filter", async () => {
+    mockFetchReports.mockResolvedValueOnce([
+      { id: "1", reportName: "Report 1" },
+    ]);
+    mockFilterReportsByDate.mockReturnValueOnce([]);
+    const { loadReports } = await import("./dashboard.js");
+    await loadReports({ uid: "user-empty-unfiltered" });
+    expect(document.querySelector("#dashboard-status").textContent).toBe("No saved reports yet.");
+  });
 });

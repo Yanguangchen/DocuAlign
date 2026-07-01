@@ -1,3 +1,10 @@
+/**
+ * @file auth-gate.js
+ * @description Authentication gatekeeper for DocuAlign workspace pages.
+ * Handles Google OAuth sign-in popups, session persistence, and performs an active
+ * Firestore access probe (`docuAlignReports/access-probe`) to verify whether the user
+ * belongs to the approved CubeSync staff allowlist before rendering protected UI.
+ */
 import {
   browserLocalPersistence,
   GoogleAuthProvider,
