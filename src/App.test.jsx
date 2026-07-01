@@ -54,6 +54,7 @@ describe('App Component', () => {
   });
 
   it('handles selecting an invalid file extension', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     render(<App />);
     const input = screen.getByLabelText(/Drop your Excel workbook here/i);
     const file = new File(['data'], 'document.pdf', { type: 'application/pdf' });
@@ -63,6 +64,24 @@ describe('App Component', () => {
     expect(screen.getByText('Choose an Excel workbook in .xlsx or .xls format.')).toBeInTheDocument();
     expect(screen.queryByText('document.pdf')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Save data to cloud/i })).toBeDisabled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[DocuAlign] File validation failure',
+      expect.objectContaining({ rule: 'EXCEL_EXTENSIONS', actualExtension: '.pdf' })
+    );
+  });
+
+  it('handles file selection with empty name or missing extension fallback', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    render(<App />);
+    const input = screen.getByLabelText(/Drop your Excel workbook here/i);
+    const file = new File(['data'], '');
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[DocuAlign] File validation failure',
+      expect.objectContaining({ rule: 'EXCEL_EXTENSIONS', actualExtension: 'unknown' })
+    );
   });
 
   it('ignores empty selection (canceling file picker)', () => {

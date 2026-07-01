@@ -25,9 +25,9 @@ DocuAlign supports two execution environments:
 2. Bundled HTTP/HTTPS execution (via `npm run dev` or Vite production build output in `dist/`).
 
 To support both environments without 404 file errors:
-* The static cover reference PDF **must exist identically** at both paths:
-  - `SampleDocuments/SampleOutput-cover.pdf`
-  - `public/SampleDocuments/SampleOutput-cover.pdf`
+* The static full report reference PDF (`SampleOutput.pdf`) and cover reference (`SampleOutput-cover.pdf`) **must exist identically** at both paths:
+  - `SampleDocuments/SampleOutput.pdf`
+  - `public/SampleDocuments/SampleOutput.pdf`
 * Never remove either copy. `src/pdf-export.test.js` enforces that both files exist and share the exact same SHA-256 hash. If you update the sample PDF, you **must update both locations**.
 
 ---

@@ -58,6 +58,13 @@ cloudSave?.addEventListener("click", async () => {
   } catch (error) {
     cloudSave.disabled = false;
     setFeedback("Could not save the report. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to save report", error);
+    console.error("[DocuAlign] Failed to save report", error, {
+      feature: "CloudPersistence",
+      function: "cloudSave.onClick",
+      operation: "firestore.addDoc",
+      collection: "docuAlignReports",
+      safeIdentifier: reportNameFromSource(source),
+      category: error?.code || "DatabaseWriteFailure",
+    });
   }
 });

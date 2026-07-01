@@ -41,13 +41,39 @@ export function showApp(user) {
 }
 
 export async function hasDocuAlignAccess(user) {
-  if (!user?.emailVerified) return false;
+  if (!user?.emailVerified) {
+    console.warn("[DocuAlign] Access check denied: email not verified", {
+      feature: "AuthGate",
+      function: "hasDocuAlignAccess",
+      operation: "verifyEmail",
+      rule: "emailVerified must be true",
+      safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+    });
+    return false;
+  }
 
   try {
     await getDoc(doc(db, "docuAlignReports", "access-probe"));
     return true;
   } catch (error) {
-    if (error?.code === "permission-denied") return false;
+    if (error?.code === "permission-denied") {
+      console.warn("[DocuAlign] Access check denied: Firestore permission-denied", {
+        feature: "AuthGate",
+        function: "hasDocuAlignAccess",
+        operation: "firestore.getDoc",
+        target: "docuAlignReports/access-probe",
+        safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+      });
+      return false;
+    }
+    console.error("[DocuAlign] Access probe verification failure", error, {
+      feature: "AuthGate",
+      function: "hasDocuAlignAccess",
+      operation: "firestore.getDoc",
+      target: "docuAlignReports/access-probe",
+      category: error?.code || "DatabaseReadFailure",
+      safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+    });
     throw error;
   }
 }
@@ -62,10 +88,22 @@ signInButton.addEventListener("click", async () => {
     await signInWithPopup(auth, provider);
   } catch (error) {
     if (error?.code === "auth/popup-closed-by-user") {
+      console.info("[DocuAlign] Sign-in popup cancelled by user", {
+        feature: "AuthGate",
+        function: "signInButton.onClick",
+        operation: "signInWithPopup",
+        category: "UserCancellation",
+      });
       showGate("Google sign-in was cancelled.");
       return;
     }
 
+    console.error("[DocuAlign] Google sign-in failure", error, {
+      feature: "AuthGate",
+      function: "signInButton.onClick",
+      operation: "signInWithPopup",
+      category: error?.code || "AuthenticationFailure",
+    });
     showGate("Google sign-in failed. Check the authorized domain and try again.", true);
   }
 });
@@ -74,6 +112,13 @@ signOutButton.addEventListener("click", async () => {
   signOutButton.disabled = true;
   try {
     await signOut(auth);
+  } catch (error) {
+    console.error("[DocuAlign] Sign out failure", error, {
+      feature: "AuthGate",
+      function: "signOutButton.onClick",
+      operation: "signOut",
+      category: error?.code || "SignOutFailure",
+    });
   } finally {
     signOutButton.disabled = false;
   }
@@ -93,7 +138,14 @@ onAuthStateChanged(auth, async (user) => {
     }
 
     showApp(user);
-  } catch {
+  } catch (error) {
+    console.error("[DocuAlign] Verification failure during auth state change", error, {
+      feature: "AuthGate",
+      function: "onAuthStateChanged",
+      operation: "hasDocuAlignAccess",
+      category: error?.code || "VerificationFailure",
+      safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+    });
     await signOut(auth);
     showGate("Access could not be verified. Check your connection and try again.", true);
   }

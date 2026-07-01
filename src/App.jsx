@@ -49,6 +49,13 @@ function App() {
     if (!isExcelFile(nextFile)) {
       setFile(null);
       setMessage("Choose an Excel workbook in .xlsx or .xls format.");
+      console.warn("[DocuAlign] File validation failure", {
+        feature: "WorkspaceIngestion",
+        function: "selectFile",
+        operation: "validateExtension",
+        rule: "EXCEL_EXTENSIONS",
+        actualExtension: nextFile.name?.slice(nextFile.name.lastIndexOf(".")) || "unknown",
+      });
       return;
     }
 

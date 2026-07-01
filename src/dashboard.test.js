@@ -152,7 +152,11 @@ describe("dashboard module", () => {
     expect(document.querySelector("#dashboard-status").textContent).toBe(
       "Could not load saved reports. Check your connection and try again."
     );
-    expect(consoleSpy).toHaveBeenCalledWith("[DocuAlign] Failed to load saved reports", expect.any(Error));
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Failed to load saved reports",
+      expect.any(Error),
+      expect.objectContaining({ feature: "Dashboard", function: "loadReports" })
+    );
     consoleSpy.mockRestore();
   });
 

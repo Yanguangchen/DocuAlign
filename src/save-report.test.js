@@ -143,7 +143,11 @@ describe("save-report module", () => {
       "Could not save the report. Check your connection and try again."
     );
     expect(btn.disabled).toBe(false);
-    expect(consoleSpy).toHaveBeenCalledWith("[DocuAlign] Failed to save report", expect.any(Error));
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Failed to save report",
+      expect.any(Error),
+      expect.objectContaining({ feature: "CloudPersistence", function: "cloudSave.onClick" })
+    );
     consoleSpy.mockRestore();
   });
 

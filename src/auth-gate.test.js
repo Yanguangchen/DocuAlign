@@ -69,9 +69,12 @@ describe("auth-gate module", () => {
   });
 
   it("exports hasDocuAlignAccess testing email verification and firestore probe", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { hasDocuAlignAccess } = await import("./auth-gate.js");
     expect(await hasDocuAlignAccess(null)).toBe(false);
     expect(await hasDocuAlignAccess({ emailVerified: false })).toBe(false);
+    expect(warnSpy).toHaveBeenCalled();
 
     mockGetDoc.mockResolvedValueOnce({ exists: () => true });
     expect(await hasDocuAlignAccess({ emailVerified: true })).toBe(true);
@@ -81,6 +84,7 @@ describe("auth-gate module", () => {
 
     mockGetDoc.mockRejectedValueOnce(new Error("Fatal DB Error"));
     await expect(hasDocuAlignAccess({ emailVerified: true })).rejects.toThrow("Fatal DB Error");
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it("handles successful sign-in button click", async () => {
@@ -99,6 +103,7 @@ describe("auth-gate module", () => {
   });
 
   it("handles sign-in popup cancelled by user", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     mockSetPersistence.mockRejectedValueOnce({ code: "auth/popup-closed-by-user" });
     await import("./auth-gate.js");
 
@@ -107,9 +112,11 @@ describe("auth-gate module", () => {
 
     await new Promise((r) => setTimeout(r, 15));
     expect(document.querySelector("#auth-message").textContent).toBe("Google sign-in was cancelled.");
+    expect(infoSpy).toHaveBeenCalled();
   });
 
   it("handles general sign-in failure", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockSetPersistence.mockRejectedValueOnce(new Error("Auth Error"));
     await import("./auth-gate.js");
 
@@ -120,6 +127,7 @@ describe("auth-gate module", () => {
     expect(document.querySelector("#auth-message").textContent).toBe(
       "Google sign-in failed. Check the authorized domain and try again."
     );
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it("handles sign-out button click", async () => {
@@ -131,6 +139,23 @@ describe("auth-gate module", () => {
 
     await new Promise((r) => setTimeout(r, 15));
     expect(mockSignOut).toHaveBeenCalled();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("handles sign-out failure gracefully", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockSignOut.mockRejectedValueOnce(new Error("SignOut error"));
+    await import("./auth-gate.js");
+
+    const btn = document.querySelector("#sign-out");
+    btn.click();
+
+    await new Promise((r) => setTimeout(r, 15));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Sign out failure",
+      expect.any(Error),
+      expect.objectContaining({ operation: "signOut" })
+    );
     expect(btn.disabled).toBe(false);
   });
 
@@ -152,6 +177,7 @@ describe("auth-gate module", () => {
   });
 
   it("handles onAuthStateChanged when user lacks access", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mockGetDoc.mockRejectedValueOnce({ code: "permission-denied" });
     mockSignOut.mockResolvedValueOnce();
     await import("./auth-gate.js");
@@ -162,9 +188,11 @@ describe("auth-gate module", () => {
     expect(document.querySelector("#auth-message").textContent).toBe(
       "This Google account does not have CubeSync access."
     );
+    expect(warnSpy).toHaveBeenCalled();
   });
 
   it("handles onAuthStateChanged verification failure error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetDoc.mockRejectedValueOnce(new Error("Network Error"));
     mockSignOut.mockResolvedValueOnce();
     await import("./auth-gate.js");
@@ -175,5 +203,6 @@ describe("auth-gate module", () => {
     expect(document.querySelector("#auth-message").textContent).toBe(
       "Access could not be verified. Check your connection and try again."
     );
+    expect(errorSpy).toHaveBeenCalled();
   });
 });

@@ -71,9 +71,12 @@ export function extractMappedReport(rawCellLookup = {}) {
  * @returns {{ isValid: boolean, missingKeys: string[] }} Validation status and missing required keys.
  */
 export function validateFullReportStructure(reportData = {}) {
-  const missingKeys = REQUIRED_FULL_REPORT_KEYS.filter(
-    (key) => !(key in reportData) || reportData[key] === null || reportData[key] === undefined || reportData[key] === ""
-  );
+  const missingKeys = REQUIRED_FULL_REPORT_KEYS.filter((key) => {
+    /* eslint-disable security/detect-object-injection */
+    const val = reportData[key];
+    /* eslint-enable security/detect-object-injection */
+    return val === null || val === undefined || val === "";
+  });
 
   return {
     isValid: missingKeys.length === 0,

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import mappingDoc from "../../rak_pdf_excel_field_mapping.json";
 import {
   extractMappedReport,
   getMappingsByPage,

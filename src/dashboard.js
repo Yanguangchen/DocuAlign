@@ -115,7 +115,14 @@ export async function loadReports(user) {
   } catch (error) {
     loadedForUser = null;
     setStatus("Could not load saved reports. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to load saved reports", error);
+    console.error("[DocuAlign] Failed to load saved reports", error, {
+      feature: "Dashboard",
+      function: "loadReports",
+      operation: "firestore.getDocs",
+      collection: "docuAlignReports",
+      category: error?.code || "DatabaseReadFailure",
+      safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+    });
   }
 }
 
