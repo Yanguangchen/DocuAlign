@@ -7,7 +7,12 @@
  * tokens render a status message instead of report data.
  */
 import { db } from "./lib/firebase.js";
-import { fetchSharedReport, isValidShareToken, PUBLIC_PDF_PATH } from "./lib/share.js";
+import {
+  fetchSharedBundle,
+  fetchSharedReport,
+  isValidShareToken,
+  PUBLIC_PDF_PATH,
+} from "./lib/share.js";
 
 const status = document.querySelector("#share-status");
 const reportPanel = document.querySelector("#share-report");
@@ -16,6 +21,11 @@ const reportStatus = document.querySelector("#share-report-status");
 const reportSource = document.querySelector("#share-source");
 const reportPublished = document.querySelector("#share-published");
 const pdfLink = document.querySelector("#share-pdf-link");
+const bundlePanel = document.querySelector("#share-bundle");
+const bundleName = document.querySelector("#share-bundle-name");
+const bundleCount = document.querySelector("#share-bundle-count");
+const bundlePublished = document.querySelector("#share-bundle-published");
+const bundleList = document.querySelector("#share-bundle-list");
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -29,6 +39,16 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
  */
 export function getShareTokenFromUrl(search) {
   const token = new URLSearchParams(search).get("share");
+  return isValidShareToken(token) ? token : null;
+}
+
+/**
+ * Extract a well-formed bundle (group link) token from a URL query string.
+ * @param {string} search - The query string (e.g. `location.search`).
+ * @returns {string|null} The token, or null when absent or malformed.
+ */
+export function getBundleTokenFromUrl(search) {
+  const token = new URLSearchParams(search).get("bundle");
   return isValidShareToken(token) ? token : null;
 }
 
@@ -48,14 +68,10 @@ export function safePdfUrl(url) {
 }
 
 function setStatus(message) {
-  if (message) {
-    status.textContent = message;
-    status.hidden = false;
-    reportPanel.hidden = true;
-  } else {
-    status.hidden = true;
-    reportPanel.hidden = false;
-  }
+  if (message) status.textContent = message;
+  status.hidden = !message;
+  reportPanel.hidden = true;
+  bundlePanel.hidden = true;
 }
 
 function renderSharedReport(share) {
@@ -67,6 +83,54 @@ function renderSharedReport(share) {
     : "Date unavailable";
   pdfLink.setAttribute("href", safePdfUrl(share.pdfUrl));
   setStatus("");
+  reportPanel.hidden = false;
+}
+
+// Build each grouped report entry with DOM APIs (not innerHTML) so report
+// names and file names from the share document can never inject markup.
+function bundleReportItem(report) {
+  const item = document.createElement("li");
+  item.className = "bundle-report";
+
+  const head = document.createElement("div");
+  head.className = "report-card-head";
+  const title = document.createElement("strong");
+  title.textContent = report.reportName || "Untitled report";
+  const statusLabel = document.createElement("span");
+  statusLabel.className = "report-status";
+  statusLabel.textContent = report.status || "saved";
+  head.append(title, statusLabel);
+  item.append(head);
+
+  if (report.sourceFileName) {
+    const source = document.createElement("p");
+    source.className = "report-source";
+    source.textContent = `Source: ${report.sourceFileName}`;
+    item.append(source);
+  }
+
+  const anchor = document.createElement("a");
+  anchor.className = "google-button share-pdf-button";
+  anchor.href = safePdfUrl(report.pdfUrl);
+  anchor.target = "_blank";
+  anchor.rel = "noopener";
+  anchor.textContent = "Open PDF report";
+  item.append(anchor);
+
+  return item;
+}
+
+function renderSharedBundle(sharedBundle) {
+  bundleName.textContent = sharedBundle.bundleName || "Shared reports";
+  bundleCount.textContent = `${sharedBundle.reports.length} ${
+    sharedBundle.reports.length === 1 ? "report" : "reports"
+  }`;
+  bundlePublished.textContent = sharedBundle.publishedAt
+    ? dateFormatter.format(sharedBundle.publishedAt)
+    : "Date unavailable";
+  bundleList.replaceChildren(...sharedBundle.reports.map(bundleReportItem));
+  setStatus("");
+  bundlePanel.hidden = false;
 }
 
 /**
@@ -76,16 +140,38 @@ function renderSharedReport(share) {
  * @returns {Promise<void>} Settles once the viewer has rendered.
  */
 export async function initViewer(search = globalThis.location?.search ?? "") {
-  const token = getShareTokenFromUrl(search);
-  if (!token) {
+  const bundleToken = getBundleTokenFromUrl(search);
+  const shareToken = getShareTokenFromUrl(search);
+  if (!bundleToken && !shareToken) {
     setStatus("This share link is not valid. Check the URL and try again.");
     return;
   }
 
   setStatus("Loading shared report…");
 
+  if (bundleToken) {
+    try {
+      const sharedBundle = await fetchSharedBundle(db, bundleToken);
+      if (!sharedBundle) {
+        setStatus("This share link is no longer available. Ask the report owner for a new link.");
+        return;
+      }
+      renderSharedBundle(sharedBundle);
+    } catch (error) {
+      setStatus("Could not load this shared report. Check your connection and try again.");
+      console.error("[DocuAlign] Failed to load shared bundle", error, {
+        feature: "PublicShare",
+        function: "initViewer",
+        operation: "firestore.getDoc",
+        collection: "docuAlignPublicBundles",
+        category: error?.code || "DatabaseReadFailure",
+      });
+    }
+    return;
+  }
+
   try {
-    const share = await fetchSharedReport(db, token);
+    const share = await fetchSharedReport(db, shareToken);
     if (!share) {
       setStatus("This share link is no longer available. Ask the report owner for a new link.");
       return;

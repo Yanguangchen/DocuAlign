@@ -158,6 +158,32 @@ tied to the share document keyed by its token:
 The domain logic lives in `src/lib/share.js`; the viewer controller is
 `src/view-report.js`. See `design.md` section 5.3 for the full security model.
 
+#### Group Links (Bundles)
+
+Several saved reports can also be grouped behind **one single public URL**.
+Each dashboard card has an **Add to group link** checkbox; selecting one or
+more reports reveals a group bar with a **Create group link** button that:
+
+1. Publishes each selected report as an ordinary single share.
+2. Writes a bundle document (`docuAlignPublicBundles/{token}`) that stores only
+   the resulting share tokens (never embedded report data) plus an optional
+   bundle name and publish timestamp.
+3. Shows the group URL (`view.html?bundle=<token>`) and copies it to the
+   clipboard.
+
+A customer opening the group URL sees every grouped report on one page, each
+with its own "Open PDF report" button. Design properties:
+
+* A bundle may hold 1 to 25 reports (`MAX_BUNDLE_REPORTS`, mirrored in the
+  Firestore rules).
+* Bundles reference share tokens instead of embedding snapshots. This keeps
+  every grouped report individually revocable — deleting a single share
+  removes it from every group link that references it — and keeps rules
+  evaluation cheap (Firestore caps each evaluation at 1000 expressions, which
+  embedded per-report snapshots were measured to exceed).
+* The same capability-URL contract applies: public `get`, denied `list`,
+  staff-only create/delete, immutable snapshots, revocation by deletion.
+
 ## PDF Mapping Approach
 
 The app should use logical field keys instead of relying on existing PDF field names.
@@ -505,11 +531,12 @@ DocuAlign data must be stored under `docuAlignReports/{document=**}`. Users who
 pass `isCubeSyncStaff()` receive read and write access throughout that namespace.
 Existing WorkGrid and CubeSync collections keep their current independent rules.
 
-The single deliberate exception is `docuAlignPublicShares/{token}`: share
-documents published by staff are publicly readable by `get` (never `list`) so
-that capability URLs work without sign-in. Only staff can create or delete
-shares, share payloads are allowlisted to non-PII fields, and updates are
-denied entirely.
+The deliberate exceptions are `docuAlignPublicShares/{token}` and
+`docuAlignPublicBundles/{token}`: share and group-link documents published by
+staff are publicly readable by `get` (never `list`) so that capability URLs
+work without sign-in. Only staff can create or delete them, payloads are
+allowlisted to non-PII fields (bundles store only share tokens), and updates
+are denied entirely.
 
 Before deployment:
 

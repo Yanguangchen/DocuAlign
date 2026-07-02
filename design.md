@@ -57,6 +57,7 @@ graph TD
             CubeSyncNS["/appConfig/access (Shared Staff Allowlist)"]
             DocuAlignNS["/docuAlignReports/{document=**} (DocuAlign namespace)"]
             PublicSharesNS["/docuAlignPublicShares/{token} (Public get, no list)"]
+            PublicBundlesNS["/docuAlignPublicBundles/{token} (Grouped share tokens)"]
         end
     end
 
@@ -73,6 +74,8 @@ graph TD
     ShareLib --> FirebaseLib
     AuthGate --> FirebaseLib
     ShareLib -. Publish / Public Get .-> PublicSharesNS
+    ShareLib -. Publish / Public Get .-> PublicBundlesNS
+    PublicBundlesNS -. references share tokens .-> PublicSharesNS
 
     IndexPage --> RootSample
     IndexPage --> PublicSample
@@ -88,7 +91,7 @@ graph TD
 * **`src/auth-gate.js`**: Enforces strict enterprise access control. Restricts UI access until a verified Google session passes an active Firestore probe against `docuAlignReports/access-probe`.
 * **`src/lib/reports.js`**: Pure domain library providing server-timestamped document creation (`saveReport`), descending ordered retrieval (`fetchReports`), and client-side date range filtering (`filterReportsByDate`).
 * **`view.html` / `src/view-report.js`**: Public, unauthenticated share viewer. Resolves the `share` capability token from the URL, loads exactly one published report snapshot, and links its PDF output through a scheme-restricted URL guard (`safePdfUrl`).
-* **`src/lib/share.js`**: Pure domain library for public share links: cryptographically random 32-character capability tokens (`generateShareToken`), viewer URL construction (`buildPublicUrl`), PII-free snapshot publication (`publishReport`), and token-validated retrieval (`fetchSharedReport`).
+* **`src/lib/share.js`**: Pure domain library for public share links: cryptographically random 32-character capability tokens (`generateShareToken`), viewer URL construction (`buildPublicUrl`, `buildBundleUrl`), PII-free snapshot publication (`publishReport`, `publishBundle`), and token-validated retrieval (`fetchSharedReport`, `fetchSharedBundle`). Bundles group up to 25 single-share tokens behind one URL.
 * **`src/lib/firebase.js`**: Singleton initialization of Firebase App, Firestore, Auth, and Storage with HMR/test environment protection (`getApps().length`).
 
 ---
@@ -267,9 +270,17 @@ erDiagram
         timestamp publishedAt "Server timestamp at publication"
     }
 
+    DOCUALIGN_PUBLIC_BUNDLES {
+        string token PK "32-char capability token (unguessable document ID)"
+        string bundleName "Customer-facing group title (nullable)"
+        list shareTokens "1..25 docuAlignPublicShares tokens"
+        timestamp publishedAt "Server timestamp at publication"
+    }
+
     APP_CONFIG_ACCESS ||--o{ USERS : authorizes
     APP_CONFIG_ACCESS ||--o{ DOCUALIGN_REPORTS : "gates access via isCubeSyncStaff()"
     DOCUALIGN_REPORTS ||--o{ DOCUALIGN_PUBLIC_SHARES : "published as immutable public snapshot"
+    DOCUALIGN_PUBLIC_BUNDLES }o--o{ DOCUALIGN_PUBLIC_SHARES : "groups by share token"
     DOCUALIGN_REPORTS ||--o{ PARTICLE_SIZE_ROWS : contains
     DOCUALIGN_REPORTS ||--o{ DIRECT_SHEAR_ROWS : contains
     DOCUALIGN_REPORTS ||--o{ METALLIC_ANALYSIS_ROWS : contains
@@ -325,6 +336,17 @@ service cloud.firestore {
       allow update: if false;  // shares are immutable snapshots
       allow delete: if isCubeSyncStaff(); // revocation
     }
+
+    // DocuAlign Group Links (bundles of share tokens, same contract)
+    match /docuAlignPublicBundles/{bundleToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isCubeSyncStaff() &&
+        bundleToken.matches('^[A-Za-z0-9]{32}$') &&
+        isValidDocuAlignPublicBundle(request.resource.data); // 1..25 tokens
+      allow update: if false;
+      allow delete: if isCubeSyncStaff();
+    }
   }
 }
 ```
@@ -362,6 +384,16 @@ Security properties enforced by rules and domain code:
 3. **PII never leaves the staff namespace.** `toPublicReportPayload` strips `createdBy` (staff email) and all unknown fields, and the rules' `hasOnly` allowlist rejects any extra keys at the boundary.
 4. **Immutable snapshots, revocable links.** `update` is denied for all clients; staff revoke a link by deleting the share document, after which the viewer shows a "no longer available" notice.
 5. **Scheme-restricted PDF links.** The viewer refuses `javascript:`, `data:`, protocol-relative, and plain `http:` URLs in `pdfUrl`, falling back to the bundled report asset.
+
+#### Group Links (Bundles)
+
+Staff can also group several saved reports behind one URL (`view.html?bundle=<token>`). Publishing a group first creates an ordinary single share per report, then writes a `docuAlignPublicBundles/{token}` document that stores **only the share tokens** (1..25, `MAX_BUNDLE_REPORTS`), an optional bundle name, and the publish timestamp. The public viewer resolves each token with unauthenticated `get`s and renders all grouped reports on one page.
+
+Storing tokens instead of embedded snapshots is deliberate:
+
+1. **Rules evaluation budget.** Firestore caps each rules evaluation at 1000 expressions; validating 25 embedded per-report snapshots was measured (against the emulator) to exceed it, while validating 25 token strings is cheap.
+2. **Per-report revocation.** Deleting one share document removes that report from every group link referencing it; the viewer silently drops revoked members.
+3. **Single validation boundary.** Report content is validated (PII allowlist included) only by the `docuAlignPublicShares` rules — the bundle never duplicates report data that could drift or leak.
 
 ---
 

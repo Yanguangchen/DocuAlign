@@ -95,6 +95,14 @@
             <p class="result-count" id="result-count" aria-live="polite"></p>
           </section>
 
+          <section class="bundle-bar" id="bundle-bar" aria-label="Group selected reports into one link" hidden>
+            <span class="bundle-count" id="bundle-count" aria-live="polite"></span>
+            <button class="share-button bundle-create" id="bundle-create" type="button">
+              Create group link
+            </button>
+            <p class="share-link" id="bundle-link" aria-live="polite" hidden></p>
+          </section>
+
           <section class="dashboard-list" aria-label="Saved reports">
             <p class="dashboard-status" id="dashboard-status">Loading saved reports…</p>
             <ul class="report-grid" id="report-grid" hidden></ul>

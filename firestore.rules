@@ -60,12 +60,11 @@ rules_version = '2';
 // The first appConfig/access write must be done with the Admin SDK script.
 // After that, listed master emails and admin users can maintain the list.
 // ===============================================================
-// IMPORTANT SHARED DATABASE & RULES MAINTENANCE NOTE:
-// This database instance is shared across multiple applications (WorkGrid,
-// CubeSync, and DocuAlign / RAK Report Parser). Consequently, all applications
-// share this single firestore.rules file.
-// NEVER edit or modify existing rules for WorkGrid or CubeSync when working on
-// DocuAlign. Each application's rules must remain isolated in dedicated blocks.
+//
+// IMPORTANT CUBESYNC MAINTENANCE NOTE:
+// NEVER edit the WorkGrid rules below for CubeSync changes. WorkGrid is a
+// separate sensitive app. CubeSync rules must live only in the CUBESYNC-ONLY
+// RULES block near the bottom of this file, immediately before default deny.
 // ===============================================================
 
 service cloud.firestore {
@@ -830,37 +829,13 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
-
-
-
-
-
-
-
-
-
-
+ // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     // CUBESYNC-ONLY RULES
     //
     // NEVER edit the WorkGrid rules above for CubeSync changes.
@@ -891,6 +866,7 @@ service cloud.firestore {
         'ma@rakmat.com.sg',
         'khun@rakmat.com.sg',
         'yanguangchen@webwizardsg.com',
+        'webwizardssg@gmail.com',
         'santofokir605@gmail.com',
         'nckeyong@gmail.com',
         'nck@rakmat.com.sg',
@@ -955,8 +931,44 @@ service cloud.firestore {
         (value.size() > 7 ? isCubeDropdownField(value[7]) : true);
     }
 
+    function isValidExtraFieldEntry(val) {
+      return val is bool || val is number || (val is string && val.size() <= 500);
+    }
+
+    function isValidExtraFieldKey(k) {
+      return k is string && k.matches('^[a-z][a-zA-Z0-9_]{0,31}$');
+    }
+
+    function isValidExtraFieldsList(keys, vals) {
+      return (keys.size() > 0 ? (isValidExtraFieldKey(keys[0]) && isValidExtraFieldEntry(vals[0])) : true) &&
+        (keys.size() > 1 ? (isValidExtraFieldKey(keys[1]) && isValidExtraFieldEntry(vals[1])) : true) &&
+        (keys.size() > 2 ? (isValidExtraFieldKey(keys[2]) && isValidExtraFieldEntry(vals[2])) : true) &&
+        (keys.size() > 3 ? (isValidExtraFieldKey(keys[3]) && isValidExtraFieldEntry(vals[3])) : true) &&
+        (keys.size() > 4 ? (isValidExtraFieldKey(keys[4]) && isValidExtraFieldEntry(vals[4])) : true) &&
+        (keys.size() > 5 ? (isValidExtraFieldKey(keys[5]) && isValidExtraFieldEntry(vals[5])) : true) &&
+        (keys.size() > 6 ? (isValidExtraFieldKey(keys[6]) && isValidExtraFieldEntry(vals[6])) : true) &&
+        (keys.size() > 7 ? (isValidExtraFieldKey(keys[7]) && isValidExtraFieldEntry(vals[7])) : true) &&
+        (keys.size() > 8 ? (isValidExtraFieldKey(keys[8]) && isValidExtraFieldEntry(vals[8])) : true) &&
+        (keys.size() > 9 ? (isValidExtraFieldKey(keys[9]) && isValidExtraFieldEntry(vals[9])) : true) &&
+        (keys.size() > 10 ? (isValidExtraFieldKey(keys[10]) && isValidExtraFieldEntry(vals[10])) : true) &&
+        (keys.size() > 11 ? (isValidExtraFieldKey(keys[11]) && isValidExtraFieldEntry(vals[11])) : true) &&
+        (keys.size() > 12 ? (isValidExtraFieldKey(keys[12]) && isValidExtraFieldEntry(vals[12])) : true) &&
+        (keys.size() > 13 ? (isValidExtraFieldKey(keys[13]) && isValidExtraFieldEntry(vals[13])) : true) &&
+        (keys.size() > 14 ? (isValidExtraFieldKey(keys[14]) && isValidExtraFieldEntry(vals[14])) : true) &&
+        (keys.size() > 15 ? (isValidExtraFieldKey(keys[15]) && isValidExtraFieldEntry(vals[15])) : true) &&
+        (keys.size() > 16 ? (isValidExtraFieldKey(keys[16]) && isValidExtraFieldEntry(vals[16])) : true) &&
+        (keys.size() > 17 ? (isValidExtraFieldKey(keys[17]) && isValidExtraFieldEntry(vals[17])) : true) &&
+        (keys.size() > 18 ? (isValidExtraFieldKey(keys[18]) && isValidExtraFieldEntry(vals[18])) : true) &&
+        (keys.size() > 19 ? (isValidExtraFieldKey(keys[19]) && isValidExtraFieldEntry(vals[19])) : true) &&
+        (keys.size() > 20 ? (isValidExtraFieldKey(keys[20]) && isValidExtraFieldEntry(vals[20])) : true) &&
+        (keys.size() > 21 ? (isValidExtraFieldKey(keys[21]) && isValidExtraFieldEntry(vals[21])) : true) &&
+        (keys.size() > 22 ? (isValidExtraFieldKey(keys[22]) && isValidExtraFieldEntry(vals[22])) : true) &&
+        (keys.size() > 23 ? (isValidExtraFieldKey(keys[23]) && isValidExtraFieldEntry(vals[23])) : true) &&
+        (keys.size() > 24 ? (isValidExtraFieldKey(keys[24]) && isValidExtraFieldEntry(vals[24])) : true);
+    }
+
     function isValidExtraFields(value) {
-      return value is map && value.size() <= 25;
+      return value is map && value.size() <= 25 && isValidExtraFieldsList(value.keys(), value.values());
     }
 
     function isValidCubeResult(row) {
@@ -1013,7 +1025,47 @@ service cloud.firestore {
         (value.size() > 6 ? isValidCubeResult(value[6]) : true) &&
         (value.size() > 7 ? isValidCubeResult(value[7]) : true) &&
         (value.size() > 8 ? isValidCubeResult(value[8]) : true) &&
-        (value.size() > 9 ? isValidCubeResult(value[9]) : true);
+        (value.size() > 9 ? isValidCubeResult(value[9]) : true) &&
+        (value.size() > 10 ? isValidCubeResult(value[10]) : true) &&
+        (value.size() > 11 ? isValidCubeResult(value[11]) : true) &&
+        (value.size() > 12 ? isValidCubeResult(value[12]) : true) &&
+        (value.size() > 13 ? isValidCubeResult(value[13]) : true) &&
+        (value.size() > 14 ? isValidCubeResult(value[14]) : true) &&
+        (value.size() > 15 ? isValidCubeResult(value[15]) : true) &&
+        (value.size() > 16 ? isValidCubeResult(value[16]) : true) &&
+        (value.size() > 17 ? isValidCubeResult(value[17]) : true) &&
+        (value.size() > 18 ? isValidCubeResult(value[18]) : true) &&
+        (value.size() > 19 ? isValidCubeResult(value[19]) : true) &&
+        (value.size() > 20 ? isValidCubeResult(value[20]) : true) &&
+        (value.size() > 21 ? isValidCubeResult(value[21]) : true) &&
+        (value.size() > 22 ? isValidCubeResult(value[22]) : true) &&
+        (value.size() > 23 ? isValidCubeResult(value[23]) : true) &&
+        (value.size() > 24 ? isValidCubeResult(value[24]) : true) &&
+        (value.size() > 25 ? isValidCubeResult(value[25]) : true) &&
+        (value.size() > 26 ? isValidCubeResult(value[26]) : true) &&
+        (value.size() > 27 ? isValidCubeResult(value[27]) : true) &&
+        (value.size() > 28 ? isValidCubeResult(value[28]) : true) &&
+        (value.size() > 29 ? isValidCubeResult(value[29]) : true) &&
+        (value.size() > 30 ? isValidCubeResult(value[30]) : true) &&
+        (value.size() > 31 ? isValidCubeResult(value[31]) : true) &&
+        (value.size() > 32 ? isValidCubeResult(value[32]) : true) &&
+        (value.size() > 33 ? isValidCubeResult(value[33]) : true) &&
+        (value.size() > 34 ? isValidCubeResult(value[34]) : true) &&
+        (value.size() > 35 ? isValidCubeResult(value[35]) : true) &&
+        (value.size() > 36 ? isValidCubeResult(value[36]) : true) &&
+        (value.size() > 37 ? isValidCubeResult(value[37]) : true) &&
+        (value.size() > 38 ? isValidCubeResult(value[38]) : true) &&
+        (value.size() > 39 ? isValidCubeResult(value[39]) : true) &&
+        (value.size() > 40 ? isValidCubeResult(value[40]) : true) &&
+        (value.size() > 41 ? isValidCubeResult(value[41]) : true) &&
+        (value.size() > 42 ? isValidCubeResult(value[42]) : true) &&
+        (value.size() > 43 ? isValidCubeResult(value[43]) : true) &&
+        (value.size() > 44 ? isValidCubeResult(value[44]) : true) &&
+        (value.size() > 45 ? isValidCubeResult(value[45]) : true) &&
+        (value.size() > 46 ? isValidCubeResult(value[46]) : true) &&
+        (value.size() > 47 ? isValidCubeResult(value[47]) : true) &&
+        (value.size() > 48 ? isValidCubeResult(value[48]) : true) &&
+        (value.size() > 49 ? isValidCubeResult(value[49]) : true);
     }
 
     function cubeRequestDataKeys() {
@@ -1351,34 +1403,7 @@ service cloud.firestore {
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     // DOCUALIGN / RAK REPORT PARSER RULES
     // Note: Shares the same database instance and firestore.rules file with WorkGrid & CubeSync.
     // Keep all DocuAlign-specific collection rules inside this dedicated block.
@@ -1433,6 +1458,73 @@ service cloud.firestore {
         shareToken.matches('^[A-Za-z0-9]{32}$') &&
         isValidDocuAlignPublicShare(request.resource.data);
       // Shares are immutable snapshots; revoking a link means deleting it.
+      allow update: if false;
+      allow delete: if isDocuAlignStaff();
+    }
+
+    // Grouped share links ("bundles"). One capability token references a list
+    // of ordinary share tokens so a customer opens a single URL and sees every
+    // PDF export grouped for them. The bundle deliberately stores TOKENS, not
+    // embedded report snapshots: per-report content is already validated by
+    // the docuAlignPublicShares rules (PII allowlist included), each grouped
+    // report stays individually revocable, and validating 25 short strings
+    // stays far below the 1000-expressions-per-evaluation rules limit that an
+    // embedded-snapshot design was measured to exceed.
+    // Identical access contract to single shares: public get, no list,
+    // staff-only create/delete, immutable. Keep the 25 cap in sync with
+    // MAX_BUNDLE_REPORTS in src/lib/share.js.
+    function isValidDocuAlignBundleToken(value) {
+      return value is string && value.matches('^[A-Za-z0-9]{32}$');
+    }
+
+    function isValidDocuAlignBundleTokens(value) {
+      return value is list &&
+        value.size() >= 1 &&
+        value.size() <= 25 &&
+        (value.size() > 0 ? isValidDocuAlignBundleToken(value[0]) : true) &&
+        (value.size() > 1 ? isValidDocuAlignBundleToken(value[1]) : true) &&
+        (value.size() > 2 ? isValidDocuAlignBundleToken(value[2]) : true) &&
+        (value.size() > 3 ? isValidDocuAlignBundleToken(value[3]) : true) &&
+        (value.size() > 4 ? isValidDocuAlignBundleToken(value[4]) : true) &&
+        (value.size() > 5 ? isValidDocuAlignBundleToken(value[5]) : true) &&
+        (value.size() > 6 ? isValidDocuAlignBundleToken(value[6]) : true) &&
+        (value.size() > 7 ? isValidDocuAlignBundleToken(value[7]) : true) &&
+        (value.size() > 8 ? isValidDocuAlignBundleToken(value[8]) : true) &&
+        (value.size() > 9 ? isValidDocuAlignBundleToken(value[9]) : true) &&
+        (value.size() > 10 ? isValidDocuAlignBundleToken(value[10]) : true) &&
+        (value.size() > 11 ? isValidDocuAlignBundleToken(value[11]) : true) &&
+        (value.size() > 12 ? isValidDocuAlignBundleToken(value[12]) : true) &&
+        (value.size() > 13 ? isValidDocuAlignBundleToken(value[13]) : true) &&
+        (value.size() > 14 ? isValidDocuAlignBundleToken(value[14]) : true) &&
+        (value.size() > 15 ? isValidDocuAlignBundleToken(value[15]) : true) &&
+        (value.size() > 16 ? isValidDocuAlignBundleToken(value[16]) : true) &&
+        (value.size() > 17 ? isValidDocuAlignBundleToken(value[17]) : true) &&
+        (value.size() > 18 ? isValidDocuAlignBundleToken(value[18]) : true) &&
+        (value.size() > 19 ? isValidDocuAlignBundleToken(value[19]) : true) &&
+        (value.size() > 20 ? isValidDocuAlignBundleToken(value[20]) : true) &&
+        (value.size() > 21 ? isValidDocuAlignBundleToken(value[21]) : true) &&
+        (value.size() > 22 ? isValidDocuAlignBundleToken(value[22]) : true) &&
+        (value.size() > 23 ? isValidDocuAlignBundleToken(value[23]) : true) &&
+        (value.size() > 24 ? isValidDocuAlignBundleToken(value[24]) : true);
+    }
+
+    function isValidDocuAlignPublicBundle(data) {
+      return data.keys().hasAll(['shareTokens', 'publishedAt']) &&
+        data.keys().hasOnly(['bundleName', 'shareTokens', 'publishedAt']) &&
+        (!('bundleName' in data) ||
+          data.bundleName == null ||
+          (data.bundleName is string && data.bundleName.size() <= 200)) &&
+        isValidDocuAlignBundleTokens(data.shareTokens) &&
+        (data.publishedAt == request.time || data.publishedAt is timestamp);
+    }
+
+    match /docuAlignPublicBundles/{bundleToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isDocuAlignStaff() &&
+        bundleToken.matches('^[A-Za-z0-9]{32}$') &&
+        isValidDocuAlignPublicBundle(request.resource.data);
+      // Bundles are immutable snapshots; revoking a link means deleting it.
       allow update: if false;
       allow delete: if isDocuAlignStaff();
     }
