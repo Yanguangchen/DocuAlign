@@ -26,12 +26,18 @@ vi.mock("./lib/reports.js", () => ({
 
 const SHARE_TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
 const SHARE_URL = `https://example.com/view.html?share=${SHARE_TOKEN}`;
+const BUNDLE_TOKEN = "Bb3dEfGh1JkLmNoPqRsTuVwXyZ012345";
+const BUNDLE_URL = `https://example.com/view.html?bundle=${BUNDLE_TOKEN}`;
 const mockPublishReport = vi.fn();
 const mockBuildPublicUrl = vi.fn(() => SHARE_URL);
+const mockPublishBundle = vi.fn();
+const mockBuildBundleUrl = vi.fn(() => BUNDLE_URL);
 
 vi.mock("./lib/share.js", () => ({
   publishReport: (...args) => mockPublishReport(...args),
   buildPublicUrl: (...args) => mockBuildPublicUrl(...args),
+  publishBundle: (...args) => mockPublishBundle(...args),
+  buildBundleUrl: (...args) => mockBuildBundleUrl(...args),
 }));
 
 describe("dashboard module", () => {
@@ -46,6 +52,11 @@ describe("dashboard module", () => {
       <div id="dashboard-status"></div>
       <ul id="report-grid"></ul>
       <span id="result-count"></span>
+      <section id="bundle-bar" hidden>
+        <span id="bundle-count"></span>
+        <button id="bundle-create" type="button">Create group link</button>
+        <p id="bundle-link" hidden></p>
+      </section>
     `;
   });
 
@@ -377,6 +388,188 @@ describe("dashboard module", () => {
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 15));
       expect(mockPublishReport).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("group links (bundles)", () => {
+    async function renderReports(reports) {
+      mockFetchReports.mockResolvedValueOnce(reports);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-bundle" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    function toggle(reportId, checked = true) {
+      const box = document.querySelector(`.bundle-checkbox[data-report-id="${reportId}"]`);
+      box.checked = checked;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      return box;
+    }
+
+    const twoReports = [
+      { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      { id: "doc-2", reportName: "Report 2", matchFilter: true },
+    ];
+
+    it("renders a group checkbox only on saved report cards", async () => {
+      const { reportCard } = await import("./dashboard.js");
+      expect(reportCard({ id: "doc-1" })).toContain("bundle-checkbox");
+      expect(reportCard({ reportName: "unsaved" })).not.toContain("bundle-checkbox");
+    });
+
+    it("shows the bundle bar with a count while reports are selected", async () => {
+      await renderReports(twoReports);
+      const bar = document.querySelector("#bundle-bar");
+      expect(bar.hidden).toBe(true);
+
+      toggle("doc-1");
+      expect(bar.hidden).toBe(false);
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+
+      toggle("doc-2");
+      expect(document.querySelector("#bundle-count").textContent).toBe("2 reports selected");
+
+      toggle("doc-1", false);
+      toggle("doc-2", false);
+      expect(bar.hidden).toBe(true);
+    });
+
+    it("publishes the selected reports as one group link on click", async () => {
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+      toggle("doc-2");
+
+      const button = document.querySelector("#bundle-create");
+      button.click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishBundle).toHaveBeenCalledWith(expect.anything(), [
+        expect.objectContaining({ id: "doc-1" }),
+        expect.objectContaining({ id: "doc-2" }),
+      ]);
+      expect(mockBuildBundleUrl).toHaveBeenCalledWith(BUNDLE_TOKEN);
+
+      const link = document.querySelector("#bundle-link a");
+      expect(link.getAttribute("href")).toBe(BUNDLE_URL);
+      expect(link.textContent).toBe(BUNDLE_URL);
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toContain("created");
+    });
+
+    it("copies the group URL to the clipboard when available", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(writeText).toHaveBeenCalledWith(BUNDLE_URL);
+      delete navigator.clipboard;
+    });
+
+    it("still shows the group link without a clipboard or when the copy fails", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: undefined,
+        configurable: true,
+      });
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(document.querySelector("#bundle-link a").getAttribute("href")).toBe(BUNDLE_URL);
+
+      const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      toggle("doc-2");
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(document.querySelector("#bundle-create").textContent).toContain("created");
+      delete navigator.clipboard;
+    });
+
+    it("ignores change events that are not from a group checkbox", async () => {
+      await renderReports(twoReports);
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new Event("change", { bubbles: true }));
+      expect(document.querySelector("#bundle-bar").hidden).toBe(true);
+    });
+
+    it("re-enables the group button after a new selection change", async () => {
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+
+      const button = document.querySelector("#bundle-create");
+      button.click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(button.disabled).toBe(true);
+
+      toggle("doc-2");
+      expect(button.disabled).toBe(false);
+      expect(button.textContent).toBe("Create group link");
+      expect(document.querySelector("#bundle-link").hidden).toBe(true);
+    });
+
+    it("reports group publish failures and allows retrying", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockPublishBundle.mockRejectedValueOnce(new Error("denied"));
+      await renderReports(twoReports);
+      toggle("doc-1");
+
+      const button = document.querySelector("#bundle-create");
+      button.click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(button.disabled).toBe(false);
+      expect(document.querySelector("#bundle-link").textContent).toBe(
+        "Could not create the group link. Try again.",
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Failed to publish group link",
+        expect.any(Error),
+        expect.objectContaining({ feature: "PublicShare", function: "handleBundleClick" }),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("keeps the selection across re-renders and drops filtered-out reports", async () => {
+      const { render } = await renderReports([
+        { id: "doc-1", reportName: "Report 1", matchFilter: true },
+        { id: "doc-2", reportName: "Report 2", matchFilter: false },
+      ]);
+      toggle("doc-1");
+      toggle("doc-2");
+      expect(document.querySelector("#bundle-count").textContent).toBe("2 reports selected");
+
+      document.querySelector("#filter-from").value = "2026-06-01";
+      render();
+
+      // doc-2 is filtered out of the grid, so only doc-1 stays selected.
+      expect(
+        document.querySelector('.bundle-checkbox[data-report-id="doc-1"]').checked,
+      ).toBe(true);
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+    });
+
+    it("ignores group clicks when nothing is selected", async () => {
+      await renderReports(twoReports);
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(mockPublishBundle).not.toHaveBeenCalled();
     });
   });
 

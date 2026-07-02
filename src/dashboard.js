@@ -7,7 +7,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { fetchReports, filterReportsByDate } from "./lib/reports.js";
-import { buildPublicUrl, publishReport } from "./lib/share.js";
+import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
 
 const filterForm = document.querySelector("#date-filter");
 const fromInput = document.querySelector("#filter-from");
@@ -15,9 +15,15 @@ const toInput = document.querySelector("#filter-to");
 const status = document.querySelector("#dashboard-status");
 const grid = document.querySelector("#report-grid");
 const resultCount = document.querySelector("#result-count");
+const bundleBar = document.querySelector("#bundle-bar");
+const bundleCount = document.querySelector("#bundle-count");
+const bundleCreate = document.querySelector("#bundle-create");
+const bundleLink = document.querySelector("#bundle-link");
 
 let allReports = [];
 let loadedForUser = null;
+// Report ids ticked for grouping into one link; survives re-renders.
+const bundleSelection = new Set();
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -65,6 +71,14 @@ export function reportCard(report) {
         <button class="share-button" type="button" data-report-id="${escapeHtml(report.id)}">
           Create public link
         </button>
+        <label class="bundle-select">
+          <input
+            type="checkbox"
+            class="bundle-checkbox"
+            data-report-id="${escapeHtml(report.id)}"
+          />
+          Add to group link
+        </label>
         <p class="share-link" aria-live="polite" hidden></p>
       </div>
     `
@@ -84,6 +98,74 @@ export function reportCard(report) {
       ${share}
     </li>
   `;
+}
+
+// Reflect the current group selection in the bundle bar. Any selection change
+// re-arms the create button and hides a previously produced link, since the
+// selection it referred to has changed.
+export function updateBundleBar() {
+  const count = bundleSelection.size;
+  bundleBar.hidden = count === 0;
+  bundleCount.textContent = `${count} ${count === 1 ? "report" : "reports"} selected`;
+  bundleCreate.disabled = false;
+  bundleCreate.textContent = "Create group link";
+  bundleLink.hidden = true;
+}
+
+// Re-rendering rebuilds the card DOM, so restore each checkbox from the
+// selection set and drop ids whose cards are no longer in the grid (e.g.
+// filtered out by the date range).
+function syncBundleSelection() {
+  const boxes = [...grid.querySelectorAll(".bundle-checkbox")];
+  const visible = new Set(boxes.map((box) => box.dataset.reportId));
+  for (const id of bundleSelection) {
+    if (!visible.has(id)) bundleSelection.delete(id);
+  }
+  for (const box of boxes) {
+    box.checked = bundleSelection.has(box.dataset.reportId);
+  }
+  updateBundleBar();
+}
+
+// Publish every selected report behind one group URL: each report becomes an
+// ordinary public share, and the bundle document ties their tokens together
+// so the customer sees all grouped PDF exports on a single page.
+export async function handleBundleClick() {
+  const reports = allReports.filter((report) => bundleSelection.has(report.id));
+  if (reports.length === 0) return;
+
+  bundleCreate.disabled = true;
+
+  try {
+    const token = await publishBundle(db, reports);
+    const url = buildBundleUrl(token);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener";
+    anchor.textContent = url;
+    bundleLink.replaceChildren(anchor);
+    bundleLink.hidden = false;
+    bundleCreate.textContent = "Group link created";
+
+    if (navigator.clipboard?.writeText) {
+      // Best effort: surfacing the link matters, the copy is a convenience.
+      await navigator.clipboard.writeText(url).catch(() => {});
+    }
+  } catch (error) {
+    bundleCreate.disabled = false;
+    bundleLink.textContent = "Could not create the group link. Try again.";
+    bundleLink.hidden = false;
+    console.error("[DocuAlign] Failed to publish group link", error, {
+      feature: "PublicShare",
+      function: "handleBundleClick",
+      operation: "firestore.setDoc",
+      collection: "docuAlignPublicBundles",
+      safeIdentifier: `selection:${reports.length}`,
+      category: error?.code || "DatabaseWriteFailure",
+    });
+  }
 }
 
 // Publish the clicked report as a public capability URL and surface the link
@@ -160,6 +242,7 @@ export function render() {
     ? `${filtered.length} of ${allReports.length} reports`
     : `${allReports.length} ${allReports.length === 1 ? "report" : "reports"}`;
   grid.innerHTML = filtered.map(reportCard).join("");
+  syncBundleSelection();
   setStatus("");
 }
 
@@ -190,6 +273,19 @@ grid.addEventListener("click", (event) => {
   const button = event.target.closest(".share-button");
   if (button) handleShareClick(button);
 });
+
+grid.addEventListener("change", (event) => {
+  const box = event.target.closest(".bundle-checkbox");
+  if (!box) return;
+  if (box.checked) {
+    bundleSelection.add(box.dataset.reportId);
+  } else {
+    bundleSelection.delete(box.dataset.reportId);
+  }
+  updateBundleBar();
+});
+
+bundleCreate.addEventListener("click", handleBundleClick);
 
 filterForm.addEventListener("input", render);
 filterForm.addEventListener("reset", () => {

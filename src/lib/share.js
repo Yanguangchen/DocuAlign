@@ -11,6 +11,15 @@ import { toDate } from "./reports.js";
 
 export const PUBLIC_SHARES_COLLECTION = "docuAlignPublicShares";
 
+// Grouped share links ("bundles"): one capability token exposing several
+// report snapshots at once, so a customer opens a single URL and sees every
+// PDF export grouped for them. Same security model as single shares.
+export const PUBLIC_BUNDLES_COLLECTION = "docuAlignPublicBundles";
+
+// Upper bound on reports per bundle; mirrored by the Firestore rules so an
+// oversized group is rejected on both sides of the trust boundary.
+export const MAX_BUNDLE_REPORTS = 25;
+
 // The PDF output asset the public viewer serves for a shared report. Relative so
 // it resolves against the deployed origin (see the dual asset directory contract).
 export const PUBLIC_PDF_PATH = "SampleDocuments/SampleOutput.pdf";
@@ -71,6 +80,21 @@ export function buildPublicUrl(token, baseUrl = globalThis.location?.href) {
 }
 
 /**
+ * Build the public viewer URL for a bundle token.
+ * @param {string} token - A valid share token.
+ * @param {string} [baseUrl] - URL to resolve against; defaults to the current page.
+ * @returns {string} Absolute URL of the public viewer for this bundle.
+ */
+export function buildBundleUrl(token, baseUrl = globalThis.location?.href) {
+  if (!isValidShareToken(token)) {
+    throw new TypeError("A valid share token is required to build a bundle URL.");
+  }
+  const url = new URL("view.html", baseUrl);
+  url.search = `?bundle=${token}`;
+  return url.toString();
+}
+
+/**
  * Reduce a saved report to the fields that are safe to expose publicly.
  * Deliberately excludes createdBy (staff email) and any unknown fields.
  * @param {Object} report - A saved report as returned by fetchReports.
@@ -103,6 +127,69 @@ export async function publishReport(database, report) {
     publishedAt: serverTimestamp(),
   });
   return token;
+}
+
+/**
+ * Publish a group of saved reports as one public bundle URL. Each report is
+ * published as an ordinary single share first, and the bundle document only
+ * stores the resulting share tokens. This keeps every grouped report
+ * individually revocable and keeps the bundle rules cheap to evaluate
+ * (Firestore rules cap each evaluation at 1000 expressions, which embedded
+ * per-report snapshots would exceed).
+ * @param {Object} database - Firestore database instance.
+ * @param {Array<Object>} reports - Saved reports to group (1..MAX_BUNDLE_REPORTS).
+ * @param {{ name?: string }} [options] - Optional customer-facing bundle title.
+ * @returns {Promise<string>} The share token backing the public bundle URL.
+ */
+export async function publishBundle(database, reports, { name } = {}) {
+  if (!Array.isArray(reports) || reports.length === 0) {
+    throw new TypeError("Select at least one saved report to group into a link.");
+  }
+  if (reports.length > MAX_BUNDLE_REPORTS) {
+    throw new TypeError(`A group link can hold at most ${MAX_BUNDLE_REPORTS} reports.`);
+  }
+  if (reports.some((report) => !report?.id)) {
+    throw new TypeError("Only reports saved to the cloud can be grouped into a link.");
+  }
+
+  const shareTokens = await Promise.all(
+    reports.map((report) => publishReport(database, report)),
+  );
+
+  const token = generateShareToken();
+  await setDoc(doc(database, PUBLIC_BUNDLES_COLLECTION, token), {
+    bundleName: name ?? null,
+    shareTokens,
+    publishedAt: serverTimestamp(),
+  });
+  return token;
+}
+
+/**
+ * Load one public bundle by token and resolve every linked share into its
+ * report snapshot. Invalid tokens and missing bundles resolve to null; shares
+ * that were revoked (deleted) since publication are silently dropped, and a
+ * malformed shareTokens field degrades to an empty report list.
+ * @param {Object} database - Firestore database instance.
+ * @param {unknown} token - Bundle token taken from the viewer URL.
+ * @returns {Promise<Object|null>} Bundle with `reports` resolved and a
+ *   normalised publishedAt Date.
+ */
+export async function fetchSharedBundle(database, token) {
+  if (!isValidShareToken(token)) return null;
+  const snapshot = await getDoc(doc(database, PUBLIC_BUNDLES_COLLECTION, token));
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data();
+  const shareTokens = Array.isArray(data.shareTokens) ? data.shareTokens : [];
+  const shares = await Promise.all(
+    shareTokens.map((shareToken) => fetchSharedReport(database, shareToken)),
+  );
+  return {
+    token,
+    bundleName: data.bundleName ?? null,
+    reports: shares.filter(Boolean),
+    publishedAt: toDate(data.publishedAt),
+  };
 }
 
 /**

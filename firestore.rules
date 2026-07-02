@@ -1462,6 +1462,73 @@ service cloud.firestore {
       allow delete: if isDocuAlignStaff();
     }
 
+    // Grouped share links ("bundles"). One capability token references a list
+    // of ordinary share tokens so a customer opens a single URL and sees every
+    // PDF export grouped for them. The bundle deliberately stores TOKENS, not
+    // embedded report snapshots: per-report content is already validated by
+    // the docuAlignPublicShares rules (PII allowlist included), each grouped
+    // report stays individually revocable, and validating 25 short strings
+    // stays far below the 1000-expressions-per-evaluation rules limit that an
+    // embedded-snapshot design was measured to exceed.
+    // Identical access contract to single shares: public get, no list,
+    // staff-only create/delete, immutable. Keep the 25 cap in sync with
+    // MAX_BUNDLE_REPORTS in src/lib/share.js.
+    function isValidDocuAlignBundleToken(value) {
+      return value is string && value.matches('^[A-Za-z0-9]{32}$');
+    }
+
+    function isValidDocuAlignBundleTokens(value) {
+      return value is list &&
+        value.size() >= 1 &&
+        value.size() <= 25 &&
+        (value.size() > 0 ? isValidDocuAlignBundleToken(value[0]) : true) &&
+        (value.size() > 1 ? isValidDocuAlignBundleToken(value[1]) : true) &&
+        (value.size() > 2 ? isValidDocuAlignBundleToken(value[2]) : true) &&
+        (value.size() > 3 ? isValidDocuAlignBundleToken(value[3]) : true) &&
+        (value.size() > 4 ? isValidDocuAlignBundleToken(value[4]) : true) &&
+        (value.size() > 5 ? isValidDocuAlignBundleToken(value[5]) : true) &&
+        (value.size() > 6 ? isValidDocuAlignBundleToken(value[6]) : true) &&
+        (value.size() > 7 ? isValidDocuAlignBundleToken(value[7]) : true) &&
+        (value.size() > 8 ? isValidDocuAlignBundleToken(value[8]) : true) &&
+        (value.size() > 9 ? isValidDocuAlignBundleToken(value[9]) : true) &&
+        (value.size() > 10 ? isValidDocuAlignBundleToken(value[10]) : true) &&
+        (value.size() > 11 ? isValidDocuAlignBundleToken(value[11]) : true) &&
+        (value.size() > 12 ? isValidDocuAlignBundleToken(value[12]) : true) &&
+        (value.size() > 13 ? isValidDocuAlignBundleToken(value[13]) : true) &&
+        (value.size() > 14 ? isValidDocuAlignBundleToken(value[14]) : true) &&
+        (value.size() > 15 ? isValidDocuAlignBundleToken(value[15]) : true) &&
+        (value.size() > 16 ? isValidDocuAlignBundleToken(value[16]) : true) &&
+        (value.size() > 17 ? isValidDocuAlignBundleToken(value[17]) : true) &&
+        (value.size() > 18 ? isValidDocuAlignBundleToken(value[18]) : true) &&
+        (value.size() > 19 ? isValidDocuAlignBundleToken(value[19]) : true) &&
+        (value.size() > 20 ? isValidDocuAlignBundleToken(value[20]) : true) &&
+        (value.size() > 21 ? isValidDocuAlignBundleToken(value[21]) : true) &&
+        (value.size() > 22 ? isValidDocuAlignBundleToken(value[22]) : true) &&
+        (value.size() > 23 ? isValidDocuAlignBundleToken(value[23]) : true) &&
+        (value.size() > 24 ? isValidDocuAlignBundleToken(value[24]) : true);
+    }
+
+    function isValidDocuAlignPublicBundle(data) {
+      return data.keys().hasAll(['shareTokens', 'publishedAt']) &&
+        data.keys().hasOnly(['bundleName', 'shareTokens', 'publishedAt']) &&
+        (!('bundleName' in data) ||
+          data.bundleName == null ||
+          (data.bundleName is string && data.bundleName.size() <= 200)) &&
+        isValidDocuAlignBundleTokens(data.shareTokens) &&
+        (data.publishedAt == request.time || data.publishedAt is timestamp);
+    }
+
+    match /docuAlignPublicBundles/{bundleToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isDocuAlignStaff() &&
+        bundleToken.matches('^[A-Za-z0-9]{32}$') &&
+        isValidDocuAlignPublicBundle(request.resource.data);
+      // Bundles are immutable snapshots; revoking a link means deleting it.
+      allow update: if false;
+      allow delete: if isDocuAlignStaff();
+    }
+
     // Default deny everything else.
     match /{document=**} {
       allow read, write: if false;

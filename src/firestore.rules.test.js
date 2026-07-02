@@ -205,4 +205,127 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       await assertFails(deleteDoc(doc(context.firestore(), SHARES, TOKEN)));
     });
   });
+
+  describe("docuAlignPublicBundles (grouped share links)", () => {
+    const BUNDLES = "docuAlignPublicBundles";
+    const TOKEN = "Bb3dEfGh1JkLmNoPqRsTuVwXyZ012345";
+
+    function shareTokenFor(index) {
+      // Deterministic, well-formed 32-char alphanumeric share tokens.
+      return `S${String(index).padStart(3, "0")}EfGh1JkLmNoPqRsTuVwXyZ012345`;
+    }
+
+    function bundlePayload(overrides = {}) {
+      return {
+        bundleName: "Customer pack",
+        shareTokens: [shareTokenFor(1), shareTokenFor(2)],
+        publishedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function staffContext() {
+      return testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+    }
+
+    function seedBundle() {
+      return testEnvironment.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload());
+      });
+    }
+
+    it("allows anyone, even unauthenticated, to get a bundle by its token", async () => {
+      await seedBundle();
+      const context = testEnvironment.unauthenticatedContext();
+      await assertSucceeds(getDoc(doc(context.firestore(), BUNDLES, TOKEN)));
+    });
+
+    it("denies listing bundles so tokens cannot be enumerated", async () => {
+      await seedBundle();
+      const anonymous = testEnvironment.unauthenticatedContext();
+      await assertFails(getDocs(collection(anonymous.firestore(), BUNDLES)));
+      await assertFails(getDocs(collection(staffContext().firestore(), BUNDLES)));
+    });
+
+    it("allows approved staff to publish a valid bundle up to the cap", async () => {
+      const context = staffContext();
+      await assertSucceeds(
+        setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload()),
+      );
+
+      const fullPayload = bundlePayload({
+        shareTokens: Array.from({ length: 25 }, (_, i) => shareTokenFor(i)),
+      });
+      const fullToken = "Cc3dEfGh1JkLmNoPqRsTuVwXyZ012345";
+      await assertSucceeds(
+        setDoc(doc(context.firestore(), BUNDLES, fullToken), fullPayload),
+      );
+    });
+
+    it("denies bundles that are empty or above the 25 report cap", async () => {
+      const context = staffContext();
+      await assertFails(
+        setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload({ shareTokens: [] })),
+      );
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), BUNDLES, TOKEN),
+          bundlePayload({
+            shareTokens: Array.from({ length: 26 }, (_, i) => shareTokenFor(i)),
+          }),
+        ),
+      );
+    });
+
+    it("denies bundles with malformed member tokens or extra fields", async () => {
+      const context = staffContext();
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), BUNDLES, TOKEN),
+          bundlePayload({ shareTokens: [shareTokenFor(1), "guessable"] }),
+        ),
+      );
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), BUNDLES, TOKEN),
+          bundlePayload({ createdBy: "staff@rakmat.com.sg" }),
+        ),
+      );
+    });
+
+    it("denies publishing for outsiders and under malformed tokens", async () => {
+      const anonymous = testEnvironment.unauthenticatedContext();
+      await assertFails(
+        setDoc(doc(anonymous.firestore(), BUNDLES, TOKEN), bundlePayload()),
+      );
+
+      const outsider = testEnvironment.authenticatedContext("outsider", {
+        email: "outside@example.com",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(doc(outsider.firestore(), BUNDLES, TOKEN), bundlePayload()),
+      );
+
+      await assertFails(
+        setDoc(doc(staffContext().firestore(), BUNDLES, "guessable"), bundlePayload()),
+      );
+    });
+
+    it("keeps bundles immutable, while staff can revoke them", async () => {
+      await seedBundle();
+      const context = staffContext();
+      await assertFails(
+        updateDoc(doc(context.firestore(), BUNDLES, TOKEN), { bundleName: "edited" }),
+      );
+      await assertSucceeds(deleteDoc(doc(context.firestore(), BUNDLES, TOKEN)));
+
+      await seedBundle();
+      const anonymous = testEnvironment.unauthenticatedContext();
+      await assertFails(deleteDoc(doc(anonymous.firestore(), BUNDLES, TOKEN)));
+    });
+  });
 });
