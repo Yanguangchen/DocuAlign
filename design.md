@@ -391,7 +391,7 @@ Staff can also group several saved reports behind one URL (`view.html?bundle=<to
 
 Storing tokens instead of embedded snapshots is deliberate:
 
-1. **Rules evaluation budget.** Firestore caps each rules evaluation at 1000 expressions; validating 25 embedded per-report snapshots was measured (against the emulator) to exceed it, while validating 25 token strings is cheap.
+1. **Rules evaluation budget.** Firestore caps each rules evaluation at 1000 expressions; validating 25 embedded per-report snapshots was measured (against the emulator) to exceed it, while validating 25 token strings is cheap. See **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** for the full writeup of this limit, how to recognize it, and other incidents in this codebase.
 2. **Per-report revocation.** Deleting one share document removes that report from every group link referencing it; the viewer silently drops revoked members.
 3. **Single validation boundary.** Report content is validated (PII allowlist included) only by the `docuAlignPublicShares` rules — the bundle never duplicates report data that could drift or leak.
 
