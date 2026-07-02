@@ -5,3 +5,4 @@ npm-debug.log*
 firestore-debug.log
 .firebase/
 .vercel
+.env*.local
