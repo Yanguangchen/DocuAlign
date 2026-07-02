@@ -428,7 +428,7 @@ service cloud.firestore {
         value.tier in ['active', 'archival'] &&
         (!('dataUrl' in value) ||
           (value.dataUrl is string &&
-            value.dataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,') &&
+            value.dataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,.*$') &&
             value.dataUrl.size() <= 950000));
     }
 
@@ -464,7 +464,7 @@ service cloud.firestore {
         strWithin(value.signerName, 1, 120) &&
         strWithin(value.signerContact, 1, 120) &&
         value.signatureDataUrl is string &&
-        value.signatureDataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,') &&
+        value.signatureDataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,.*$') &&
         value.signatureDataUrl.size() <= 300000 &&
         value.loggedBy is string &&
         value.loggedBy.size() <= 128 &&
@@ -497,29 +497,12 @@ service cloud.firestore {
         (value.size() > 0 ? isValidTeamMember(value[0]) : true);
     }
 
+    // Keep element validation bounded. Checking every slot can push a fully
+    // populated booking create over Firestore's 1,000-expression limit.
     function isValidTeamMemberIds(value) {
       return value is list &&
         value.size() <= 20 &&
-        (value.size() > 0 ? strWithin(value[0], 1, 128) : true) &&
-        (value.size() > 1 ? strWithin(value[1], 1, 128) : true) &&
-        (value.size() > 2 ? strWithin(value[2], 1, 128) : true) &&
-        (value.size() > 3 ? strWithin(value[3], 1, 128) : true) &&
-        (value.size() > 4 ? strWithin(value[4], 1, 128) : true) &&
-        (value.size() > 5 ? strWithin(value[5], 1, 128) : true) &&
-        (value.size() > 6 ? strWithin(value[6], 1, 128) : true) &&
-        (value.size() > 7 ? strWithin(value[7], 1, 128) : true) &&
-        (value.size() > 8 ? strWithin(value[8], 1, 128) : true) &&
-        (value.size() > 9 ? strWithin(value[9], 1, 128) : true) &&
-        (value.size() > 10 ? strWithin(value[10], 1, 128) : true) &&
-        (value.size() > 11 ? strWithin(value[11], 1, 128) : true) &&
-        (value.size() > 12 ? strWithin(value[12], 1, 128) : true) &&
-        (value.size() > 13 ? strWithin(value[13], 1, 128) : true) &&
-        (value.size() > 14 ? strWithin(value[14], 1, 128) : true) &&
-        (value.size() > 15 ? strWithin(value[15], 1, 128) : true) &&
-        (value.size() > 16 ? strWithin(value[16], 1, 128) : true) &&
-        (value.size() > 17 ? strWithin(value[17], 1, 128) : true) &&
-        (value.size() > 18 ? strWithin(value[18], 1, 128) : true) &&
-        (value.size() > 19 ? strWithin(value[19], 1, 128) : true);
+        (value.size() > 0 ? strWithin(value[0], 1, 128) : true);
     }
 
     function isValidBooking(data) {
@@ -541,6 +524,7 @@ service cloud.firestore {
           'ownerUserId',
           'companyName',
           'projectName',
+          'workers',
           'invoiceNumber',
           'reportNumber',
           'userName',
@@ -553,27 +537,20 @@ service cloud.firestore {
           'address',
           'coordinates',
           'photo',
-          'overruns',
           'jobNumber',
           'jobCompletionStatus',
-          'jobCompletionRecord',
           'status',
           'collisionStatus',
           'createdBy',
-          'updatedBy',
-          'cancelledBy',
-          'deletedBy',
           'createdAt',
-          'updatedAt',
-          'cancelledAt',
-          'deletedAt',
-          'cancellationReason'
+          'updatedAt'
         ]) &&
         (!('teamId' in data) ||
           (data.teamId is string && data.teamId.size() <= 64)) &&
         data.ownerUserId is string && data.ownerUserId.size() <= 128 &&
         optStrWithin(data, 'companyName', 200) &&
         strWithin(data.projectName, 1, 200) &&
+        optStrWithin(data, 'workers', 500) &&
         optStrWithin(data, 'invoiceNumber', 128) &&
         optStrWithin(data, 'reportNumber', 128) &&
         strWithin(data.userName, 1, 120) &&
@@ -584,24 +561,15 @@ service cloud.firestore {
         data.endTime is string &&
         data.status in ['active', 'cancelled', 'completed', 'archived'] &&
         data.collisionStatus in ['none', 'open', 'reviewed', 'resolved'] &&
-        data.createdBy is string &&
-        data.createdBy.size() <= 128 &&
         data.createdAt is string &&
         data.updatedAt is string &&
-        optStrWithin(data, 'updatedBy', 128) &&
-        optStrWithin(data, 'cancelledBy', 128) &&
-        optStrWithin(data, 'deletedBy', 128) &&
-        optStrWithin(data, 'cancelledAt', 64) &&
-        optStrWithin(data, 'deletedAt', 64) &&
-        optStrWithin(data, 'cancellationReason', 1000) &&
         (!('coordinates' in data) || isValidCoordinates(data.coordinates)) &&
         (!('jobCompletionStatus' in data) ||
           data.jobCompletionStatus in ['pending', 'completed', 'cancelled']) &&
         (!('photo' in data) || isValidPhoto(data.photo)) &&
-        (!('jobNumber' in data) || optStrWithin(data, 'jobNumber', 120)) &&
+        optStrWithin(data, 'jobNumber', 120) &&
         (!('teamMemberIds' in data) || isValidTeamMemberIds(data.teamMemberIds)) &&
-        (!('teamMembers' in data) || isValidTeamMembers(data.teamMembers)) &&
-        (!('overruns' in data) || isValidOverruns(data.overruns));
+        (!('teamMembers' in data) || isValidTeamMembers(data.teamMembers));
     }
 
     function ownerBaseFieldsUnchanged() {
@@ -623,6 +591,7 @@ service cloud.firestore {
           'contact',
           'companyName',
           'projectName',
+          'workers',
           'details',
           'teamMemberIds',
           'teamMembers',
@@ -642,6 +611,7 @@ service cloud.firestore {
         strWithin(request.resource.data.contact, 1, 200) &&
         optStrWithin(request.resource.data, 'companyName', 200) &&
         optStrWithin(request.resource.data, 'projectName', 200) &&
+        optStrWithin(request.resource.data, 'workers', 500) &&
         strWithin(request.resource.data.details, 1, 2000) &&
         request.resource.data.startTime is string &&
         request.resource.data.endTime is string &&
@@ -738,6 +708,7 @@ service cloud.firestore {
         'contact',
         'companyName',
         'projectName',
+        'workers',
         'invoiceNumber',
         'reportNumber',
         'details',
@@ -791,6 +762,8 @@ service cloud.firestore {
           optStrWithin(request.resource.data, 'companyName', 200)) &&
         (!bookingChanged('projectName') ||
           optStrWithin(request.resource.data, 'projectName', 200)) &&
+        (!bookingChanged('workers') ||
+          optStrWithin(request.resource.data, 'workers', 500)) &&
         (!bookingChanged('invoiceNumber') ||
           optStrWithin(request.resource.data, 'invoiceNumber', 128)) &&
         (!bookingChanged('reportNumber') ||
@@ -939,21 +912,21 @@ service cloud.firestore {
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     // CUBESYNC-ONLY RULES
     //
     // NEVER edit the WorkGrid rules above for CubeSync changes.
@@ -1471,17 +1444,17 @@ service cloud.firestore {
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     // DOCUALIGN / RAK REPORT PARSER RULES
     // Note: Shares the same database instance and firestore.rules file with WorkGrid & CubeSync.
     // Keep all DocuAlign-specific collection rules inside this dedicated block.
