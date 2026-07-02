@@ -59,6 +59,17 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
     await assertSucceeds(deleteDoc(report));
   });
 
+  it("grants access to emails newly added to the shared CubeSync allowlist", async () => {
+    const context = testEnvironment.authenticatedContext("new-staff", {
+      email: "webwizardssg@gmail.com",
+      email_verified: true,
+    });
+    const report = doc(context.firestore(), "docuAlignReports", "report-new");
+
+    await assertSucceeds(setDoc(report, { status: "draft" }));
+    await assertSucceeds(getDoc(report));
+  });
+
   it("denies an authenticated user outside the CubeSync allowlist", async () => {
     const context = testEnvironment.authenticatedContext("outside-user", {
       email: "outside@example.com",
