@@ -7,6 +7,8 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   getDocs,
   orderBy,
   query,
@@ -64,6 +66,15 @@ export function saveReport(database, report) {
     ...report,
     createdAt: serverTimestamp(),
   });
+}
+
+// Permanently delete one saved form by its Firestore document id. The id is
+// required: deleting against an empty path would target the collection itself.
+export function deleteReport(database, reportId) {
+  if (!reportId) {
+    throw new TypeError("A report id is required to delete a saved report.");
+  }
+  return deleteDoc(doc(database, SAVED_REPORTS_COLLECTION, reportId));
 }
 
 // Load all saved forms, newest first, with createdAt normalised to a Date.

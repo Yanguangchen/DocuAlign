@@ -19,9 +19,12 @@ const mockFilterReportsByDate = vi.fn((reports, range) => {
   return reports.filter((r) => r.matchFilter);
 });
 
+const mockDeleteReport = vi.fn();
+
 vi.mock("./lib/reports.js", () => ({
   fetchReports: (...args) => mockFetchReports(...args),
   filterReportsByDate: (...args) => mockFilterReportsByDate(...args),
+  deleteReport: (...args) => mockDeleteReport(...args),
 }));
 
 const SHARE_TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
@@ -570,6 +573,105 @@ describe("dashboard module", () => {
       document.querySelector("#bundle-create").click();
       await new Promise((r) => setTimeout(r, 15));
       expect(mockPublishBundle).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("delete report", () => {
+    async function renderReports(reports) {
+      mockFetchReports.mockResolvedValueOnce(reports);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-delete" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    const twoReports = [
+      { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      { id: "doc-2", reportName: "Report 2", matchFilter: true },
+    ];
+
+    it("renders a delete button only on saved report cards", async () => {
+      const { reportCard } = await import("./dashboard.js");
+      const saved = reportCard({ id: "doc-1", reportName: "Report 1" });
+      expect(saved).toContain("delete-button");
+      expect(saved).toContain('data-report-id="doc-1"');
+      expect(reportCard({ reportName: "unsaved" })).not.toContain("delete-button");
+    });
+
+    it("arms the delete button on the first click without deleting", async () => {
+      await renderReports(twoReports);
+      const button = document.querySelector(".delete-button");
+
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockDeleteReport).not.toHaveBeenCalled();
+      expect(button.textContent).toContain("Confirm");
+      expect(button.dataset.armed).toBe("true");
+    });
+
+    it("deletes the report on the second (confirming) click and re-renders", async () => {
+      mockDeleteReport.mockResolvedValueOnce(undefined);
+      await renderReports(twoReports);
+      const button = document.querySelector(".delete-button");
+
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockDeleteReport).toHaveBeenCalledWith(expect.anything(), "doc-1");
+      // The deleted card is gone; the other report remains.
+      const remaining = [...document.querySelectorAll(".delete-button")].map(
+        (b) => b.dataset.reportId,
+      );
+      expect(remaining).toEqual(["doc-2"]);
+      expect(document.querySelector("#result-count").textContent).toBe("1 report");
+    });
+
+    it("re-enables and reports failures on delete error, keeping the card", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockDeleteReport.mockRejectedValueOnce(new Error("denied"));
+      await renderReports(twoReports);
+      const button = document.querySelector(".delete-button");
+
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(button.disabled).toBe(false);
+      expect(button.dataset.armed).toBe("false");
+      expect(document.querySelectorAll(".delete-button")).toHaveLength(2);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Failed to delete report",
+        expect.any(Error),
+        expect.objectContaining({ feature: "Dashboard", function: "handleDeleteClick" }),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("ignores delete clicks for reports that are no longer loaded", async () => {
+      await renderReports(twoReports);
+      const button = document.querySelector(".delete-button");
+      button.dataset.reportId = "gone";
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+      expect(mockDeleteReport).not.toHaveBeenCalled();
+    });
+
+    it("drops a deleted report from the group selection", async () => {
+      mockDeleteReport.mockResolvedValueOnce(undefined);
+      const { handleDeleteClick } = await renderReports(twoReports);
+
+      const box = document.querySelector('.bundle-checkbox[data-report-id="doc-1"]');
+      box.checked = true;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+
+      const button = document.querySelector('.delete-button[data-report-id="doc-1"]');
+      await handleDeleteClick(button); // arm
+      await handleDeleteClick(button); // confirm
+
+      expect(document.querySelector("#bundle-bar").hidden).toBe(true);
     });
   });
 

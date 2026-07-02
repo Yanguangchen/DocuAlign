@@ -6,7 +6,7 @@
  */
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
-import { fetchReports, filterReportsByDate } from "./lib/reports.js";
+import { deleteReport, fetchReports, filterReportsByDate } from "./lib/reports.js";
 import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
 
 const filterForm = document.querySelector("#date-filter");
@@ -80,6 +80,14 @@ export function reportCard(report) {
           Add to group link
         </label>
         <p class="share-link" aria-live="polite" hidden></p>
+        <button
+          class="delete-button"
+          type="button"
+          data-report-id="${escapeHtml(report.id)}"
+          data-armed="false"
+        >
+          Delete
+        </button>
       </div>
     `
     : "";
@@ -214,6 +222,43 @@ export async function handleShareClick(button) {
   }
 }
 
+// Permanently delete the clicked report. Deletion is destructive, so the button
+// is a two-step confirm (arm on the first click, delete on the second) rather
+// than a blocking browser confirm() dialog. On success the report is dropped
+// from local state, unselected from any group link, and the grid re-rendered.
+export async function handleDeleteClick(button) {
+  const id = button.dataset.reportId;
+  const report = allReports.find((entry) => entry.id === id);
+  if (!report) return;
+
+  if (button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    button.textContent = "Confirm delete";
+    return;
+  }
+
+  button.disabled = true;
+
+  try {
+    await deleteReport(db, id);
+    allReports = allReports.filter((entry) => entry.id !== id);
+    bundleSelection.delete(id);
+    render();
+  } catch (error) {
+    button.disabled = false;
+    button.dataset.armed = "false";
+    button.textContent = "Delete";
+    console.error("[DocuAlign] Failed to delete report", error, {
+      feature: "Dashboard",
+      function: "handleDeleteClick",
+      operation: "firestore.deleteDoc",
+      collection: "docuAlignReports",
+      safeIdentifier: id,
+      category: error?.code || "DatabaseDeleteFailure",
+    });
+  }
+}
+
 export function render() {
   const filtered = filterReportsByDate(allReports, {
     from: fromInput.value,
@@ -270,8 +315,13 @@ export async function loadReports(user) {
 }
 
 grid.addEventListener("click", (event) => {
-  const button = event.target.closest(".share-button");
-  if (button) handleShareClick(button);
+  const shareButton = event.target.closest(".share-button");
+  if (shareButton) {
+    handleShareClick(shareButton);
+    return;
+  }
+  const deleteButton = event.target.closest(".delete-button");
+  if (deleteButton) handleDeleteClick(deleteButton);
 });
 
 grid.addEventListener("change", (event) => {

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { filterReportsByDate, toDate, saveReport, fetchReports, SAVED_REPORTS_COLLECTION } from "./reports.js";
+import { filterReportsByDate, toDate, saveReport, fetchReports, deleteReport, SAVED_REPORTS_COLLECTION } from "./reports.js";
 import * as firestore from "firebase/firestore";
 
 vi.mock("firebase/firestore", () => ({
   addDoc: vi.fn(),
   collection: vi.fn((db, name) => ({ db, name })),
+  deleteDoc: vi.fn(),
+  doc: vi.fn((db, name, id) => ({ db, name, id })),
   getDocs: vi.fn(),
   orderBy: vi.fn((field, dir) => ({ field, dir })),
   query: vi.fn((coll, order) => ({ coll, order })),
@@ -106,6 +108,27 @@ describe("saveReport", () => {
       createdAt: "MOCK_TIMESTAMP"
     });
     expect(result).toEqual({ id: "doc-123" });
+  });
+});
+
+describe("deleteReport", () => {
+  it("deletes the report document by id from the docuAlignReports collection", async () => {
+    firestore.deleteDoc.mockResolvedValueOnce(undefined);
+    const dummyDb = {};
+    const result = await deleteReport(dummyDb, "doc-123");
+    expect(firestore.doc).toHaveBeenCalledWith(dummyDb, SAVED_REPORTS_COLLECTION, "doc-123");
+    expect(firestore.deleteDoc).toHaveBeenCalledWith({
+      db: dummyDb,
+      name: SAVED_REPORTS_COLLECTION,
+      id: "doc-123",
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it("throws when no report id is provided", () => {
+    firestore.deleteDoc.mockClear();
+    expect(() => deleteReport({}, "")).toThrow(TypeError);
+    expect(firestore.deleteDoc).not.toHaveBeenCalled();
   });
 });
 

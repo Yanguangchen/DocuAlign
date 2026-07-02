@@ -841,6 +841,35 @@ a:focus-visible {
   cursor: default;
 }
 
+/* Destructive action: styled like .share-button but in the accent colour so a
+   report deletion reads clearly as irreversible. Armed state (data-armed) fills
+   in to reinforce the second, confirming click. */
+.delete-button {
+  align-self: flex-start;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.delete-button:hover:not(:disabled),
+.delete-button[data-armed="true"] {
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.delete-button:disabled {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+
 .share-link {
   margin: 0;
   color: var(--muted);
