@@ -4,7 +4,15 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
 import { afterAll, afterEach, beforeAll, describe, it } from "vitest";
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST;
@@ -78,5 +86,112 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
 
     await assertFails(setDoc(report, { status: "draft" }));
     await assertFails(getDoc(report));
+  });
+
+  describe("docuAlignPublicShares (public share links)", () => {
+    const SHARES = "docuAlignPublicShares";
+    const TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
+
+    function sharePayload(overrides = {}) {
+      return {
+        reportId: "report-1",
+        reportName: "rak-report",
+        sourceFileName: "rak-report.xlsx",
+        status: "complete",
+        pdfUrl: "SampleDocuments/SampleOutput.pdf",
+        publishedAt: new Date(),
+        ...overrides,
+      };
+    }
+
+    function seedShare() {
+      return testEnvironment.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), SHARES, TOKEN), sharePayload());
+      });
+    }
+
+    it("allows anyone, even unauthenticated, to get a share by its token", async () => {
+      await seedShare();
+      const context = testEnvironment.unauthenticatedContext();
+      await assertSucceeds(getDoc(doc(context.firestore(), SHARES, TOKEN)));
+    });
+
+    it("denies listing the shares collection so tokens cannot be enumerated", async () => {
+      await seedShare();
+      const context = testEnvironment.unauthenticatedContext();
+      await assertFails(getDocs(collection(context.firestore(), SHARES)));
+
+      const staff = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(getDocs(collection(staff.firestore(), SHARES)));
+    });
+
+    it("allows approved staff to publish a valid share", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertSucceeds(
+        setDoc(doc(context.firestore(), SHARES, TOKEN), sharePayload()),
+      );
+    });
+
+    it("denies publishing for unauthenticated and non-allowlisted users", async () => {
+      const anonymous = testEnvironment.unauthenticatedContext();
+      await assertFails(
+        setDoc(doc(anonymous.firestore(), SHARES, TOKEN), sharePayload()),
+      );
+
+      const outsider = testEnvironment.authenticatedContext("outsider", {
+        email: "outside@example.com",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(doc(outsider.firestore(), SHARES, TOKEN), sharePayload()),
+      );
+    });
+
+    it("denies publishing under a malformed document token", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(doc(context.firestore(), SHARES, "guessable"), sharePayload()),
+      );
+    });
+
+    it("denies publishing extra fields such as staff emails", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({ createdBy: "staff@rakmat.com.sg" }),
+        ),
+      );
+    });
+
+    it("keeps published shares immutable, while staff can revoke them", async () => {
+      await seedShare();
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(
+        updateDoc(doc(context.firestore(), SHARES, TOKEN), { status: "edited" }),
+      );
+      await assertSucceeds(deleteDoc(doc(context.firestore(), SHARES, TOKEN)));
+    });
+
+    it("denies revocation by unauthenticated users", async () => {
+      await seedShare();
+      const context = testEnvironment.unauthenticatedContext();
+      await assertFails(deleteDoc(doc(context.firestore(), SHARES, TOKEN)));
+    });
   });
 });

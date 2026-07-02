@@ -12,8 +12,8 @@ This document specifies the critical behavioral, architectural, and quality rule
 
 When modifying or auditing `firestore.rules`:
 1. **NEVER** edit, delete, or reorder existing security rule blocks for `WorkGrid` (`/users`, `/teams`, `/bookings`, `/collisions`) or `CubeSync`.
-2. **ALWAYS** keep DocuAlign rules scoped strictly within the dedicated `match /docuAlignReports/{document=**}` block.
-3. Access to DocuAlign must use the shared `isCubeSyncStaff()` helper or `isDocuAlignStaff()` alias to ensure access matches verified CubeSync staff members.
+2. **ALWAYS** keep DocuAlign rules scoped strictly within the dedicated DocuAlign section: the `match /docuAlignReports/{document=**}` block and the `match /docuAlignPublicShares/{shareToken}` block.
+3. Access to DocuAlign must use the shared `isCubeSyncStaff()` helper or `isDocuAlignStaff()` alias to ensure access matches verified CubeSync staff members. The single exception is `docuAlignPublicShares`, whose capability-URL contract is deliberate: public `get`, denied `list`, staff-only `create`/`delete`, denied `update`, 32-character alphanumeric document IDs, and a strict non-PII payload allowlist (`isValidDocuAlignPublicShare`). Never widen this contract — in particular never allow `list`, never add staff emails or other PII to the payload allowlist, and never weaken the token ID pattern.
 4. Always run Firestore emulator unit tests (`npm run test:rules`) when making security rule changes if an emulator environment is available.
 
 ---
@@ -56,5 +56,6 @@ To support both environments without 404 file errors:
 When modifying any codebase file:
 1. **Run Linting:** Always verify zero lint warnings by running `npm run lint`.
 2. **Run Tests:** Ensure all unit tests pass with `npm test`.
-3. **Documentation Integrity:** Preserve all existing comments and docstrings. Add clear, professional file-level headers and JSDoc comments to newly added or modified modules.
-4. **No Console Spam:** Avoid leaving stray `console.log` debugging statements. Keep error logging structured (`console.error('[DocuAlign] ...', error)`).
+3. **Test-Driven Development & Coverage Baseline:** Develop features test-first (write the failing spec, then the implementation). The audited coverage baseline for `src/**` is 100% statements / branches / functions / lines (`npm run coverage`); do not regress it.
+4. **Documentation Integrity:** Preserve all existing comments and docstrings. Add clear, professional file-level headers and JSDoc comments to newly added or modified modules.
+5. **No Console Spam:** Avoid leaving stray `console.log` debugging statements. Keep error logging structured (`console.error('[DocuAlign] ...', error)`).

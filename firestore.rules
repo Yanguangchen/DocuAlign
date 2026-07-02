@@ -1394,6 +1394,49 @@ service cloud.firestore {
       allow read, write: if isDocuAlignStaff();
     }
 
+    // Public share links for saved reports. The document ID is an unguessable
+    // 32-character capability token generated client-side (src/lib/share.js);
+    // holding the full URL is the only way to reach a share. `get` is public by
+    // design so anyone with the link can read that ONE report snapshot and its
+    // PDF output. `list` stays closed so tokens can never be enumerated, and
+    // the payload allowlist keeps PII (e.g. staff emails) out of public reach.
+    function isValidDocuAlignPublicShare(data) {
+      return data.keys().hasAll([
+          'reportId',
+          'reportName',
+          'status',
+          'pdfUrl',
+          'publishedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'reportId',
+          'reportName',
+          'sourceFileName',
+          'status',
+          'pdfUrl',
+          'publishedAt'
+        ]) &&
+        strWithin(data.reportId, 1, 128) &&
+        strWithin(data.reportName, 1, 200) &&
+        (!('sourceFileName' in data) ||
+          data.sourceFileName == null ||
+          (data.sourceFileName is string && data.sourceFileName.size() <= 200)) &&
+        strWithin(data.status, 1, 40) &&
+        strWithin(data.pdfUrl, 1, 500) &&
+        (data.publishedAt == request.time || data.publishedAt is timestamp);
+    }
+
+    match /docuAlignPublicShares/{shareToken} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isDocuAlignStaff() &&
+        shareToken.matches('^[A-Za-z0-9]{32}$') &&
+        isValidDocuAlignPublicShare(request.resource.data);
+      // Shares are immutable snapshots; revoking a link means deleting it.
+      allow update: if false;
+      allow delete: if isDocuAlignStaff();
+    }
+
     // Default deny everything else.
     match /{document=**} {
       allow read, write: if false;

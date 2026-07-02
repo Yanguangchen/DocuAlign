@@ -87,6 +87,33 @@ describe("auth-gate module", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it("logs uid-scoped safe identifiers when the user has a uid", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { hasDocuAlignAccess } = await import("./auth-gate.js");
+
+    expect(await hasDocuAlignAccess({ emailVerified: false, uid: "u-1" })).toBe(false);
+    expect(warnSpy).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ safeIdentifier: "uid:u-1" })
+    );
+
+    mockGetDoc.mockRejectedValueOnce({ code: "permission-denied" });
+    expect(await hasDocuAlignAccess({ emailVerified: true, uid: "u-2" })).toBe(false);
+    expect(warnSpy).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ safeIdentifier: "uid:u-2" })
+    );
+
+    mockGetDoc.mockRejectedValueOnce(new Error("Fatal DB Error"));
+    await expect(hasDocuAlignAccess({ emailVerified: true, uid: "u-3" })).rejects.toThrow();
+    expect(errorSpy).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(Error),
+      expect.objectContaining({ safeIdentifier: "uid:u-3" })
+    );
+  });
+
   it("handles successful sign-in button click", async () => {
     mockSetPersistence.mockResolvedValueOnce();
     mockSignInWithPopup.mockResolvedValueOnce({});
@@ -204,5 +231,22 @@ describe("auth-gate module", () => {
       "Access could not be verified. Check your connection and try again."
     );
     expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("logs a uid-scoped identifier on verification failure for users with a uid", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetDoc.mockRejectedValueOnce(new Error("Network Error"));
+    mockSignOut.mockResolvedValueOnce();
+    await import("./auth-gate.js");
+    if (authStateCallback) {
+      authStateCallback({ emailVerified: true, email: "err@example.com", uid: "u-err" });
+    }
+
+    await new Promise((r) => setTimeout(r, 15));
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Verification failure during auth state change",
+      expect.any(Error),
+      expect.objectContaining({ safeIdentifier: "uid:u-err" })
+    );
   });
 });

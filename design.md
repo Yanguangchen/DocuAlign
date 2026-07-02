@@ -28,14 +28,17 @@ graph TD
     subgraph Client [Browser Environment]
         IndexPage["index.html (ETL / New Report UI)"]
         DashboardPage["dashboard.html (Saved Reports UI)"]
+        ViewPage["view.html (Public Share Viewer, no auth)"]
         AppShell["src/App.jsx (React Workspace Shell)"]
         Styles["src/styles.css (Design System)"]
         
         subgraph Logic Modules
             AuthGate["src/auth-gate.js (Session & Gatekeeper)"]
             SaveReport["src/save-report.js (Cloud Persistence Wiring)"]
-            DashboardLogic["src/dashboard.js (Grid & Date Filtering)"]
+            DashboardLogic["src/dashboard.js (Grid, Date Filtering & Share Links)"]
+            ViewLogic["src/view-report.js (Public Share Rendering)"]
             ReportsLib["src/lib/reports.js (Firestore CRUD & Filters)"]
+            ShareLib["src/lib/share.js (Capability Tokens & Public Shares)"]
             FirebaseLib["src/lib/firebase.js (Core SDK Initialization)"]
         end
     end
@@ -53,6 +56,7 @@ graph TD
             WorkGridNS["/users, /teams, /bookings (WorkGrid namespace)"]
             CubeSyncNS["/appConfig/access (Shared Staff Allowlist)"]
             DocuAlignNS["/docuAlignReports/{document=**} (DocuAlign namespace)"]
+            PublicSharesNS["/docuAlignPublicShares/{token} (Public get, no list)"]
         end
     end
 
@@ -60,10 +64,15 @@ graph TD
     IndexPage --> SaveReport
     DashboardPage --> AuthGate
     DashboardPage --> DashboardLogic
+    ViewPage --> ViewLogic
     SaveReport --> ReportsLib
     DashboardLogic --> ReportsLib
+    DashboardLogic --> ShareLib
+    ViewLogic --> ShareLib
     ReportsLib --> FirebaseLib
+    ShareLib --> FirebaseLib
     AuthGate --> FirebaseLib
+    ShareLib -. Publish / Public Get .-> PublicSharesNS
 
     IndexPage --> RootSample
     IndexPage --> PublicSample
@@ -78,6 +87,8 @@ graph TD
 * **`dashboard.html`**: Cloud dashboard enabling authenticated staff to browse historical reports, view metadata (source filename, creator, timestamp), and filter records dynamically by date range.
 * **`src/auth-gate.js`**: Enforces strict enterprise access control. Restricts UI access until a verified Google session passes an active Firestore probe against `docuAlignReports/access-probe`.
 * **`src/lib/reports.js`**: Pure domain library providing server-timestamped document creation (`saveReport`), descending ordered retrieval (`fetchReports`), and client-side date range filtering (`filterReportsByDate`).
+* **`view.html` / `src/view-report.js`**: Public, unauthenticated share viewer. Resolves the `share` capability token from the URL, loads exactly one published report snapshot, and links its PDF output through a scheme-restricted URL guard (`safePdfUrl`).
+* **`src/lib/share.js`**: Pure domain library for public share links: cryptographically random 32-character capability tokens (`generateShareToken`), viewer URL construction (`buildPublicUrl`), PII-free snapshot publication (`publishReport`), and token-validated retrieval (`fetchSharedReport`).
 * **`src/lib/firebase.js`**: Singleton initialization of Firebase App, Firestore, Auth, and Storage with HMR/test environment protection (`getApps().length`).
 
 ---
@@ -246,8 +257,19 @@ erDiagram
         number sort_order "Display sequence index"
     }
 
+    DOCUALIGN_PUBLIC_SHARES {
+        string token PK "32-char capability token (unguessable document ID)"
+        string reportId FK "Source docuAlignReports document ID"
+        string reportName "Public display title"
+        string sourceFileName "Original workbook filename (nullable)"
+        string status "Report status label"
+        string pdfUrl "Relative path of the PDF output asset"
+        timestamp publishedAt "Server timestamp at publication"
+    }
+
     APP_CONFIG_ACCESS ||--o{ USERS : authorizes
     APP_CONFIG_ACCESS ||--o{ DOCUALIGN_REPORTS : "gates access via isCubeSyncStaff()"
+    DOCUALIGN_REPORTS ||--o{ DOCUALIGN_PUBLIC_SHARES : "published as immutable public snapshot"
     DOCUALIGN_REPORTS ||--o{ PARTICLE_SIZE_ROWS : contains
     DOCUALIGN_REPORTS ||--o{ DIRECT_SHEAR_ROWS : contains
     DOCUALIGN_REPORTS ||--o{ METALLIC_ANALYSIS_ROWS : contains
@@ -292,6 +314,17 @@ service cloud.firestore {
     match /docuAlignReports/{document=**} {
       allow read, write: if isCubeSyncStaff();
     }
+
+    // DocuAlign Public Share Links (capability URLs)
+    match /docuAlignPublicShares/{shareToken} {
+      allow get: if true;      // token holder reads exactly one snapshot
+      allow list: if false;    // tokens can never be enumerated
+      allow create: if isCubeSyncStaff() &&
+        shareToken.matches('^[A-Za-z0-9]{32}$') &&
+        isValidDocuAlignPublicShare(request.resource.data);
+      allow update: if false;  // shares are immutable snapshots
+      allow delete: if isCubeSyncStaff(); // revocation
+    }
   }
 }
 ```
@@ -300,6 +333,35 @@ service cloud.firestore {
 When a user authenticates via Google OAuth, `src/auth-gate.js` performs a probe read against `docuAlignReports/access-probe`:
 1. If the user's email is present in `appConfig/access.allowedEmails` or hardcoded masters, Firestore allows the read. The application shell opens.
 2. If the read fails with `permission-denied`, the user is immediately logged out and shown an access rejection notice.
+
+### 5.3 Public Share Link (Capability URL) Architecture
+
+Staff can publish any saved report as a public, read-only share link from the dashboard. The design is a classic **capability URL**: possession of the full link is the only credential.
+
+```mermaid
+sequenceDiagram
+    participant Staff as Staff (dashboard.html)
+    participant Share as src/lib/share.js
+    participant FS as Firestore (docuAlignPublicShares)
+    participant Anyone as Anonymous visitor (view.html)
+
+    Staff->>Share: Click "Create public link" (publishReport)
+    Share->>Share: generateShareToken() — 32 chars via crypto.getRandomValues
+    Share->>FS: setDoc(/docuAlignPublicShares/{token}, sanitized snapshot)
+    FS-->>Staff: Public URL: view.html?share={token} (copied to clipboard)
+    Staff-->>Anyone: Shares the URL out of band
+    Anyone->>FS: getDoc(/docuAlignPublicShares/{token}) — unauthenticated
+    FS-->>Anyone: Snapshot (name, source, status, publishedAt, pdfUrl)
+    Anyone->>Anyone: Open PDF output via safePdfUrl(pdfUrl)
+```
+
+Security properties enforced by rules and domain code:
+
+1. **Unguessable tokens.** Document IDs are 32-character alphanumeric strings (~190 bits of entropy) generated with `crypto.getRandomValues` and rejection sampling; the rules reject creates under any other ID shape.
+2. **Get-only, never list.** Anonymous clients can `get` one document whose token they already know; `list` is denied for everyone, so tokens cannot be enumerated — each URL exposes exactly one report snapshot.
+3. **PII never leaves the staff namespace.** `toPublicReportPayload` strips `createdBy` (staff email) and all unknown fields, and the rules' `hasOnly` allowlist rejects any extra keys at the boundary.
+4. **Immutable snapshots, revocable links.** `update` is denied for all clients; staff revoke a link by deleting the share document, after which the viewer shows a "no longer available" notice.
+5. **Scheme-restricted PDF links.** The viewer refuses `javascript:`, `data:`, protocol-relative, and plain `http:` URLs in `pdfUrl`, falling back to the bundled report asset.
 
 ---
 
