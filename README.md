@@ -608,6 +608,7 @@ npx firebase-tools emulators:exec --only firestore --project demo-docualign \
 ## Architecture & System Documentation
 
 For detailed technical design specifications, UML diagrams, E/R diagrams, and developer guidelines, see:
+* **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** — Firestore's 1,000-expression-per-request rules evaluation cap: how it presents (identical error to a real permission denial), how to confirm it against the emulator, and the concrete incidents in this codebase (CubeSync batch edits, DocuAlign bundle design) that hit it.
 * **[design.md](./design.md)** — Complete architectural specification containing:
   - **UML System Architecture & Component Diagram**
   - **UML State Machine Diagram (ETL Pipeline)**

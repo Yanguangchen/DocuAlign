@@ -60,11 +60,12 @@ rules_version = '2';
 // The first appConfig/access write must be done with the Admin SDK script.
 // After that, listed master emails and admin users can maintain the list.
 // ===============================================================
-//
-// IMPORTANT CUBESYNC MAINTENANCE NOTE:
-// NEVER edit the WorkGrid rules below for CubeSync changes. WorkGrid is a
-// separate sensitive app. CubeSync rules must live only in the CUBESYNC-ONLY
-// RULES block near the bottom of this file, immediately before default deny.
+// IMPORTANT SHARED DATABASE & RULES MAINTENANCE NOTE:
+// This database instance is shared across multiple applications (WorkGrid,
+// CubeSync, and DocuAlign / RAK Report Parser). Consequently, all applications
+// share this single firestore.rules file.
+// NEVER edit or modify existing rules for WorkGrid or CubeSync when working on
+// DocuAlign. Each application's rules must remain isolated in dedicated blocks.
 // ===============================================================
 
 service cloud.firestore {
@@ -140,6 +141,10 @@ service cloud.firestore {
           'yanguangchen@outlook.com',
           'mushfiqsiddqiue@gmail.com',
           'desmond@rakmat.com.sg',
+          'florence@rakmat.com.sg',
+          'waibin@rakmat.com.sg',
+          'yuxin@rakmat.com.sg',
+          'shunee@rakmat.com.sg',
           'theresaongpohkuan@gmail.com',
           'theresa@rakmat.com.sg',
           'ken@rakmat.com.sg',
@@ -151,7 +156,6 @@ service cloud.firestore {
           'oakkar@rakmat.com.sg',
           'agga@rakmat.com.sg',
           'ma@rakmat.com.sg',
-          'yuxin@rakmat.com.sg',
           'khun@rakmat.com.sg',
           'yanguangchen@webwizardsg.com',
           'santofokir605@gmail.com',
@@ -159,12 +163,12 @@ service cloud.firestore {
           'nck@rakmat.com.sg',
           'nabiullahnabin@gmail.com',
           'amirkhan3273@gmail.com',
-          'Pradeeprajtfw595@gmail.com',
-          'Saifulmal90@gmail.com',
+          'pradeeprajtfw595@gmail.com',
+          'saifulmal90@gmail.com',
           'diaheard2@gmail.com',
           'balki221195@gmail.com',
           'mr8890085@gmail.com',
-          'Naythulin731@gmail.com',
+          'naythulin731@gmail.com',
           'tasinahamedshahadat03@gmail.com',
           'parbjitsingh718@gmil.com'
         ];
@@ -489,7 +493,8 @@ service cloud.firestore {
 
     function isValidTeamMembers(value) {
       return value is list &&
-        value.size() <= 20;
+        value.size() <= 20 &&
+        (value.size() > 0 ? isValidTeamMember(value[0]) : true);
     }
 
     function isValidTeamMemberIds(value) {
@@ -536,6 +541,8 @@ service cloud.firestore {
           'ownerUserId',
           'companyName',
           'projectName',
+          'invoiceNumber',
+          'reportNumber',
           'userName',
           'contact',
           'details',
@@ -549,25 +556,30 @@ service cloud.firestore {
           'overruns',
           'jobNumber',
           'jobCompletionStatus',
+          'jobCompletionRecord',
           'status',
           'collisionStatus',
           'createdBy',
           'updatedBy',
           'cancelledBy',
+          'deletedBy',
           'createdAt',
           'updatedAt',
           'cancelledAt',
+          'deletedAt',
           'cancellationReason'
         ]) &&
         (!('teamId' in data) ||
           (data.teamId is string && data.teamId.size() <= 64)) &&
         data.ownerUserId is string && data.ownerUserId.size() <= 128 &&
         optStrWithin(data, 'companyName', 200) &&
-        optStrWithin(data, 'projectName', 200) &&
+        strWithin(data.projectName, 1, 200) &&
+        optStrWithin(data, 'invoiceNumber', 128) &&
+        optStrWithin(data, 'reportNumber', 128) &&
         strWithin(data.userName, 1, 120) &&
         strWithin(data.contact, 1, 200) &&
         strWithin(data.details, 1, 2000) &&
-        optStrWithin(data, 'address', 500) &&
+        strWithin(data.address, 1, 500) &&
         data.startTime is string &&
         data.endTime is string &&
         data.status in ['active', 'cancelled', 'completed', 'archived'] &&
@@ -578,7 +590,9 @@ service cloud.firestore {
         data.updatedAt is string &&
         optStrWithin(data, 'updatedBy', 128) &&
         optStrWithin(data, 'cancelledBy', 128) &&
+        optStrWithin(data, 'deletedBy', 128) &&
         optStrWithin(data, 'cancelledAt', 64) &&
+        optStrWithin(data, 'deletedAt', 64) &&
         optStrWithin(data, 'cancellationReason', 1000) &&
         (!('coordinates' in data) || isValidCoordinates(data.coordinates)) &&
         (!('jobCompletionStatus' in data) ||
@@ -724,6 +738,8 @@ service cloud.firestore {
         'contact',
         'companyName',
         'projectName',
+        'invoiceNumber',
+        'reportNumber',
         'details',
         'teamMemberIds',
         'teamMembers',
@@ -735,11 +751,14 @@ service cloud.firestore {
         'overruns',
         'jobNumber',
         'jobCompletionStatus',
+        'jobCompletionRecord',
         'status',
         'collisionStatus',
         'updatedBy',
         'cancelledBy',
         'cancelledAt',
+        'deletedBy',
+        'deletedAt',
         'cancellationReason',
         'updatedAt'
       ]);
@@ -771,7 +790,19 @@ service cloud.firestore {
         (!bookingChanged('companyName') ||
           optStrWithin(request.resource.data, 'companyName', 200)) &&
         (!bookingChanged('projectName') ||
-          optStrWithin(request.resource.data, 'projectName', 200));
+          optStrWithin(request.resource.data, 'projectName', 200)) &&
+        (!bookingChanged('invoiceNumber') ||
+          optStrWithin(request.resource.data, 'invoiceNumber', 128)) &&
+        (!bookingChanged('reportNumber') ||
+          optStrWithin(request.resource.data, 'reportNumber', 128)) &&
+        (!bookingChanged('deletedBy') ||
+          optStrWithin(request.resource.data, 'deletedBy', 128)) &&
+        (!bookingChanged('deletedAt') ||
+          optStrWithin(request.resource.data, 'deletedAt', 64)) &&
+        (!bookingChanged('status') ||
+          request.resource.data.status != 'archived' ||
+          (request.resource.data.deletedBy == request.auth.uid &&
+            request.resource.data.deletedAt is string));
     }
 
     match /bookings/{bookingId} {
@@ -820,6 +851,69 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------
+    // WorkGrid number registries
+    // ---------------------------------------------------------------
+    function isValidManagedNumber(data) {
+      return data.keys().hasAll(['value', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['value', 'createdBy', 'createdAt', 'updatedAt']) &&
+        strWithin(data.value, 1, 128) &&
+        strWithin(data.createdBy, 1, 128) &&
+        data.createdAt is string &&
+        data.updatedAt is string;
+    }
+
+    match /invoiceNumbers/{numberId} {
+      allow read: if canWriteBookings();
+      allow create: if canWriteBookings() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        isValidManagedNumber(request.resource.data);
+      allow update: if canWriteBookings() &&
+        isValidManagedNumber(request.resource.data);
+      allow delete: if canWriteBookings();
+    }
+
+    match /reportNumbers/{numberId} {
+      allow read: if canWriteBookings();
+      allow create: if canWriteBookings() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.value.matches('^RPT-[0-9]{6,}$') &&
+        request.resource.data.keys().hasAll([
+          'value', 'sequence', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'value', 'sequence', 'createdBy', 'createdAt', 'updatedAt'
+        ]) &&
+        strWithin(request.resource.data.value, 1, 128) &&
+        strWithin(request.resource.data.createdBy, 1, 128) &&
+        request.resource.data.createdAt is string &&
+        request.resource.data.updatedAt is string &&
+        request.resource.data.sequence is int &&
+        request.resource.data.sequence > 0 &&
+        request.resource.data.sequence ==
+          getAfter(/databases/$(database)/documents/counters/reportNumbers).data.value;
+      allow update: if false;
+      allow delete: if canWriteBookings();
+    }
+
+    match /counters/reportNumbers {
+      allow read: if canWriteBookings();
+      allow create: if canWriteBookings() &&
+        request.resource.data.keys().hasAll(['value', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.keys().hasOnly(['value', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.value == 1 &&
+        request.resource.data.updatedAt is string &&
+        request.resource.data.updatedBy == request.auth.uid;
+      allow update: if canWriteBookings() &&
+        request.resource.data.keys().hasAll(['value', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.keys().hasOnly(['value', 'updatedAt', 'updatedBy']) &&
+        request.resource.data.value is int &&
+        request.resource.data.value == resource.data.value + 1 &&
+        request.resource.data.updatedAt is string &&
+        request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------
     // passwordChangeLogs/{logId}
     // Accountability trail for admin-set passwords. Written exclusively by the
     // server (Admin SDK, which bypasses these rules), so all client writes are
@@ -829,13 +923,37 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
- // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // CUBESYNC-ONLY RULES
     //
     // NEVER edit the WorkGrid rules above for CubeSync changes.
@@ -931,44 +1049,8 @@ service cloud.firestore {
         (value.size() > 7 ? isCubeDropdownField(value[7]) : true);
     }
 
-    function isValidExtraFieldEntry(val) {
-      return val is bool || val is number || (val is string && val.size() <= 500);
-    }
-
-    function isValidExtraFieldKey(k) {
-      return k is string && k.matches('^[a-z][a-zA-Z0-9_]{0,31}$');
-    }
-
-    function isValidExtraFieldsList(keys, vals) {
-      return (keys.size() > 0 ? (isValidExtraFieldKey(keys[0]) && isValidExtraFieldEntry(vals[0])) : true) &&
-        (keys.size() > 1 ? (isValidExtraFieldKey(keys[1]) && isValidExtraFieldEntry(vals[1])) : true) &&
-        (keys.size() > 2 ? (isValidExtraFieldKey(keys[2]) && isValidExtraFieldEntry(vals[2])) : true) &&
-        (keys.size() > 3 ? (isValidExtraFieldKey(keys[3]) && isValidExtraFieldEntry(vals[3])) : true) &&
-        (keys.size() > 4 ? (isValidExtraFieldKey(keys[4]) && isValidExtraFieldEntry(vals[4])) : true) &&
-        (keys.size() > 5 ? (isValidExtraFieldKey(keys[5]) && isValidExtraFieldEntry(vals[5])) : true) &&
-        (keys.size() > 6 ? (isValidExtraFieldKey(keys[6]) && isValidExtraFieldEntry(vals[6])) : true) &&
-        (keys.size() > 7 ? (isValidExtraFieldKey(keys[7]) && isValidExtraFieldEntry(vals[7])) : true) &&
-        (keys.size() > 8 ? (isValidExtraFieldKey(keys[8]) && isValidExtraFieldEntry(vals[8])) : true) &&
-        (keys.size() > 9 ? (isValidExtraFieldKey(keys[9]) && isValidExtraFieldEntry(vals[9])) : true) &&
-        (keys.size() > 10 ? (isValidExtraFieldKey(keys[10]) && isValidExtraFieldEntry(vals[10])) : true) &&
-        (keys.size() > 11 ? (isValidExtraFieldKey(keys[11]) && isValidExtraFieldEntry(vals[11])) : true) &&
-        (keys.size() > 12 ? (isValidExtraFieldKey(keys[12]) && isValidExtraFieldEntry(vals[12])) : true) &&
-        (keys.size() > 13 ? (isValidExtraFieldKey(keys[13]) && isValidExtraFieldEntry(vals[13])) : true) &&
-        (keys.size() > 14 ? (isValidExtraFieldKey(keys[14]) && isValidExtraFieldEntry(vals[14])) : true) &&
-        (keys.size() > 15 ? (isValidExtraFieldKey(keys[15]) && isValidExtraFieldEntry(vals[15])) : true) &&
-        (keys.size() > 16 ? (isValidExtraFieldKey(keys[16]) && isValidExtraFieldEntry(vals[16])) : true) &&
-        (keys.size() > 17 ? (isValidExtraFieldKey(keys[17]) && isValidExtraFieldEntry(vals[17])) : true) &&
-        (keys.size() > 18 ? (isValidExtraFieldKey(keys[18]) && isValidExtraFieldEntry(vals[18])) : true) &&
-        (keys.size() > 19 ? (isValidExtraFieldKey(keys[19]) && isValidExtraFieldEntry(vals[19])) : true) &&
-        (keys.size() > 20 ? (isValidExtraFieldKey(keys[20]) && isValidExtraFieldEntry(vals[20])) : true) &&
-        (keys.size() > 21 ? (isValidExtraFieldKey(keys[21]) && isValidExtraFieldEntry(vals[21])) : true) &&
-        (keys.size() > 22 ? (isValidExtraFieldKey(keys[22]) && isValidExtraFieldEntry(vals[22])) : true) &&
-        (keys.size() > 23 ? (isValidExtraFieldKey(keys[23]) && isValidExtraFieldEntry(vals[23])) : true) &&
-        (keys.size() > 24 ? (isValidExtraFieldKey(keys[24]) && isValidExtraFieldEntry(vals[24])) : true);
-    }
-
     function isValidExtraFields(value) {
-      return value is map && value.size() <= 25 && isValidExtraFieldsList(value.keys(), value.values());
+      return value is map && value.size() <= 25;
     }
 
     function isValidCubeResult(row) {
@@ -1013,6 +1095,11 @@ service cloud.firestore {
         optCubeStrOrNum(row, 'invoiceNumber', 128);
     }
 
+    // Used on CREATE only. Deep-validates the first 5 rows as a spot check;
+    // validating every row costs ~130 rule expressions per populated row and
+    // runs into Firestore's 1,000-expressions-per-request cap (which rejects
+    // the write as "permission denied"). Updates check only list shape/size —
+    // see isValidCubeRequestUpdate.
     function isValidCubeResults(value) {
       return value is list &&
         value.size() <= 50 &&
@@ -1020,52 +1107,7 @@ service cloud.firestore {
         (value.size() > 1 ? isValidCubeResult(value[1]) : true) &&
         (value.size() > 2 ? isValidCubeResult(value[2]) : true) &&
         (value.size() > 3 ? isValidCubeResult(value[3]) : true) &&
-        (value.size() > 4 ? isValidCubeResult(value[4]) : true) &&
-        (value.size() > 5 ? isValidCubeResult(value[5]) : true) &&
-        (value.size() > 6 ? isValidCubeResult(value[6]) : true) &&
-        (value.size() > 7 ? isValidCubeResult(value[7]) : true) &&
-        (value.size() > 8 ? isValidCubeResult(value[8]) : true) &&
-        (value.size() > 9 ? isValidCubeResult(value[9]) : true) &&
-        (value.size() > 10 ? isValidCubeResult(value[10]) : true) &&
-        (value.size() > 11 ? isValidCubeResult(value[11]) : true) &&
-        (value.size() > 12 ? isValidCubeResult(value[12]) : true) &&
-        (value.size() > 13 ? isValidCubeResult(value[13]) : true) &&
-        (value.size() > 14 ? isValidCubeResult(value[14]) : true) &&
-        (value.size() > 15 ? isValidCubeResult(value[15]) : true) &&
-        (value.size() > 16 ? isValidCubeResult(value[16]) : true) &&
-        (value.size() > 17 ? isValidCubeResult(value[17]) : true) &&
-        (value.size() > 18 ? isValidCubeResult(value[18]) : true) &&
-        (value.size() > 19 ? isValidCubeResult(value[19]) : true) &&
-        (value.size() > 20 ? isValidCubeResult(value[20]) : true) &&
-        (value.size() > 21 ? isValidCubeResult(value[21]) : true) &&
-        (value.size() > 22 ? isValidCubeResult(value[22]) : true) &&
-        (value.size() > 23 ? isValidCubeResult(value[23]) : true) &&
-        (value.size() > 24 ? isValidCubeResult(value[24]) : true) &&
-        (value.size() > 25 ? isValidCubeResult(value[25]) : true) &&
-        (value.size() > 26 ? isValidCubeResult(value[26]) : true) &&
-        (value.size() > 27 ? isValidCubeResult(value[27]) : true) &&
-        (value.size() > 28 ? isValidCubeResult(value[28]) : true) &&
-        (value.size() > 29 ? isValidCubeResult(value[29]) : true) &&
-        (value.size() > 30 ? isValidCubeResult(value[30]) : true) &&
-        (value.size() > 31 ? isValidCubeResult(value[31]) : true) &&
-        (value.size() > 32 ? isValidCubeResult(value[32]) : true) &&
-        (value.size() > 33 ? isValidCubeResult(value[33]) : true) &&
-        (value.size() > 34 ? isValidCubeResult(value[34]) : true) &&
-        (value.size() > 35 ? isValidCubeResult(value[35]) : true) &&
-        (value.size() > 36 ? isValidCubeResult(value[36]) : true) &&
-        (value.size() > 37 ? isValidCubeResult(value[37]) : true) &&
-        (value.size() > 38 ? isValidCubeResult(value[38]) : true) &&
-        (value.size() > 39 ? isValidCubeResult(value[39]) : true) &&
-        (value.size() > 40 ? isValidCubeResult(value[40]) : true) &&
-        (value.size() > 41 ? isValidCubeResult(value[41]) : true) &&
-        (value.size() > 42 ? isValidCubeResult(value[42]) : true) &&
-        (value.size() > 43 ? isValidCubeResult(value[43]) : true) &&
-        (value.size() > 44 ? isValidCubeResult(value[44]) : true) &&
-        (value.size() > 45 ? isValidCubeResult(value[45]) : true) &&
-        (value.size() > 46 ? isValidCubeResult(value[46]) : true) &&
-        (value.size() > 47 ? isValidCubeResult(value[47]) : true) &&
-        (value.size() > 48 ? isValidCubeResult(value[48]) : true) &&
-        (value.size() > 49 ? isValidCubeResult(value[49]) : true);
+        (value.size() > 4 ? isValidCubeResult(value[4]) : true);
     }
 
     function cubeRequestDataKeys() {
@@ -1163,13 +1205,21 @@ service cloud.firestore {
         optCubeSyncTimestamp(data, 'updatedAt');
     }
 
-    function cubeRequestChanged(field) {
-      return request.resource.data.diff(resource.data)
-        .affectedKeys().hasAny([field]);
-    }
-
+    // Update validation is DIFF-ONLY and intentionally cheap.
+    //
+    // Firestore hard-caps rules evaluation at 1,000 expressions per request and
+    // rejects anything over it with the SAME "permission denied" error as a
+    // real rule failure. The previous version of this function recomputed
+    // request.resource.data.diff(resource.data).affectedKeys() once per field
+    // (~37 times) and deep-validated every result row on every save, so a
+    // dashboard edit touching several fields at once blew the cap while the
+    // same edits made one at a time stayed under it. The diff is now bound ONCE
+    // via `let`, and `results` gets only a shape check on update — per-row
+    // content validation stays on create and in the client
+    // (cubesync-form-data.js normalizes rows before every save).
     function isValidCubeRequestUpdate() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
           'internalDate',
           'projectCode',
           'reportNo',
@@ -1210,85 +1260,86 @@ service cloud.firestore {
           'version',
           'updatedAt'
         ]) &&
-        (!cubeRequestChanged('version') ||
+        (!changed.hasAny(['version']) ||
           (request.resource.data.version is int &&
             request.resource.data.version >= 1 &&
             request.resource.data.version <= 1000000)) &&
-        (!cubeRequestChanged('template') ||
+        (!changed.hasAny(['template']) ||
           request.resource.data.template in ['Original', 'Glassmorphic']) &&
-        (!cubeRequestChanged('status') ||
+        (!changed.hasAny(['status']) ||
           request.resource.data.status in ['Draft', 'Ready', 'Archived']) &&
-        (!cubeRequestChanged('results') ||
-          isValidCubeResults(request.resource.data.results)) &&
-        (!cubeRequestChanged('updatedAt') ||
+        (!changed.hasAny(['results']) ||
+          (request.resource.data.results is list &&
+            request.resource.data.results.size() <= 50)) &&
+        (!changed.hasAny(['updatedAt']) ||
           isCubeSyncTimestamp(request.resource.data.updatedAt)) &&
-        (!cubeRequestChanged('internalDate') ||
+        (!changed.hasAny(['internalDate']) ||
           optStrWithin(request.resource.data, 'internalDate', 64)) &&
-        (!cubeRequestChanged('projectCode') ||
+        (!changed.hasAny(['projectCode']) ||
           optStrWithin(request.resource.data, 'projectCode', 128)) &&
-        (!cubeRequestChanged('reportNo') ||
+        (!changed.hasAny(['reportNo']) ||
           optStrWithin(request.resource.data, 'reportNo', 128)) &&
-        (!cubeRequestChanged('client') ||
+        (!changed.hasAny(['client']) ||
           optStrWithin(request.resource.data, 'client', 200)) &&
-        (!cubeRequestChanged('method') ||
+        (!changed.hasAny(['method']) ||
           optStrWithin(request.resource.data, 'method', 200)) &&
-        (!cubeRequestChanged('project') ||
+        (!changed.hasAny(['project']) ||
           optStrWithin(request.resource.data, 'project', 200)) &&
-        (!cubeRequestChanged('concreteGrade') ||
+        (!changed.hasAny(['concreteGrade']) ||
           optStrWithin(request.resource.data, 'concreteGrade', 120)) &&
-        (!cubeRequestChanged('supplier') ||
+        (!changed.hasAny(['supplier']) ||
           optStrWithin(request.resource.data, 'supplier', 200)) &&
-        (!cubeRequestChanged('locationRepresented') ||
+        (!changed.hasAny(['locationRepresented']) ||
           optStrWithin(request.resource.data, 'locationRepresented', 500)) &&
-        (!cubeRequestChanged('additionalInformation') ||
+        (!changed.hasAny(['additionalInformation']) ||
           optStrWithin(request.resource.data, 'additionalInformation', 4000)) &&
-        (!cubeRequestChanged('dateTimeSampled') ||
+        (!changed.hasAny(['dateTimeSampled']) ||
           optStrWithin(request.resource.data, 'dateTimeSampled', 64)) &&
-        (!cubeRequestChanged('slumpMeasured') ||
+        (!changed.hasAny(['slumpMeasured']) ||
           optCubeStrOrNum(request.resource.data, 'slumpMeasured', 32)) &&
-        (!cubeRequestChanged('specimenSize') ||
+        (!changed.hasAny(['specimenSize']) ||
           optStrWithin(request.resource.data, 'specimenSize', 64)) &&
-        (!cubeRequestChanged('slumpSpecified') ||
+        (!changed.hasAny(['slumpSpecified']) ||
           optCubeStrOrNum(request.resource.data, 'slumpSpecified', 32)) &&
-        (!cubeRequestChanged('projectErp') ||
+        (!changed.hasAny(['projectErp']) ||
           optStrWithin(request.resource.data, 'projectErp', 128)) &&
-        (!cubeRequestChanged('customerBilling') ||
+        (!changed.hasAny(['customerBilling']) ||
           optStrWithin(request.resource.data, 'customerBilling', 200)) &&
-        (!cubeRequestChanged('projectNameOnReport') ||
+        (!changed.hasAny(['projectNameOnReport']) ||
           optStrWithin(request.resource.data, 'projectNameOnReport', 200)) &&
-        (!cubeRequestChanged('clientNameOnReport') ||
+        (!changed.hasAny(['clientNameOnReport']) ||
           optStrWithin(request.resource.data, 'clientNameOnReport', 200)) &&
-        (!cubeRequestChanged('contact') ||
+        (!changed.hasAny(['contact']) ||
           optStrWithin(request.resource.data, 'contact', 200)) &&
-        (!cubeRequestChanged('enableManualCubeJobNumber') ||
+        (!changed.hasAny(['enableManualCubeJobNumber']) ||
           optCubeBool(request.resource.data, 'enableManualCubeJobNumber')) &&
-        (!cubeRequestChanged('cubeJobNumber') ||
+        (!changed.hasAny(['cubeJobNumber']) ||
           optStrWithin(request.resource.data, 'cubeJobNumber', 128)) &&
-        (!cubeRequestChanged('quote') ||
+        (!changed.hasAny(['quote']) ||
           optStrWithin(request.resource.data, 'quote', 128)) &&
-        (!cubeRequestChanged('testItem') ||
+        (!changed.hasAny(['testItem']) ||
           optStrWithin(request.resource.data, 'testItem', 200)) &&
-        (!cubeRequestChanged('supplierDisplay') ||
+        (!changed.hasAny(['supplierDisplay']) ||
           optStrWithin(request.resource.data, 'supplierDisplay', 200)) &&
-        (!cubeRequestChanged('dateOfCast') ||
+        (!changed.hasAny(['dateOfCast']) ||
           optStrWithin(request.resource.data, 'dateOfCast', 64)) &&
-        (!cubeRequestChanged('reportGrade') ||
+        (!changed.hasAny(['reportGrade']) ||
           optStrWithin(request.resource.data, 'reportGrade', 120)) &&
-        (!cubeRequestChanged('personInCharge') ||
+        (!changed.hasAny(['personInCharge']) ||
           optStrWithin(request.resource.data, 'personInCharge', 200)) &&
-        (!cubeRequestChanged('managerInCharge') ||
+        (!changed.hasAny(['managerInCharge']) ||
           optStrWithin(request.resource.data, 'managerInCharge', 200)) &&
-        (!cubeRequestChanged('customFields') ||
+        (!changed.hasAny(['customFields']) ||
           isValidCubeCustomFields(request.resource.data.customFields)) &&
-        (!cubeRequestChanged('extraFields') ||
+        (!changed.hasAny(['extraFields']) ||
           isValidExtraFields(request.resource.data.extraFields)) &&
-        (!cubeRequestChanged('erpStatus') ||
+        (!changed.hasAny(['erpStatus']) ||
           optStrWithin(request.resource.data, 'erpStatus', 80)) &&
-        (!cubeRequestChanged('rpaStatus') ||
+        (!changed.hasAny(['rpaStatus']) ||
           optStrWithin(request.resource.data, 'rpaStatus', 80)) &&
-        (!cubeRequestChanged('submittedAt') ||
+        (!changed.hasAny(['submittedAt']) ||
           isCubeSyncTimestamp(request.resource.data.submittedAt)) &&
-        (!cubeRequestChanged('attemptCount') ||
+        (!changed.hasAny(['attemptCount']) ||
           (request.resource.data.attemptCount is int &&
             request.resource.data.attemptCount >= 0 &&
             request.resource.data.attemptCount <= 10000));
@@ -1403,7 +1454,34 @@ service cloud.firestore {
     }
 
 
+
+
+
+
+
+
+
+
+
+
+
     // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
     // DOCUALIGN / RAK REPORT PARSER RULES
     // Note: Shares the same database instance and firestore.rules file with WorkGrid & CubeSync.
     // Keep all DocuAlign-specific collection rules inside this dedicated block.
