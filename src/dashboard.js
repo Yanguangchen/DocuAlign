@@ -7,6 +7,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { fetchReports, filterReportsByDate } from "./lib/reports.js";
+import { buildPublicUrl, publishReport } from "./lib/share.js";
 
 const filterForm = document.querySelector("#date-filter");
 const fromInput = document.querySelector("#filter-from");
@@ -56,6 +57,18 @@ export function reportCard(report) {
   const savedBy = report.createdBy
     ? `<span class="report-meta-item">${escapeHtml(report.createdBy)}</span>`
     : "";
+  // Only saved documents can be shared: the public snapshot references the
+  // Firestore id, so a report without one has nothing durable to point at.
+  const share = report.id
+    ? `
+      <div class="report-share">
+        <button class="share-button" type="button" data-report-id="${escapeHtml(report.id)}">
+          Create public link
+        </button>
+        <p class="share-link" aria-live="polite" hidden></p>
+      </div>
+    `
+    : "";
 
   return `
     <li class="report-card">
@@ -68,8 +81,55 @@ export function reportCard(report) {
         <span class="report-meta-item">${escapeHtml(created)}</span>
         ${savedBy}
       </div>
+      ${share}
     </li>
   `;
+}
+
+// Publish the clicked report as a public capability URL and surface the link
+// inside the card. The link keeps working for anyone who has it until the
+// share document is deleted (revoked) in Firestore.
+export async function handleShareClick(button) {
+  const report = allReports.find((entry) => entry.id === button.dataset.reportId);
+  if (!report) return;
+
+  const output = button.closest(".report-share")?.querySelector(".share-link");
+  button.disabled = true;
+
+  try {
+    const token = await publishReport(db, report);
+    const url = buildPublicUrl(token);
+
+    if (output) {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener";
+      anchor.textContent = url;
+      output.replaceChildren(anchor);
+      output.hidden = false;
+    }
+    button.textContent = "Public link created";
+
+    if (navigator.clipboard?.writeText) {
+      // Best effort: surfacing the link matters, the copy is a convenience.
+      await navigator.clipboard.writeText(url).catch(() => {});
+    }
+  } catch (error) {
+    button.disabled = false;
+    if (output) {
+      output.textContent = "Could not create the public link. Try again.";
+      output.hidden = false;
+    }
+    console.error("[DocuAlign] Failed to publish public share link", error, {
+      feature: "PublicShare",
+      function: "handleShareClick",
+      operation: "firestore.setDoc",
+      collection: "docuAlignPublicShares",
+      safeIdentifier: button.dataset.reportId,
+      category: error?.code || "DatabaseWriteFailure",
+    });
+  }
 }
 
 export function render() {
@@ -125,6 +185,11 @@ export async function loadReports(user) {
     });
   }
 }
+
+grid.addEventListener("click", (event) => {
+  const button = event.target.closest(".share-button");
+  if (button) handleShareClick(button);
+});
 
 filterForm.addEventListener("input", render);
 filterForm.addEventListener("reset", () => {

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="View a DocuAlign report shared through a public link and open its PDF output."
+    />
+    <meta name="robots" content="noindex" />
+    <title>DocuAlign | Shared report</title>
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "firebase/app": "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js",
+          "firebase/analytics": "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/12.15.0/firebase-storage.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <span class="brand" aria-label="DocuAlign">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>DocuAlign</span>
+        </span>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="share-title">
+          <p class="eyebrow">Shared report</p>
+          <h1 id="share-title">A report was shared with you.</h1>
+          <p class="intro-copy">
+            This page shows a read-only snapshot of a DocuAlign report. Anyone with
+            this exact link can view it and open the PDF output below.
+          </p>
+        </section>
+
+        <section class="dashboard-list" aria-label="Shared report">
+          <p class="dashboard-status" id="share-status" aria-live="polite">
+            Loading shared report…
+          </p>
+          <article class="report-card share-card" id="share-report" hidden>
+            <div class="report-card-head">
+              <strong id="share-report-name"></strong>
+              <span class="report-status" id="share-report-status"></span>
+            </div>
+            <p class="report-source" id="share-source"></p>
+            <div class="report-card-meta">
+              <span class="report-meta-item" id="share-published"></span>
+            </div>
+            <a
+              class="google-button share-pdf-button"
+              id="share-pdf-link"
+              href="SampleDocuments/SampleOutput.pdf"
+              target="_blank"
+              rel="noopener"
+            >
+              Open PDF report
+            </a>
+          </article>
+        </section>
+      </main>
+
+      <footer>
+        <span>RAK report workspace</span>
+        <span>Excel in / Structured data / PDF out</span>
+      </footer>
+    </div>
+
+    <script type="module" src="./src/view-report.js"></script>
+  </body>
+</html>

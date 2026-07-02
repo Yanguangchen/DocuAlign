@@ -133,6 +133,31 @@ The app should allow users to print the generated report directly from the brows
 
 The print version should use the same layout logic as the PDF export so that print output and PDF output remain consistent.
 
+### Public Share Links
+
+Every report saved to the cloud can be published as a public, read-only share link
+from the dashboard. Each card offers a **Create public link** button that:
+
+1. Generates an unguessable 32-character capability token with `crypto.getRandomValues`.
+2. Writes a sanitised, PII-free snapshot of the report (name, source file, status,
+   PDF output path, publish timestamp — never the staff creator email) to the
+   `docuAlignPublicShares/{token}` Firestore collection.
+3. Shows the resulting URL (`view.html?share=<token>`) and copies it to the clipboard.
+
+Anyone holding the full URL — no Google sign-in required — can open `view.html`
+to read that one report snapshot and open its PDF output. The URL is specifically
+tied to the share document keyed by its token:
+
+* Firestore rules allow public `get` on a single share document but deny `list`,
+  so tokens cannot be enumerated and no other report is reachable.
+* Shares are immutable snapshots; staff revoke a link by deleting its share
+  document, after which the viewer shows a "no longer available" notice.
+* The viewer refuses unsafe `pdfUrl` schemes (`javascript:`, `data:`, `http:`,
+  protocol-relative) and falls back to the bundled report PDF.
+
+The domain logic lives in `src/lib/share.js`; the viewer controller is
+`src/view-report.js`. See `design.md` section 5.3 for the full security model.
+
 ## PDF Mapping Approach
 
 The app should use logical field keys instead of relying on existing PDF field names.
@@ -480,6 +505,12 @@ DocuAlign data must be stored under `docuAlignReports/{document=**}`. Users who
 pass `isCubeSyncStaff()` receive read and write access throughout that namespace.
 Existing WorkGrid and CubeSync collections keep their current independent rules.
 
+The single deliberate exception is `docuAlignPublicShares/{token}`: share
+documents published by staff are publicly readable by `get` (never `list`) so
+that capability URLs work without sign-in. Only staff can create or delete
+shares, share payloads are allowlisted to non-PII fields, and updates are
+denied entirely.
+
 Before deployment:
 
 1. Enable the Google provider in Firebase Authentication for `crewhub-43647`.
@@ -519,6 +550,34 @@ link, which made the missing asset look like a successful export. The source
 asset was added at the direct-file path, and `src/pdf-export.test.js` now checks
 the URL contract, PDF signature, source/public equality, and five-page format.
 
+## Testing & Coverage
+
+The project is developed test-first (TDD) with Vitest, Testing Library, and
+Happy DOM:
+
+```bash
+npm test            # full unit suite
+npm run coverage    # unit suite + V8 coverage report
+npm run test:rules  # Firestore security rules tests (requires the emulator)
+npm run lint        # ESLint incl. eslint-plugin-security, zero warnings allowed
+```
+
+A coverage audit accompanies every feature. Current audited baseline for
+`src/**` (excluding `main.jsx` and test files): **100% statements, 100%
+branches, 100% functions, 100% lines**. New modules must not lower this
+baseline — write the failing test first, then the implementation.
+
+The Firestore rules suite (`src/firestore.rules.test.js`) is emulator-gated via
+`RUN_FIRESTORE_RULE_TESTS=1` and covers both the staff-only report namespace
+and the public share link contract (public `get`, denied `list`/enumeration,
+staff-only publish, malformed-token rejection, PII allowlisting, immutability,
+and revocation). Run it with:
+
+```bash
+npx firebase-tools emulators:exec --only firestore --project demo-docualign \
+  "RUN_FIRESTORE_RULE_TESTS=1 FIRESTORE_EMULATOR_HOST=127.0.0.1:8087 npm run test:rules"
+```
+
 ## Architecture & System Documentation
 
 For detailed technical design specifications, UML diagrams, E/R diagrams, and developer guidelines, see:
@@ -543,14 +602,17 @@ DocuAlign/
 ├── src/
 │   ├── lib/
 │   │   ├── firebase.js              # Firebase SDK v12 singleton initialization
-│   │   └── reports.js               # Domain layer: Firestore CRUD & date filtering
+│   │   ├── reports.js               # Domain layer: Firestore CRUD & date filtering
+│   │   └── share.js                 # Domain layer: public share tokens & snapshots
 │   ├── App.jsx                      # React workspace shell prototype
 │   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
-│   ├── dashboard.js                 # Dashboard report grid & date filtering controller
+│   ├── dashboard.js                 # Dashboard grid, date filtering & public share links
 │   ├── save-report.js               # Cloud persistence wiring for ETL workspace
+│   ├── view-report.js               # Public share viewer controller (unauthenticated)
 │   └── styles.css                   # Premium vanilla CSS tokenized design system
 ├── index.html                       # Primary ingestion & ETL pipeline workspace
 ├── dashboard.html                   # Cloud dashboard for saved reports
+├── view.html                        # Public read-only share viewer (capability URL)
 ├── firestore.rules                  # Shared Firestore security rules (WorkGrid, CubeSync, DocuAlign)
 ├── design.md                        # Technical design specification (UML & E/R diagrams)
 └── AGENTS.md                        # Developer and agent behavioral rules

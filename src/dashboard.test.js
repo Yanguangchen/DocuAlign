@@ -24,6 +24,16 @@ vi.mock("./lib/reports.js", () => ({
   filterReportsByDate: (...args) => mockFilterReportsByDate(...args),
 }));
 
+const SHARE_TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
+const SHARE_URL = `https://example.com/view.html?share=${SHARE_TOKEN}`;
+const mockPublishReport = vi.fn();
+const mockBuildPublicUrl = vi.fn(() => SHARE_URL);
+
+vi.mock("./lib/share.js", () => ({
+  publishReport: (...args) => mockPublishReport(...args),
+  buildPublicUrl: (...args) => mockBuildPublicUrl(...args),
+}));
+
 describe("dashboard module", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,6 +170,20 @@ describe("dashboard module", () => {
     consoleSpy.mockRestore();
   });
 
+  it("logs an anonymous safe identifier when a fetch fails without a uid", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockFetchReports.mockRejectedValueOnce(new Error("API failure"));
+    const { loadReports } = await import("./dashboard.js");
+    await loadReports({});
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Failed to load saved reports",
+      expect.any(Error),
+      expect.objectContaining({ safeIdentifier: "anonymous" })
+    );
+    consoleSpy.mockRestore();
+  });
+
   it("handles unauthenticated state or sign out", async () => {
     await import("./dashboard.js");
     if (authStateCallback) authStateCallback(null);
@@ -201,6 +225,159 @@ describe("dashboard module", () => {
     render();
 
     expect(document.querySelector("#result-count").textContent).toBe("1 of 2 reports");
+  });
+
+  describe("public share links", () => {
+    async function renderOneReport() {
+      mockFetchReports.mockResolvedValueOnce([
+        { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      ]);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-share" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    it("renders a share button on cards for saved reports", async () => {
+      const { reportCard } = await import("./dashboard.js");
+      const html = reportCard({ id: "doc-1", reportName: "Report 1" });
+      expect(html).toContain("share-button");
+      expect(html).toContain('data-report-id="doc-1"');
+    });
+
+    it("omits the share button when a report has no document id", async () => {
+      const { reportCard } = await import("./dashboard.js");
+      expect(reportCard({ reportName: "Unsaved" })).not.toContain("share-button");
+    });
+
+    it("publishes the report and shows the public URL on click", async () => {
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      const button = document.querySelector(".share-button");
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishReport).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ id: "doc-1" }),
+      );
+      expect(mockBuildPublicUrl).toHaveBeenCalledWith(SHARE_TOKEN);
+
+      const link = document.querySelector(".share-link a");
+      expect(link.getAttribute("href")).toBe(SHARE_URL);
+      expect(link.textContent).toBe(SHARE_URL);
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toContain("created");
+    });
+
+    it("copies the public URL to the clipboard when available", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+      delete navigator.clipboard;
+    });
+
+    it("re-enables the button and reports failures on publish error", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockPublishReport.mockRejectedValueOnce(new Error("denied"));
+      await renderOneReport();
+
+      const button = document.querySelector(".share-button");
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(button.disabled).toBe(false);
+      expect(document.querySelector(".share-link").textContent).toBe(
+        "Could not create the public link. Try again.",
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Failed to publish public share link",
+        expect.any(Error),
+        expect.objectContaining({ feature: "PublicShare", function: "handleShareClick" }),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("still succeeds when the clipboard copy is rejected", async () => {
+      const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      const button = document.querySelector(".share-button");
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(button.textContent).toContain("created");
+      expect(document.querySelector(".share-link a").getAttribute("href")).toBe(SHARE_URL);
+      delete navigator.clipboard;
+    });
+
+    it("still shows the link when no clipboard API is available", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: undefined,
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      const button = document.querySelector(".share-button");
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector(".share-link a").getAttribute("href")).toBe(SHARE_URL);
+      delete navigator.clipboard;
+    });
+
+    it("tolerates cards without a share output element", async () => {
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      const { handleShareClick } = await renderOneReport();
+
+      const detached = document.createElement("button");
+      detached.dataset.reportId = "doc-1";
+      await handleShareClick(detached);
+      expect(detached.disabled).toBe(true);
+
+      mockPublishReport.mockRejectedValueOnce(new Error("denied"));
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const failing = document.createElement("button");
+      failing.dataset.reportId = "doc-1";
+      await handleShareClick(failing);
+      expect(failing.disabled).toBe(false);
+      consoleSpy.mockRestore();
+    });
+
+    it("ignores clicks that are not on a share button", async () => {
+      await renderOneReport();
+      document
+        .querySelector(".report-card")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(mockPublishReport).not.toHaveBeenCalled();
+    });
+
+    it("ignores share clicks for reports that are no longer loaded", async () => {
+      await renderOneReport();
+      const button = document.querySelector(".share-button");
+      button.dataset.reportId = "gone";
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+      expect(mockPublishReport).not.toHaveBeenCalled();
+    });
   });
 
   it("renders fallback empty message when filtered is empty without active filter", async () => {
