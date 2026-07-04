@@ -608,13 +608,14 @@ npx firebase-tools emulators:exec --only firestore --project demo-docualign \
 ## Architecture & System Documentation
 
 For detailed technical design specifications, UML diagrams, E/R diagrams, and developer guidelines, see:
+* **[documentation/project-guide.md](./documentation/project-guide.md)** — Canonical, current-state project documentation with:
+  - implemented-versus-planned capability matrix;
+  - repository and module map;
+  - **UML component, state-machine, and sequence diagrams**;
+  - **implemented Firestore E/R diagram and schema contracts**;
+  - authentication, public sharing, deployment, testing, and known limitations.
 * **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** — Firestore's 1,000-expression-per-request rules evaluation cap: how it presents (identical error to a real permission denial), how to confirm it against the emulator, and the concrete incidents in this codebase (CubeSync batch edits, DocuAlign bundle design) that hit it.
-* **[design.md](./design.md)** — Complete architectural specification containing:
-  - **UML System Architecture & Component Diagram**
-  - **UML State Machine Diagram (ETL Pipeline)**
-  - **UML End-to-End Sequence Diagram**
-  - **Entity-Relationship (E/R) Diagram & Schema Design**
-  - **Security Rules & Access Gate Architecture**
+* **[design.md](./design.md)** — Stable compatibility link to the canonical guide.
 * **[AGENTS.md](./AGENTS.md)** — AI agent coding standards, shared database rules constraints, and testing protocols.
 * **[rak_pdf_excel_field_mapping.json](./rak_pdf_excel_field_mapping.json)** — Detailed cell-to-logical-key mapping dictionary.
 
@@ -658,4 +659,3 @@ DocuAlign/
 8. Template version control
 9. Auto generated charts
 10. Search by client, vessel, job reference, or sample ID
-
