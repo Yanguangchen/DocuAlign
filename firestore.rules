@@ -177,7 +177,10 @@ service cloud.firestore {
     // Hard-coded worker onboarding allowlist. Keep empty unless a temporary
     // non-admin worker needs access before appConfig/access can be updated.
     function isHardcodedAllowedEmail() {
-      return false;
+      return isVerifiedEmail() &&
+        request.auth.token.email.lower() in [
+          'gavidarshini18@gmail.com'
+        ];
     }
 
     // An authenticated user whose profile exists and is active.
@@ -194,11 +197,11 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isHardcodedMaster() || isConfiguredMasterEmail() || isProfileAdmin();
-    }
-
-    function isEngineerOrAdmin() {
-      return isAdmin() || (isActiveUser() && role() == 'engineer');
+      // Cheapest-positive check first: profile admins short-circuit before
+      // the hard-coded master list (~34 string comparisons) is evaluated.
+      // Order does not change semantics — the three checks are independent
+      // ORs — it only trims the expression budget on the common admin path.
+      return isProfileAdmin() || isHardcodedMaster() || isConfiguredMasterEmail();
     }
 
     // Can create/manage bookings. Master/admin accounts must pass this even
@@ -406,9 +409,10 @@ service cloud.firestore {
     // is intentional to allow field teams to remain fluid and is not a flaw.
     // ---------------------------------------------------------------
     function isValidCoordinates(value) {
+      let keys = value.keys();
       return value is map &&
-        value.keys().hasAll(['lat', 'lng']) &&
-        value.keys().hasOnly(['lat', 'lng']) &&
+        keys.hasAll(['lat', 'lng']) &&
+        keys.hasOnly(['lat', 'lng']) &&
         value.lat is number &&
         value.lng is number &&
         value.lat >= -90 &&
@@ -418,9 +422,10 @@ service cloud.firestore {
     }
 
     function isValidPhoto(value) {
+      let keys = value.keys();
       return value is map &&
-        value.keys().hasAll(['name', 'sizeBytes', 'tier']) &&
-        value.keys().hasOnly(['name', 'sizeBytes', 'tier', 'dataUrl']) &&
+        keys.hasAll(['name', 'sizeBytes', 'tier']) &&
+        keys.hasOnly(['name', 'sizeBytes', 'tier', 'dataUrl']) &&
         strWithin(value.name, 1, 200) &&
         value.sizeBytes is int &&
         value.sizeBytes >= 0 &&
@@ -432,59 +437,18 @@ service cloud.firestore {
             value.dataUrl.size() <= 950000));
     }
 
-    function isValidOverrun(value) {
-      return value is map &&
-        value.keys().hasAll([
-          'id',
-          'minutes',
-          'reason',
-          'signerName',
-          'signerContact',
-          'signatureDataUrl',
-          'loggedBy',
-          'loggedAt'
-        ]) &&
-        value.keys().hasOnly([
-          'id',
-          'minutes',
-          'reason',
-          'jobNumber',
-          'signerName',
-          'signerContact',
-          'signatureDataUrl',
-          'loggedBy',
-          'loggedAt'
-        ]) &&
-        strWithin(value.id, 1, 128) &&
-        value.minutes is int &&
-        value.minutes > 0 &&
-        value.minutes <= 1440 &&
-        strWithin(value.reason, 1, 2000) &&
-        optStrWithin(value, 'jobNumber', 120) &&
-        strWithin(value.signerName, 1, 120) &&
-        strWithin(value.signerContact, 1, 120) &&
-        value.signatureDataUrl is string &&
-        value.signatureDataUrl.matches('^data:image/(png|jpeg|jpg|webp);base64,.*$') &&
-        value.signatureDataUrl.size() <= 300000 &&
-        value.loggedBy is string &&
-        value.loggedBy.size() <= 128 &&
-        value.loggedAt is string;
-    }
-
-    function isValidOverruns(value) {
-      return value is list &&
-        value.size() <= 5 &&
-        (value.size() > 0 ? isValidOverrun(value[0]) : true) &&
-        (value.size() > 1 ? isValidOverrun(value[1]) : true) &&
-        (value.size() > 2 ? isValidOverrun(value[2]) : true) &&
-        (value.size() > 3 ? isValidOverrun(value[3]) : true) &&
-        (value.size() > 4 ? isValidOverrun(value[4]) : true);
-    }
+    // NOTE: overruns are only ever written through booking UPDATES, which are
+    // diff-only validated (see isValidBookingUpdate). Overrun content shape
+    // (minutes, signature data URL, size caps) is enforced client-side; the
+    // 1 MB document limit is the server backstop. The old isValidOverrun(s)
+    // validators were dead code — never reachable from any allow statement —
+    // and were removed to keep the ruleset lean (recoverable from git history).
 
     function isValidTeamMember(value) {
+      let keys = value.keys();
       return value is map &&
-        value.keys().hasAll(['userId', 'name']) &&
-        value.keys().hasOnly(['userId', 'name', 'role', 'contact']) &&
+        keys.hasAll(['userId', 'name']) &&
+        keys.hasOnly(['userId', 'name', 'role', 'contact']) &&
         strWithin(value.userId, 1, 128) &&
         strWithin(value.name, 1, 120) &&
         (!('role' in value) || isValidRole(value.role)) &&
@@ -506,7 +470,8 @@ service cloud.firestore {
     }
 
     function isValidBooking(data) {
-      return data.keys().hasAll([
+      let keys = data.keys();
+      return keys.hasAll([
           'ownerUserId',
           'userName',
           'contact',
@@ -519,7 +484,7 @@ service cloud.firestore {
           'createdAt',
           'updatedAt'
         ]) &&
-        data.keys().hasOnly([
+        keys.hasOnly([
           'teamId',
           'ownerUserId',
           'companyName',
@@ -572,125 +537,6 @@ service cloud.firestore {
         (!('teamMembers' in data) || isValidTeamMembers(data.teamMembers));
     }
 
-    function ownerBaseFieldsUnchanged() {
-      return unchanged('ownerUserId') &&
-        unchanged('teamId') &&
-        unchanged('createdBy') &&
-        unchanged('createdAt');
-    }
-
-    function ownerCanEditBooking() {
-      return ownerBaseFieldsUnchanged() &&
-        unchanged('status') &&
-        unchanged('collisionStatus') &&
-        unchanged('cancelledBy') &&
-        unchanged('cancelledAt') &&
-        unchanged('cancellationReason') &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'userName',
-          'contact',
-          'companyName',
-          'projectName',
-          'workers',
-          'details',
-          'teamMemberIds',
-          'teamMembers',
-          'startTime',
-          'endTime',
-          'address',
-          'coordinates',
-          'photo',
-          'jobCompletionStatus',
-          'updatedBy',
-          'updatedAt'
-        ]);
-    }
-
-    function ownerEditFieldsValid() {
-      return strWithin(request.resource.data.userName, 1, 120) &&
-        strWithin(request.resource.data.contact, 1, 200) &&
-        optStrWithin(request.resource.data, 'companyName', 200) &&
-        optStrWithin(request.resource.data, 'projectName', 200) &&
-        optStrWithin(request.resource.data, 'workers', 500) &&
-        strWithin(request.resource.data.details, 1, 2000) &&
-        request.resource.data.startTime is string &&
-        request.resource.data.endTime is string &&
-        request.resource.data.updatedAt is string &&
-        optStrWithin(request.resource.data, 'updatedBy', 128) &&
-        optStrWithin(request.resource.data, 'address', 500) &&
-        (!('coordinates' in request.resource.data) ||
-          isValidCoordinates(request.resource.data.coordinates)) &&
-        (!('photo' in request.resource.data) ||
-          isValidPhoto(request.resource.data.photo)) &&
-        (!('jobCompletionStatus' in request.resource.data) ||
-          request.resource.data.jobCompletionStatus in ['pending', 'completed', 'cancelled']) &&
-        (!('teamMemberIds' in request.resource.data) ||
-          isValidTeamMemberIds(request.resource.data.teamMemberIds)) &&
-        (!('teamMembers' in request.resource.data) ||
-          isValidTeamMembers(request.resource.data.teamMembers));
-    }
-
-    function ownerCancelFieldsValid() {
-      return request.resource.data.status == 'cancelled' &&
-        request.resource.data.cancelledBy == request.auth.uid &&
-        request.resource.data.cancelledAt is string &&
-        request.resource.data.updatedAt is string &&
-        optStrWithin(request.resource.data, 'updatedBy', 128) &&
-        optStrWithin(request.resource.data, 'cancellationReason', 1000);
-    }
-
-    function ownerOverrunFieldsValid() {
-      return request.resource.data.updatedAt is string &&
-        optStrWithin(request.resource.data, 'updatedBy', 128) &&
-        (!('overruns' in request.resource.data) ||
-          isValidOverruns(request.resource.data.overruns));
-    }
-
-    function ownerBookingUpdateValid() {
-      return ownerCanEditBooking() ? ownerEditFieldsValid() :
-        ownerCanCancelBooking() ? ownerCancelFieldsValid() :
-        ownerCanLogOverrun() ? ownerOverrunFieldsValid() :
-        false;
-    }
-
-    function ownerCanCancelBooking() {
-      return ownerBaseFieldsUnchanged() &&
-        unchanged('collisionStatus') &&
-        unchanged('overruns') &&
-        resource.data.status != 'cancelled' &&
-        request.resource.data.status == 'cancelled' &&
-        request.resource.data.cancelledBy == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status',
-          'cancelledAt',
-          'cancelledBy',
-          'cancellationReason',
-          'updatedBy',
-          'updatedAt'
-        ]);
-    }
-
-    function ownerCanLogOverrun() {
-      return ownerBaseFieldsUnchanged() &&
-        unchanged('status') &&
-        unchanged('collisionStatus') &&
-        unchanged('cancelledBy') &&
-        unchanged('cancelledAt') &&
-        unchanged('cancellationReason') &&
-        request.resource.data.status != 'cancelled' &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'overruns',
-          'updatedBy',
-          'updatedAt'
-        ]);
-    }
-
-    // Was this field added, removed, or modified by the current write?
-    function bookingChanged(field) {
-      return request.resource.data.diff(resource.data)
-        .affectedKeys().hasAny([field]);
-    }
-
     // Update validation works on the DIFF, not the whole document.
     //
     // WHY: bookings are written with partial updateDoc() patches (e.g. logging
@@ -700,45 +546,16 @@ service cloud.firestore {
     // stray field) to satisfy the latest schema too, so a single legacy record
     // would reject ALL future edits with "insufficient permissions". Validating
     // only changed keys keeps new input strict without trapping old data.
-    function bookingUpdateKeysAllowed() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'teamId',
-        'ownerUserId',
-        'userName',
-        'contact',
-        'companyName',
-        'projectName',
-        'workers',
-        'invoiceNumber',
-        'reportNumber',
-        'details',
-        'teamMemberIds',
-        'teamMembers',
-        'startTime',
-        'endTime',
-        'address',
-        'coordinates',
-        'photo',
-        'overruns',
-        'jobNumber',
-        'jobCompletionStatus',
-        'jobCompletionRecord',
-        'status',
-        'collisionStatus',
-        'updatedBy',
-        'cancelledBy',
-        'cancelledAt',
-        'deletedBy',
-        'deletedAt',
-        'cancellationReason',
-        'updatedAt'
-      ]);
-    }
-
-    // Update validation is DIFF-ONLY and intentionally light.
     //
-    // - bookingUpdateKeysAllowed() rejects unknown keys and keeps createdBy /
-    //   createdAt immutable (they are absent from the allow-list).
+    // EXPRESSION BUDGET: the affected-keys diff is bound ONCE via `let`. The
+    // previous version recomputed request.resource.data.diff(resource.data)
+    // .affectedKeys() per field (a bookingChanged() helper, ~12 evaluations
+    // per update), the same pattern that pushed CubeSync updates over
+    // Firestore's 1,000-expressions-per-request cap (see Bug 5 in
+    // docs/firestore-rules-bug-log.md).
+    //
+    // - hasOnly() rejects unknown keys and keeps createdBy / createdAt
+    //   immutable (they are absent from the allow-list).
     // - Only CHANGED enum fields are checked, so a legacy/invalid value on an
     //   UNCHANGED field can never block an unrelated edit (this was the cause of
     //   the recurring "missing or insufficient permissions" on overruns/edits).
@@ -748,31 +565,63 @@ service cloud.firestore {
     //   already shared across active/admin users by design, so deep per-field
     //   re-validation on update adds friction without a matching security gain.
     function isValidBookingUpdate() {
-      return bookingUpdateKeysAllowed() &&
-        (!bookingChanged('status') ||
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+          'teamId',
+          'ownerUserId',
+          'userName',
+          'contact',
+          'companyName',
+          'projectName',
+          'workers',
+          'invoiceNumber',
+          'reportNumber',
+          'details',
+          'teamMemberIds',
+          'teamMembers',
+          'startTime',
+          'endTime',
+          'address',
+          'coordinates',
+          'photo',
+          'overruns',
+          'jobNumber',
+          'jobCompletionStatus',
+          'jobCompletionRecord',
+          'status',
+          'collisionStatus',
+          'updatedBy',
+          'cancelledBy',
+          'cancelledAt',
+          'deletedBy',
+          'deletedAt',
+          'cancellationReason',
+          'updatedAt'
+        ]) &&
+        (!changed.hasAny(['status']) ||
           request.resource.data.status in
             ['active', 'cancelled', 'completed', 'archived']) &&
-        (!bookingChanged('collisionStatus') ||
+        (!changed.hasAny(['collisionStatus']) ||
           request.resource.data.collisionStatus in
             ['none', 'open', 'reviewed', 'resolved']) &&
-        (!bookingChanged('jobCompletionStatus') ||
+        (!changed.hasAny(['jobCompletionStatus']) ||
           request.resource.data.jobCompletionStatus in
             ['pending', 'completed', 'cancelled']) &&
-        (!bookingChanged('companyName') ||
+        (!changed.hasAny(['companyName']) ||
           optStrWithin(request.resource.data, 'companyName', 200)) &&
-        (!bookingChanged('projectName') ||
+        (!changed.hasAny(['projectName']) ||
           optStrWithin(request.resource.data, 'projectName', 200)) &&
-        (!bookingChanged('workers') ||
+        (!changed.hasAny(['workers']) ||
           optStrWithin(request.resource.data, 'workers', 500)) &&
-        (!bookingChanged('invoiceNumber') ||
+        (!changed.hasAny(['invoiceNumber']) ||
           optStrWithin(request.resource.data, 'invoiceNumber', 128)) &&
-        (!bookingChanged('reportNumber') ||
+        (!changed.hasAny(['reportNumber']) ||
           optStrWithin(request.resource.data, 'reportNumber', 128)) &&
-        (!bookingChanged('deletedBy') ||
+        (!changed.hasAny(['deletedBy']) ||
           optStrWithin(request.resource.data, 'deletedBy', 128)) &&
-        (!bookingChanged('deletedAt') ||
+        (!changed.hasAny(['deletedAt']) ||
           optStrWithin(request.resource.data, 'deletedAt', 64)) &&
-        (!bookingChanged('status') ||
+        (!changed.hasAny(['status']) ||
           request.resource.data.status != 'archived' ||
           (request.resource.data.deletedBy == request.auth.uid &&
             request.resource.data.deletedAt is string));
