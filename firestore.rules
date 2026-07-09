@@ -832,15 +832,6 @@ service cloud.firestore {
       return !(field in data) || isCubeSyncTimestamp(data[field]);
     }
 
-    function optCubeStrOrNum(data, field, maxLen) {
-      return !(field in data) ||
-        data[field] == null ||
-        (data[field] is string && data[field].size() <= maxLen) ||
-        (data[field] is number &&
-          data[field] >= -1000000000 &&
-          data[field] <= 1000000000);
-    }
-
     function optCubeBool(data, field) {
       return !(field in data) || data[field] is bool;
     }
@@ -875,63 +866,12 @@ service cloud.firestore {
       return value is map && value.size() <= 25;
     }
 
-    function isValidCubeResult(row) {
-      return row is map &&
-        row.keys().hasOnly([
-          'testNumber',
-          'dateTested',
-          'ageDays',
-          'weightKg',
-          'loadKn',
-          'strength',
-          'failureMode',
-          'setNo',
-          'size',
-          'specimenRef',
-          'barcode',
-          'specifiedSlump',
-          'meanSlump',
-          'resultGrade',
-          'resultDateOfCast',
-          'age',
-          'dateOfTest',
-          'invoiceNumber'
-        ]) &&
-        optCubeStrOrNum(row, 'testNumber', 64) &&
-        optCubeStrOrNum(row, 'dateTested', 64) &&
-        optCubeStrOrNum(row, 'ageDays', 16) &&
-        optCubeStrOrNum(row, 'weightKg', 32) &&
-        optCubeStrOrNum(row, 'loadKn', 32) &&
-        optCubeStrOrNum(row, 'strength', 32) &&
-        optCubeStrOrNum(row, 'failureMode', 200) &&
-        optCubeStrOrNum(row, 'setNo', 16) &&
-        optCubeStrOrNum(row, 'size', 64) &&
-        optCubeStrOrNum(row, 'specimenRef', 128) &&
-        optCubeStrOrNum(row, 'barcode', 128) &&
-        optCubeStrOrNum(row, 'specifiedSlump', 32) &&
-        optCubeStrOrNum(row, 'meanSlump', 32) &&
-        optCubeStrOrNum(row, 'resultGrade', 120) &&
-        optCubeStrOrNum(row, 'resultDateOfCast', 64) &&
-        optCubeStrOrNum(row, 'age', 16) &&
-        optCubeStrOrNum(row, 'dateOfTest', 64) &&
-        optCubeStrOrNum(row, 'invoiceNumber', 128);
-    }
-
-    // Used on CREATE only. Deep-validates the first 5 rows as a spot check;
-    // validating every row costs ~130 rule expressions per populated row and
-    // runs into Firestore's 1,000-expressions-per-request cap (which rejects
-    // the write as "permission denied"). Updates check only list shape/size —
-    // see isValidCubeRequestUpdate.
-    function isValidCubeResults(value) {
-      return value is list &&
-        value.size() <= 50 &&
-        (value.size() > 0 ? isValidCubeResult(value[0]) : true) &&
-        (value.size() > 1 ? isValidCubeResult(value[1]) : true) &&
-        (value.size() > 2 ? isValidCubeResult(value[2]) : true) &&
-        (value.size() > 3 ? isValidCubeResult(value[3]) : true) &&
-        (value.size() > 4 ? isValidCubeResult(value[4]) : true);
-    }
-
+    // Result rows are validated for list shape and count only (both create and
+    // update). Deep per-row content validation costs ~130 rule expressions per
+    // populated row and runs into Firestore's 1,000-expressions-per-request cap
+    // (which rejects the write with the same "permission denied" error as a
+    // genuine rule failure). Row content is normalized by the client before
+    // every save (cubesync-form-data.js) and by the API.
     function cubeRequestDataKeys() {
       return [
         'internalDate',
@@ -977,38 +917,17 @@ service cloud.firestore {
       ];
     }
 
+    // Create validation enforces the security-critical invariants only: the key
+    // allowlist, enum fields, numeric bounds, structural checks (customFields /
+    // extraFields / results shape), and timestamps. Per-field string-length
+    // guards for the ~29 scalar fields, plus deep per-row result validation,
+    // pushed a fully-populated create past Firestore's 1,000-expressions-per-
+    // request cap (which rejects the write with the same "permission denied"
+    // error as a genuine rule failure). String content/length is normalized by
+    // the client (cubesync-form-data.js) and the API before every save.
     function isValidCubeRequest(data) {
       return data.keys().hasOnly(cubeRequestDataKeys()) &&
-        optStrWithin(data, 'internalDate', 64) &&
-        optStrWithin(data, 'projectCode', 128) &&
-        optStrWithin(data, 'reportNo', 128) &&
-        optStrWithin(data, 'client', 200) &&
-        optStrWithin(data, 'method', 200) &&
-        optStrWithin(data, 'project', 200) &&
-        optStrWithin(data, 'concreteGrade', 120) &&
-        optStrWithin(data, 'supplier', 200) &&
-        optStrWithin(data, 'locationRepresented', 500) &&
-        optStrWithin(data, 'additionalInformation', 4000) &&
-        optStrWithin(data, 'dateTimeSampled', 64) &&
-        optCubeStrOrNum(data, 'slumpMeasured', 32) &&
-        optStrWithin(data, 'specimenSize', 64) &&
-        optCubeStrOrNum(data, 'slumpSpecified', 32) &&
-        optStrWithin(data, 'projectErp', 128) &&
-        optStrWithin(data, 'customerBilling', 200) &&
-        optStrWithin(data, 'projectNameOnReport', 200) &&
-        optStrWithin(data, 'clientNameOnReport', 200) &&
-        optStrWithin(data, 'contact', 200) &&
         optCubeBool(data, 'enableManualCubeJobNumber') &&
-        optStrWithin(data, 'cubeJobNumber', 128) &&
-        optStrWithin(data, 'quote', 128) &&
-        optStrWithin(data, 'testItem', 200) &&
-        optStrWithin(data, 'supplierDisplay', 200) &&
-        optStrWithin(data, 'dateOfCast', 64) &&
-        optStrWithin(data, 'reportGrade', 120) &&
-        optStrWithin(data, 'personInCharge', 200) &&
-        optStrWithin(data, 'managerInCharge', 200) &&
-        optStrWithin(data, 'erpStatus', 80) &&
-        optStrWithin(data, 'rpaStatus', 80) &&
         (!('customFields' in data) ||
           isValidCubeCustomFields(data.customFields)) &&
         (!('extraFields' in data) ||
@@ -1017,7 +936,8 @@ service cloud.firestore {
           data.template in ['Original', 'Glassmorphic']) &&
         (!('status' in data) ||
           data.status in ['Draft', 'Ready', 'Archived']) &&
-        (!('results' in data) || isValidCubeResults(data.results)) &&
+        (!('results' in data) ||
+          (data.results is list && data.results.size() <= 50)) &&
         optCubeSyncTimestamp(data, 'submittedAt') &&
         (!('attemptCount' in data) ||
           (data.attemptCount is int && data.attemptCount >= 0 && data.attemptCount <= 10000)) &&
@@ -1031,14 +951,13 @@ service cloud.firestore {
     //
     // Firestore hard-caps rules evaluation at 1,000 expressions per request and
     // rejects anything over it with the SAME "permission denied" error as a
-    // real rule failure. The previous version of this function recomputed
-    // request.resource.data.diff(resource.data).affectedKeys() once per field
-    // (~37 times) and deep-validated every result row on every save, so a
-    // dashboard edit touching several fields at once blew the cap while the
-    // same edits made one at a time stayed under it. The diff is now bound ONCE
-    // via `let`, and `results` gets only a shape check on update — per-row
-    // content validation stays on create and in the client
-    // (cubesync-form-data.js normalizes rows before every save).
+    // real rule failure. Per-field string-length guards (~30 `changed.hasAny`
+    // probes) plus per-row result validation blew that cap when a dashboard
+    // edit touched many fields at once. The diff is bound ONCE via `let`, and
+    // the update now enforces only the security-critical invariants: the key
+    // allowlist, enum fields, numeric bounds, the results list shape, and
+    // timestamps. String content/length is normalized by the client
+    // (cubesync-form-data.js) and the API before every save.
     function isValidCubeRequestUpdate() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return changed.hasOnly([
@@ -1086,85 +1005,27 @@ service cloud.firestore {
           (request.resource.data.version is int &&
             request.resource.data.version >= 1 &&
             request.resource.data.version <= 1000000)) &&
+        (!changed.hasAny(['attemptCount']) ||
+          (request.resource.data.attemptCount is int &&
+            request.resource.data.attemptCount >= 0 &&
+            request.resource.data.attemptCount <= 10000)) &&
         (!changed.hasAny(['template']) ||
           request.resource.data.template in ['Original', 'Glassmorphic']) &&
         (!changed.hasAny(['status']) ||
           request.resource.data.status in ['Draft', 'Ready', 'Archived']) &&
-        (!changed.hasAny(['results']) ||
-          (request.resource.data.results is list &&
-            request.resource.data.results.size() <= 50)) &&
-        (!changed.hasAny(['updatedAt']) ||
-          isCubeSyncTimestamp(request.resource.data.updatedAt)) &&
-        (!changed.hasAny(['internalDate']) ||
-          optStrWithin(request.resource.data, 'internalDate', 64)) &&
-        (!changed.hasAny(['projectCode']) ||
-          optStrWithin(request.resource.data, 'projectCode', 128)) &&
-        (!changed.hasAny(['reportNo']) ||
-          optStrWithin(request.resource.data, 'reportNo', 128)) &&
-        (!changed.hasAny(['client']) ||
-          optStrWithin(request.resource.data, 'client', 200)) &&
-        (!changed.hasAny(['method']) ||
-          optStrWithin(request.resource.data, 'method', 200)) &&
-        (!changed.hasAny(['project']) ||
-          optStrWithin(request.resource.data, 'project', 200)) &&
-        (!changed.hasAny(['concreteGrade']) ||
-          optStrWithin(request.resource.data, 'concreteGrade', 120)) &&
-        (!changed.hasAny(['supplier']) ||
-          optStrWithin(request.resource.data, 'supplier', 200)) &&
-        (!changed.hasAny(['locationRepresented']) ||
-          optStrWithin(request.resource.data, 'locationRepresented', 500)) &&
-        (!changed.hasAny(['additionalInformation']) ||
-          optStrWithin(request.resource.data, 'additionalInformation', 4000)) &&
-        (!changed.hasAny(['dateTimeSampled']) ||
-          optStrWithin(request.resource.data, 'dateTimeSampled', 64)) &&
-        (!changed.hasAny(['slumpMeasured']) ||
-          optCubeStrOrNum(request.resource.data, 'slumpMeasured', 32)) &&
-        (!changed.hasAny(['specimenSize']) ||
-          optStrWithin(request.resource.data, 'specimenSize', 64)) &&
-        (!changed.hasAny(['slumpSpecified']) ||
-          optCubeStrOrNum(request.resource.data, 'slumpSpecified', 32)) &&
-        (!changed.hasAny(['projectErp']) ||
-          optStrWithin(request.resource.data, 'projectErp', 128)) &&
-        (!changed.hasAny(['customerBilling']) ||
-          optStrWithin(request.resource.data, 'customerBilling', 200)) &&
-        (!changed.hasAny(['projectNameOnReport']) ||
-          optStrWithin(request.resource.data, 'projectNameOnReport', 200)) &&
-        (!changed.hasAny(['clientNameOnReport']) ||
-          optStrWithin(request.resource.data, 'clientNameOnReport', 200)) &&
-        (!changed.hasAny(['contact']) ||
-          optStrWithin(request.resource.data, 'contact', 200)) &&
         (!changed.hasAny(['enableManualCubeJobNumber']) ||
           optCubeBool(request.resource.data, 'enableManualCubeJobNumber')) &&
-        (!changed.hasAny(['cubeJobNumber']) ||
-          optStrWithin(request.resource.data, 'cubeJobNumber', 128)) &&
-        (!changed.hasAny(['quote']) ||
-          optStrWithin(request.resource.data, 'quote', 128)) &&
-        (!changed.hasAny(['testItem']) ||
-          optStrWithin(request.resource.data, 'testItem', 200)) &&
-        (!changed.hasAny(['supplierDisplay']) ||
-          optStrWithin(request.resource.data, 'supplierDisplay', 200)) &&
-        (!changed.hasAny(['dateOfCast']) ||
-          optStrWithin(request.resource.data, 'dateOfCast', 64)) &&
-        (!changed.hasAny(['reportGrade']) ||
-          optStrWithin(request.resource.data, 'reportGrade', 120)) &&
-        (!changed.hasAny(['personInCharge']) ||
-          optStrWithin(request.resource.data, 'personInCharge', 200)) &&
-        (!changed.hasAny(['managerInCharge']) ||
-          optStrWithin(request.resource.data, 'managerInCharge', 200)) &&
         (!changed.hasAny(['customFields']) ||
           isValidCubeCustomFields(request.resource.data.customFields)) &&
         (!changed.hasAny(['extraFields']) ||
           isValidExtraFields(request.resource.data.extraFields)) &&
-        (!changed.hasAny(['erpStatus']) ||
-          optStrWithin(request.resource.data, 'erpStatus', 80)) &&
-        (!changed.hasAny(['rpaStatus']) ||
-          optStrWithin(request.resource.data, 'rpaStatus', 80)) &&
+        (!changed.hasAny(['results']) ||
+          (request.resource.data.results is list &&
+            request.resource.data.results.size() <= 50)) &&
         (!changed.hasAny(['submittedAt']) ||
           isCubeSyncTimestamp(request.resource.data.submittedAt)) &&
-        (!changed.hasAny(['attemptCount']) ||
-          (request.resource.data.attemptCount is int &&
-            request.resource.data.attemptCount >= 0 &&
-            request.resource.data.attemptCount <= 10000));
+        (!changed.hasAny(['updatedAt']) ||
+          isCubeSyncTimestamp(request.resource.data.updatedAt));
     }
 
     // Append-only edit-history changelog. Each document records one save
