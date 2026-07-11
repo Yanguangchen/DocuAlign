@@ -5,6 +5,7 @@
  * and user action controls for file replacement and cloud save wiring.
  */
 import { useRef, useState } from "react";
+import { logWarn } from "./lib/logger.js";
 
 const EXCEL_EXTENSIONS = [".xlsx", ".xls"];
 
@@ -49,7 +50,7 @@ function App() {
     if (!isExcelFile(nextFile)) {
       setFile(null);
       setMessage("Choose an Excel workbook in .xlsx or .xls format.");
-      console.warn("[DocuAlign] File validation failure", {
+      logWarn("File validation failure", {
         feature: "WorkspaceIngestion",
         function: "selectFile",
         operation: "validateExtension",

@@ -253,7 +253,7 @@ describe("view-report module", () => {
         "Could not load this shared report. Check your connection and try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(
-        "[DocuAlign] Failed to load shared bundle",
+        "[DocuAlign] Load shared bundle failed",
         expect.any(Error),
         expect.objectContaining({ feature: "PublicShare", function: "initViewer" }),
       );
@@ -288,7 +288,7 @@ describe("view-report module", () => {
         "Could not load this shared report. Check your connection and try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(
-        "[DocuAlign] Failed to load shared report",
+        "[DocuAlign] Load shared report failed",
         expect.any(Error),
         expect.objectContaining({ feature: "PublicShare", function: "initViewer" }),
       );

@@ -7,6 +7,8 @@
  * tokens render a status message instead of report data.
  */
 import { db } from "./lib/firebase.js";
+import { logWarn, trackOperation } from "./lib/logger.js";
+import { initObservability } from "./lib/observability.js";
 import {
   fetchSharedBundle,
   fetchSharedReport,
@@ -144,6 +146,12 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
   const shareToken = getShareTokenFromUrl(search);
   if (!bundleToken && !shareToken) {
     setStatus("This share link is not valid. Check the URL and try again.");
+    logWarn("Share link rejected: missing or malformed token", {
+      feature: "PublicShare",
+      function: "initViewer",
+      operation: "validateShareToken",
+      category: "InvalidShareLink",
+    });
     return;
   }
 
@@ -151,42 +159,49 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
 
   if (bundleToken) {
     try {
-      const sharedBundle = await fetchSharedBundle(db, bundleToken);
+      const sharedBundle = await trackOperation(
+        "Load shared bundle",
+        {
+          feature: "PublicShare",
+          function: "initViewer",
+          operation: "firestore.getDoc",
+          collection: "docuAlignPublicBundles",
+        },
+        () => fetchSharedBundle(db, bundleToken),
+      );
       if (!sharedBundle) {
         setStatus("This share link is no longer available. Ask the report owner for a new link.");
         return;
       }
       renderSharedBundle(sharedBundle);
-    } catch (error) {
+    } catch {
+      // Failure already logged by trackOperation; show the recovery message.
       setStatus("Could not load this shared report. Check your connection and try again.");
-      console.error("[DocuAlign] Failed to load shared bundle", error, {
-        feature: "PublicShare",
-        function: "initViewer",
-        operation: "firestore.getDoc",
-        collection: "docuAlignPublicBundles",
-        category: error?.code || "DatabaseReadFailure",
-      });
     }
     return;
   }
 
   try {
-    const share = await fetchSharedReport(db, shareToken);
+    const share = await trackOperation(
+      "Load shared report",
+      {
+        feature: "PublicShare",
+        function: "initViewer",
+        operation: "firestore.getDoc",
+        collection: "docuAlignPublicShares",
+      },
+      () => fetchSharedReport(db, shareToken),
+    );
     if (!share) {
       setStatus("This share link is no longer available. Ask the report owner for a new link.");
       return;
     }
     renderSharedReport(share);
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; show the recovery message.
     setStatus("Could not load this shared report. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to load shared report", error, {
-      feature: "PublicShare",
-      function: "initViewer",
-      operation: "firestore.getDoc",
-      collection: "docuAlignPublicShares",
-      category: error?.code || "DatabaseReadFailure",
-    });
   }
 }
 
+initObservability();
 initViewer();

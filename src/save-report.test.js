@@ -144,7 +144,7 @@ describe("save-report module", () => {
     );
     expect(btn.disabled).toBe(false);
     expect(consoleSpy).toHaveBeenCalledWith(
-      "[DocuAlign] Failed to save report",
+      "[DocuAlign] Save report to cloud failed",
       expect.any(Error),
       expect.objectContaining({ feature: "CloudPersistence", function: "cloudSave.onClick" })
     );

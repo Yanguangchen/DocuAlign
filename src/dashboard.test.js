@@ -177,7 +177,7 @@ describe("dashboard module", () => {
       "Could not load saved reports. Check your connection and try again."
     );
     expect(consoleSpy).toHaveBeenCalledWith(
-      "[DocuAlign] Failed to load saved reports",
+      "[DocuAlign] Load saved reports failed",
       expect.any(Error),
       expect.objectContaining({ feature: "Dashboard", function: "loadReports" })
     );
@@ -191,7 +191,7 @@ describe("dashboard module", () => {
     await loadReports({});
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      "[DocuAlign] Failed to load saved reports",
+      "[DocuAlign] Load saved reports failed",
       expect.any(Error),
       expect.objectContaining({ safeIdentifier: "anonymous" })
     );
@@ -317,7 +317,7 @@ describe("dashboard module", () => {
         "Could not create the public link. Try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(
-        "[DocuAlign] Failed to publish public share link",
+        "[DocuAlign] Publish public share link failed",
         expect.any(Error),
         expect.objectContaining({ feature: "PublicShare", function: "handleShareClick" }),
       );
@@ -542,7 +542,7 @@ describe("dashboard module", () => {
         "Could not create the group link. Try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(
-        "[DocuAlign] Failed to publish group link",
+        "[DocuAlign] Publish group link failed",
         expect.any(Error),
         expect.objectContaining({ feature: "PublicShare", function: "handleBundleClick" }),
       );
@@ -642,7 +642,7 @@ describe("dashboard module", () => {
       expect(button.dataset.armed).toBe("false");
       expect(document.querySelectorAll(".delete-button")).toHaveLength(2);
       expect(consoleSpy).toHaveBeenCalledWith(
-        "[DocuAlign] Failed to delete report",
+        "[DocuAlign] Delete report failed",
         expect.any(Error),
         expect.objectContaining({ feature: "Dashboard", function: "handleDeleteClick" }),
       );
