@@ -7,6 +7,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { saveReport } from "./lib/reports.js";
+import { trackOperation } from "./lib/logger.js";
 const cloudSave = document.querySelector("#cloud-save");
 const fileName = document.querySelector("#file-name");
 const feedback = document.querySelector("#feedback");
@@ -48,23 +49,27 @@ cloudSave?.addEventListener("click", async () => {
   setFeedback("Saving report to the cloud…");
 
   try {
-    await saveReport(db, {
-      reportName: reportNameFromSource(source),
-      sourceFileName: source,
-      status: "complete",
-      createdBy: currentUser.email ?? null,
-    });
+    await trackOperation(
+      "Save report to cloud",
+      {
+        feature: "CloudPersistence",
+        function: "cloudSave.onClick",
+        operation: "firestore.addDoc",
+        collection: "docuAlignReports",
+        safeIdentifier: reportNameFromSource(source),
+      },
+      () =>
+        saveReport(db, {
+          reportName: reportNameFromSource(source),
+          sourceFileName: source,
+          status: "complete",
+          createdBy: currentUser.email ?? null,
+        }),
+    );
     setFeedback("Report saved. View it anytime on the dashboard.");
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     cloudSave.disabled = false;
     setFeedback("Could not save the report. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to save report", error, {
-      feature: "CloudPersistence",
-      function: "cloudSave.onClick",
-      operation: "firestore.addDoc",
-      collection: "docuAlignReports",
-      safeIdentifier: reportNameFromSource(source),
-      category: error?.code || "DatabaseWriteFailure",
-    });
   }
 });

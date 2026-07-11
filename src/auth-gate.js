@@ -15,6 +15,10 @@ import {
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "./lib/firebase.js";
+import { logError, logInfo, logWarn } from "./lib/logger.js";
+import { initObservability } from "./lib/observability.js";
+
+initObservability();
 
 const authGate = document.querySelector("#auth-gate");
 const protectedApp = document.querySelector("#protected-app");
@@ -42,7 +46,7 @@ export function showApp(user) {
 
 export async function hasDocuAlignAccess(user) {
   if (!user?.emailVerified) {
-    console.warn("[DocuAlign] Access check denied: email not verified", {
+    logWarn("Access check denied: email not verified", {
       feature: "AuthGate",
       function: "hasDocuAlignAccess",
       operation: "verifyEmail",
@@ -57,7 +61,7 @@ export async function hasDocuAlignAccess(user) {
     return true;
   } catch (error) {
     if (error?.code === "permission-denied") {
-      console.warn("[DocuAlign] Access check denied: Firestore permission-denied", {
+      logWarn("Access check denied: Firestore permission-denied", {
         feature: "AuthGate",
         function: "hasDocuAlignAccess",
         operation: "firestore.getDoc",
@@ -66,7 +70,7 @@ export async function hasDocuAlignAccess(user) {
       });
       return false;
     }
-    console.error("[DocuAlign] Access probe verification failure", error, {
+    logError("Access probe verification failure", error, {
       feature: "AuthGate",
       function: "hasDocuAlignAccess",
       operation: "firestore.getDoc",
@@ -88,7 +92,7 @@ signInButton.addEventListener("click", async () => {
     await signInWithPopup(auth, provider);
   } catch (error) {
     if (error?.code === "auth/popup-closed-by-user") {
-      console.info("[DocuAlign] Sign-in popup cancelled by user", {
+      logInfo("Sign-in popup cancelled by user", {
         feature: "AuthGate",
         function: "signInButton.onClick",
         operation: "signInWithPopup",
@@ -98,7 +102,7 @@ signInButton.addEventListener("click", async () => {
       return;
     }
 
-    console.error("[DocuAlign] Google sign-in failure", error, {
+    logError("Google sign-in failure", error, {
       feature: "AuthGate",
       function: "signInButton.onClick",
       operation: "signInWithPopup",
@@ -113,7 +117,7 @@ signOutButton.addEventListener("click", async () => {
   try {
     await signOut(auth);
   } catch (error) {
-    console.error("[DocuAlign] Sign out failure", error, {
+    logError("Sign out failure", error, {
       feature: "AuthGate",
       function: "signOutButton.onClick",
       operation: "signOut",
@@ -139,7 +143,7 @@ onAuthStateChanged(auth, async (user) => {
 
     showApp(user);
   } catch (error) {
-    console.error("[DocuAlign] Verification failure during auth state change", error, {
+    logError("Verification failure during auth state change", error, {
       feature: "AuthGate",
       function: "onAuthStateChanged",
       operation: "hasDocuAlignAccess",

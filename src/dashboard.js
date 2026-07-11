@@ -8,6 +8,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { deleteReport, fetchReports, filterReportsByDate } from "./lib/reports.js";
 import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
+import { trackOperation } from "./lib/logger.js";
 
 const filterForm = document.querySelector("#date-filter");
 const fromInput = document.querySelector("#filter-from");
@@ -145,7 +146,17 @@ export async function handleBundleClick() {
   bundleCreate.disabled = true;
 
   try {
-    const token = await publishBundle(db, reports);
+    const token = await trackOperation(
+      "Publish group link",
+      {
+        feature: "PublicShare",
+        function: "handleBundleClick",
+        operation: "firestore.setDoc",
+        collection: "docuAlignPublicBundles",
+        safeIdentifier: `selection:${reports.length}`,
+      },
+      () => publishBundle(db, reports),
+    );
     const url = buildBundleUrl(token);
 
     const anchor = document.createElement("a");
@@ -161,18 +172,11 @@ export async function handleBundleClick() {
       // Best effort: surfacing the link matters, the copy is a convenience.
       await navigator.clipboard.writeText(url).catch(() => {});
     }
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     bundleCreate.disabled = false;
     bundleLink.textContent = "Could not create the group link. Try again.";
     bundleLink.hidden = false;
-    console.error("[DocuAlign] Failed to publish group link", error, {
-      feature: "PublicShare",
-      function: "handleBundleClick",
-      operation: "firestore.setDoc",
-      collection: "docuAlignPublicBundles",
-      safeIdentifier: `selection:${reports.length}`,
-      category: error?.code || "DatabaseWriteFailure",
-    });
   }
 }
 
@@ -187,7 +191,17 @@ export async function handleShareClick(button) {
   button.disabled = true;
 
   try {
-    const token = await publishReport(db, report);
+    const token = await trackOperation(
+      "Publish public share link",
+      {
+        feature: "PublicShare",
+        function: "handleShareClick",
+        operation: "firestore.setDoc",
+        collection: "docuAlignPublicShares",
+        safeIdentifier: report.id,
+      },
+      () => publishReport(db, report),
+    );
     const url = buildPublicUrl(token);
 
     if (output) {
@@ -205,20 +219,13 @@ export async function handleShareClick(button) {
       // Best effort: surfacing the link matters, the copy is a convenience.
       await navigator.clipboard.writeText(url).catch(() => {});
     }
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     button.disabled = false;
     if (output) {
       output.textContent = "Could not create the public link. Try again.";
       output.hidden = false;
     }
-    console.error("[DocuAlign] Failed to publish public share link", error, {
-      feature: "PublicShare",
-      function: "handleShareClick",
-      operation: "firestore.setDoc",
-      collection: "docuAlignPublicShares",
-      safeIdentifier: button.dataset.reportId,
-      category: error?.code || "DatabaseWriteFailure",
-    });
   }
 }
 
@@ -240,22 +247,25 @@ export async function handleDeleteClick(button) {
   button.disabled = true;
 
   try {
-    await deleteReport(db, id);
+    await trackOperation(
+      "Delete report",
+      {
+        feature: "Dashboard",
+        function: "handleDeleteClick",
+        operation: "firestore.deleteDoc",
+        collection: "docuAlignReports",
+        safeIdentifier: id,
+      },
+      () => deleteReport(db, id),
+    );
     allReports = allReports.filter((entry) => entry.id !== id);
     bundleSelection.delete(id);
     render();
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     button.disabled = false;
     button.dataset.armed = "false";
     button.textContent = "Delete";
-    console.error("[DocuAlign] Failed to delete report", error, {
-      feature: "Dashboard",
-      function: "handleDeleteClick",
-      operation: "firestore.deleteDoc",
-      collection: "docuAlignReports",
-      safeIdentifier: id,
-      category: error?.code || "DatabaseDeleteFailure",
-    });
   }
 }
 
@@ -298,19 +308,22 @@ export async function loadReports(user) {
   resultCount.textContent = "";
 
   try {
-    allReports = await fetchReports(db);
+    allReports = await trackOperation(
+      "Load saved reports",
+      {
+        feature: "Dashboard",
+        function: "loadReports",
+        operation: "firestore.getDocs",
+        collection: "docuAlignReports",
+        safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
+      },
+      () => fetchReports(db),
+    );
     render();
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     loadedForUser = null;
     setStatus("Could not load saved reports. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to load saved reports", error, {
-      feature: "Dashboard",
-      function: "loadReports",
-      operation: "firestore.getDocs",
-      collection: "docuAlignReports",
-      category: error?.code || "DatabaseReadFailure",
-      safeIdentifier: user?.uid ? `uid:${user.uid}` : "anonymous",
-    });
   }
 }
 

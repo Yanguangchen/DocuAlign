@@ -32,14 +32,14 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>12/12</span>
+                <span class='fraction'>10/10</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>4/4</span>
+                <span class='fraction'>5/5</span>
             </div>
         
             
@@ -133,7 +133,13 @@
 <a name='L68'></a><a href='#L68'>68</a>
 <a name='L69'></a><a href='#L69'>69</a>
 <a name='L70'></a><a href='#L70'>70</a>
-<a name='L71'></a><a href='#L71'>71</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -153,7 +159,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">10x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -189,18 +195,22 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
@@ -212,6 +222,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { saveReport } from "./lib/reports.js";
+import { trackOperation } from "./lib/logger.js";
 const cloudSave = document.querySelector("#cloud-save");
 const fileName = document.querySelector("#file-name");
 const feedback = document.querySelector("#feedback");
@@ -253,24 +264,28 @@ cloudSave?.addEventListener("click", async () =&gt; {
   setFeedback("Saving report to the cloud…");
 &nbsp;
   try {
-    await saveReport(db, {
-      reportName: reportNameFromSource(source),
-      sourceFileName: source,
-      status: "complete",
-      createdBy: currentUser.email ?? null,
-    });
+    await trackOperation(
+      "Save report to cloud",
+      {
+        feature: "CloudPersistence",
+        function: "cloudSave.onClick",
+        operation: "firestore.addDoc",
+        collection: "docuAlignReports",
+        safeIdentifier: reportNameFromSource(source),
+      },
+      () =&gt;
+        saveReport(db, {
+          reportName: reportNameFromSource(source),
+          sourceFileName: source,
+          status: "complete",
+          createdBy: currentUser.email ?? null,
+        }),
+    );
     setFeedback("Report saved. View it anytime on the dashboard.");
-  } catch (error) {
+  } catch {
+    // Failure already logged by trackOperation; recover the UI.
     cloudSave.disabled = false;
     setFeedback("Could not save the report. Check your connection and try again.");
-    console.error("[DocuAlign] Failed to save report", error, {
-      feature: "CloudPersistence",
-      function: "cloudSave.onClick",
-      operation: "firestore.addDoc",
-      collection: "docuAlignReports",
-      safeIdentifier: reportNameFromSource(source),
-      category: error?.code || "DatabaseWriteFailure",
-    });
   }
 });
 &nbsp;</pre></td></tr></table></pre>
@@ -280,7 +295,7 @@ cloudSave?.addEventListener("click", async () =&gt; {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-07-04T13:01:54.196Z
+                at 2026-07-11T06:22:07.655Z
             </div>
         <script src="../prettify.js"></script>
         <script>
