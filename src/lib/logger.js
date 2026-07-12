@@ -5,7 +5,8 @@
  * context such as feature/function/operation/category) so console output is
  * searchable and a future remote sink can subscribe without touching call
  * sites. Also keeps a small in-memory buffer of recent events for support
- * diagnostics and provides an async operation timer for latency visibility.
+ * diagnostics and provides a correlated async operation lifecycle for latency
+ * and in-flight work visibility.
  */
 
 export const LOG_LEVELS = Object.freeze({
@@ -36,6 +37,7 @@ const recentEvents = [];
 const subscribers = new Set();
 
 let minimumLevel = LOG_LEVELS.info;
+let operationSequence = 0;
 
 /**
  * Raise or lower the minimum level that reaches the console and buffer.
@@ -84,15 +86,22 @@ function describeError(error) {
 function emit(level, message, context, error) {
   if (LEVEL_RANKS.get(level) < minimumLevel) return;
 
-  const event = {
+  // Caller context is intentionally applied first. The logger owns the core
+  // identity fields so an accidental `message`, `level`, or `sessionId` key at
+  // a call site cannot corrupt filtering and correlation downstream.
+  const event = Object.freeze({
+    ...context,
+    ...describeError(error),
+    feature: context.feature ?? "Application",
+    function: context.function ?? "unknown",
+    operation: context.operation ?? "unknown",
+    category: context.category ?? "General",
     timestamp: new Date().toISOString(),
     level,
     sessionId,
     page: globalThis.location?.pathname ?? "unknown",
     message,
-    ...describeError(error),
-    ...context,
-  };
+  });
 
   recentEvents.push(event);
   if (recentEvents.length > RECENT_EVENT_LIMIT) recentEvents.shift();
@@ -135,32 +144,56 @@ export function logError(message, error, context = {}) {
 }
 
 /**
- * Time an async operation and log its outcome: an info event with durationMs
- * on success, an error event (then rethrow) on failure. Callers keep their
- * catch blocks for UI recovery but no longer need to log inside them.
+ * Time an async operation and log its lifecycle: a start event followed by an
+ * info event with durationMs on success or an error event (then rethrow) on
+ * failure. Both events share an operationId for correlation.
  * @template T
  * @param {string} message - Summary used for both the success and failure event.
  * @param {object} context - feature/function/operation/category fields.
  * @param {() => Promise<T>} operation
+ * @param {{expectedErrorCodes?: string[]}} [options] - Error codes that are
+ * expected rejections rather than application failures.
  * @returns {Promise<T>} The operation's result.
  */
-export async function trackOperation(message, context, operation) {
+export async function trackOperation(message, context, operation, options = {}) {
+  operationSequence += 1;
+  const operationId = `${sessionId}-${operationSequence}`;
   const startedAt = performance.now();
+  logInfo(`${message} started`, {
+    ...context,
+    operationId,
+    outcome: "started",
+    category: context.category ?? "OperationLifecycle",
+  });
+
   try {
     const result = await operation();
     logInfo(`${message} succeeded`, {
       ...context,
+      operationId,
       durationMs: Math.round(performance.now() - startedAt),
       outcome: "success",
+      category: context.category ?? "OperationLifecycle",
     });
     return result;
   } catch (error) {
-    logError(`${message} failed`, error, {
+    const expected = (options.expectedErrorCodes ?? []).includes(error?.code);
+    const failureContext = {
       ...context,
+      operationId,
       category: context.category ?? error?.code ?? "OperationFailure",
       durationMs: Math.round(performance.now() - startedAt),
-      outcome: "failure",
-    });
+      outcome: expected ? "rejected" : "failure",
+    };
+
+    if (expected) {
+      logWarn(`${message} rejected`, {
+        ...failureContext,
+        ...describeError(error),
+      });
+    } else {
+      logError(`${message} failed`, error, failureContext);
+    }
     throw error;
   }
 }

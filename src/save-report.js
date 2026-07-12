@@ -8,6 +8,10 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { saveReport } from "./lib/reports.js";
 import { trackOperation } from "./lib/logger.js";
+import { initObservability } from "./lib/observability.js";
+
+initObservability();
+
 const cloudSave = document.querySelector("#cloud-save");
 const fileName = document.querySelector("#file-name");
 const feedback = document.querySelector("#feedback");

@@ -1,12 +1,17 @@
+/**
+ * @file pdf-export.test.js
+ * @description Verifies the workspace PDF export URL and the dual-asset
+ * contract required by direct-file and Vite deployments.
+ */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const projectRoot = resolve(".");
-const indexHtml = readFileSync(resolve(projectRoot, "index.html"), "utf8");
-const exportUrlMatch = indexHtml.match(
-  /new URL\("(\.\/SampleDocuments\/[^"?]+\.pdf)", window\.location\.href\)/,
+const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "utf8");
+const exportUrlMatch = workspaceSource.match(
+  /new URL\("(\.\/SampleDocuments\/[^"?]+\.pdf)", globalThis\.location\.href\)/,
 );
 
 function sha256(buffer) {
@@ -15,7 +20,7 @@ function sha256(buffer) {
 
 describe("PDF export asset", () => {
   it("resolves to identical full five-page PDFs for direct-file and Vite deployments", () => {
-    expect(exportUrlMatch, "index.html must declare a relative PDF export URL").not.toBeNull();
+    expect(exportUrlMatch, "workspace.js must declare a relative PDF export URL").not.toBeNull();
 
     const relativeAssetPath = exportUrlMatch[1].replace(/^\.\//, "");
     const directFilePath = resolve(projectRoot, relativeAssetPath);
