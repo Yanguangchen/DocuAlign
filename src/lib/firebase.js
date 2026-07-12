@@ -10,6 +10,7 @@ import * as analytics from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
+import { logWarn } from "./logger.js";
 
 export const firebaseConfig = {
   apiKey: "AIzaSyDovmjClkov6q1qRQkkgCExH31rEbX0X2M",
@@ -43,7 +44,16 @@ export const getAppAnalytics = () => {
         return analytics.getAnalytics(app);
       }
       return null;
-    }).catch(() => null);
+    }).catch((error) => {
+      logWarn("Firebase Analytics unavailable", {
+        feature: "Firebase",
+        function: "getAppAnalytics",
+        operation: "analytics.isSupported",
+        category: "AnalyticsInitializationFailure",
+        errorMessage: String(error),
+      });
+      return null;
+    });
   }
   return analyticsPromise;
 };

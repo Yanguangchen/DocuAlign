@@ -1,9 +1,33 @@
+/**
+ * @file vite.config.js
+ * @description Vite build, test, and coverage configuration for DocuAlign,
+ * including emission of classic scripts required by direct-file execution.
+ */
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const classicScripts = ["early-observability.js", "workspace.js"];
+
+function emitClassicScripts() {
+  return {
+    name: "docualign-classic-scripts",
+    apply: "build",
+    async buildStart() {
+      for (const fileName of classicScripts) {
+        this.emitFile({
+          type: "asset",
+          fileName: `src/${fileName}`,
+          source: await readFile(resolve(import.meta.dirname, "src", fileName)),
+        });
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), emitClassicScripts()],
   build: {
     rollupOptions: {
       input: {

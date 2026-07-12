@@ -87,6 +87,37 @@ describe("auth-gate module", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it("correlates and times the Firestore access probe without error-level denial noise", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { hasDocuAlignAccess } = await import("./auth-gate.js");
+
+    mockGetDoc.mockRejectedValueOnce({
+      code: "permission-denied",
+      message: "Missing or insufficient permissions",
+    });
+    expect(await hasDocuAlignAccess({ emailVerified: true, uid: "u-denied" })).toBe(false);
+
+    const started = infoSpy.mock.calls.find(([message]) =>
+      message.includes("Access probe started"),
+    )?.[1];
+    const rejected = warnSpy.mock.calls.find(([message]) =>
+      message.includes("Access probe rejected"),
+    )?.[1];
+    expect(started).toMatchObject({
+      operation: "firestore.getDoc",
+      category: "AuthorizationProbe",
+    });
+    expect(rejected).toMatchObject({
+      operationId: started.operationId,
+      outcome: "rejected",
+      durationMs: expect.any(Number),
+      safeIdentifier: "uid:u-denied",
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it("logs uid-scoped safe identifiers when the user has a uid", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -179,9 +210,13 @@ describe("auth-gate module", () => {
 
     await new Promise((r) => setTimeout(r, 15));
     expect(errorSpy).toHaveBeenCalledWith(
-      "[DocuAlign] Sign out failure",
+      "[DocuAlign] Sign out failed",
       expect.any(Error),
-      expect.objectContaining({ operation: "signOut" })
+      expect.objectContaining({
+        operation: "firebaseAuth.signOut",
+        outcome: "failure",
+        durationMs: expect.any(Number),
+      })
     );
     expect(btn.disabled).toBe(false);
   });
@@ -244,9 +279,14 @@ describe("auth-gate module", () => {
 
     await new Promise((r) => setTimeout(r, 15));
     expect(errorSpy).toHaveBeenCalledWith(
-      "[DocuAlign] Verification failure during auth state change",
+      "[DocuAlign] Access probe failed",
       expect.any(Error),
-      expect.objectContaining({ safeIdentifier: "uid:u-err" })
+      expect.objectContaining({
+        safeIdentifier: "uid:u-err",
+        operation: "firestore.getDoc",
+        outcome: "failure",
+        durationMs: expect.any(Number),
+      })
     );
   });
 });

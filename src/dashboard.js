@@ -8,7 +8,10 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import { deleteReport, fetchReports, filterReportsByDate } from "./lib/reports.js";
 import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
-import { trackOperation } from "./lib/logger.js";
+import { logWarn, trackOperation } from "./lib/logger.js";
+import { initObservability } from "./lib/observability.js";
+
+initObservability();
 
 const filterForm = document.querySelector("#date-filter");
 const fromInput = document.querySelector("#filter-from");
@@ -25,6 +28,24 @@ let allReports = [];
 let loadedForUser = null;
 // Report ids ticked for grouping into one link; survives re-renders.
 const bundleSelection = new Set();
+
+async function copyToClipboard(url, caller) {
+  if (!navigator.clipboard?.writeText) return;
+
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch (error) {
+    // Copying is a convenience and must not hide the rendered capability URL,
+    // but failures remain useful for diagnosing browser permission issues.
+    logWarn("Clipboard copy failed", {
+      feature: "PublicShare",
+      function: caller,
+      operation: "clipboard.writeText",
+      category: "ClipboardFailure",
+      errorMessage: String(error),
+    });
+  }
+}
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -168,10 +189,7 @@ export async function handleBundleClick() {
     bundleLink.hidden = false;
     bundleCreate.textContent = "Group link created";
 
-    if (navigator.clipboard?.writeText) {
-      // Best effort: surfacing the link matters, the copy is a convenience.
-      await navigator.clipboard.writeText(url).catch(() => {});
-    }
+    await copyToClipboard(url, "handleBundleClick");
   } catch {
     // Failure already logged by trackOperation; recover the UI.
     bundleCreate.disabled = false;
@@ -215,10 +233,7 @@ export async function handleShareClick(button) {
     }
     button.textContent = "Public link created";
 
-    if (navigator.clipboard?.writeText) {
-      // Best effort: surfacing the link matters, the copy is a convenience.
-      await navigator.clipboard.writeText(url).catch(() => {});
-    }
+    await copyToClipboard(url, "handleShareClick");
   } catch {
     // Failure already logged by trackOperation; recover the UI.
     button.disabled = false;

@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearRecentEvents, getRecentEvents, sessionId } from "./logger.js";
-import { initObservability } from "./observability.js";
+import { initObservability, replayEarlyEvents } from "./observability.js";
 
 describe("initObservability", () => {
   beforeEach(() => {
@@ -56,6 +56,35 @@ describe("initObservability", () => {
     });
   });
 
+  it("captures resource-load failures without retaining URL query data", () => {
+    const image = document.createElement("img");
+    image.src = "https://cdn.example.test/report.png?token=secret#preview";
+    document.body.append(image);
+    image.dispatchEvent(new Event("error"));
+
+    const stylesheet = document.createElement("link");
+    stylesheet.href = "https://cdn.example.test/theme.css?cache=123";
+    document.head.append(stylesheet);
+    stylesheet.dispatchEvent(new Event("error"));
+
+    expect(getRecentEvents()).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "Resource failed to load",
+        category: "ResourceLoadFailure",
+        resourceType: "img",
+        source: "https://cdn.example.test/report.png",
+      }),
+      expect.objectContaining({
+        level: "error",
+        message: "Resource failed to load",
+        category: "ResourceLoadFailure",
+        resourceType: "link",
+        source: "https://cdn.example.test/theme.css",
+      }),
+    ]);
+  });
+
   it("logs unhandled promise rejections", () => {
     globalThis.dispatchEvent(new Event("unhandledrejection"));
 
@@ -68,8 +97,67 @@ describe("initObservability", () => {
     });
   });
 
+  it("logs browser connectivity changes", () => {
+    globalThis.dispatchEvent(new Event("offline"));
+    globalThis.dispatchEvent(new Event("online"));
+
+    expect(getRecentEvents()).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        message: "Browser went offline",
+        category: "ConnectivityChange",
+        online: false,
+      }),
+      expect.objectContaining({
+        level: "info",
+        message: "Browser is online",
+        category: "ConnectivityChange",
+        online: true,
+      }),
+    ]);
+  });
+
+  it("replays queued startup failures through the structured logger", () => {
+    const stop = vi.fn();
+    const takeEvents = vi.fn(() => [{
+      timestamp: "2026-07-12T01:02:03.000Z",
+      sessionId: "early-1",
+      message: "Early module failure",
+      errorMessage: "module failed",
+      feature: "ObservabilityBootstrap",
+      category: "EarlyUncaughtException",
+      source: "https://example.test/startup.js",
+    }]);
+
+    replayEarlyEvents({ stop, takeEvents });
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(takeEvents).toHaveBeenCalledOnce();
+    expect(getRecentEvents()).toEqual([
+      expect.objectContaining({
+        level: "error",
+        message: "Early module failure",
+        errorMessage: "module failed",
+        operation: "bootstrap.replay",
+        observedAt: "2026-07-12T01:02:03.000Z",
+        earlySessionId: "early-1",
+      }),
+    ]);
+  });
+
   it("exposes the diagnostics handle for support", () => {
     expect(globalThis.docuAlignDiagnostics.sessionId).toBe(sessionId);
     expect(globalThis.docuAlignDiagnostics.getRecentEvents).toBeTypeOf("function");
+    expect(globalThis.docuAlignDiagnostics.getSnapshot).toBeTypeOf("function");
+
+    const snapshot = globalThis.docuAlignDiagnostics.getSnapshot();
+    expect(snapshot).toMatchObject({
+      sessionId,
+      page: globalThis.location.pathname,
+      online: navigator.onLine,
+      visibilityState: document.visibilityState,
+      events: [],
+    });
+    expect(snapshot.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });

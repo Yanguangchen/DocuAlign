@@ -84,10 +84,20 @@ describe('Firebase SDK Setup', () => {
   });
 
   it('should return null when isSupported rejects with an error', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(isSupported).mockRejectedValue(new Error('Analytics not supported in this environment'));
 
     const analyticsInstance = await getAppAnalytics();
     expect(analyticsInstance).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[DocuAlign] Firebase Analytics unavailable',
+      expect.objectContaining({
+        feature: 'Firebase',
+        operation: 'analytics.isSupported',
+        category: 'AnalyticsInitializationFailure',
+        errorMessage: 'Error: Analytics not supported in this environment',
+      }),
+    );
   });
 
   it('should reuse existing app instance when getApps() is not empty upon module load', async () => {

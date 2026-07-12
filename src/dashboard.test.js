@@ -325,6 +325,7 @@ describe("dashboard module", () => {
     });
 
     it("still succeeds when the clipboard copy is rejected", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const writeText = vi.fn().mockRejectedValue(new Error("denied"));
       Object.defineProperty(navigator, "clipboard", {
         value: { writeText },
@@ -339,6 +340,15 @@ describe("dashboard module", () => {
 
       expect(button.textContent).toContain("created");
       expect(document.querySelector(".share-link a").getAttribute("href")).toBe(SHARE_URL);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Clipboard copy failed",
+        expect.objectContaining({
+          function: "handleShareClick",
+          operation: "clipboard.writeText",
+          category: "ClipboardFailure",
+          errorMessage: "Error: denied",
+        }),
+      );
       delete navigator.clipboard;
     });
 
@@ -479,6 +489,7 @@ describe("dashboard module", () => {
     });
 
     it("still shows the group link without a clipboard or when the copy fails", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       Object.defineProperty(navigator, "clipboard", {
         value: undefined,
         configurable: true,
@@ -500,6 +511,15 @@ describe("dashboard module", () => {
       document.querySelector("#bundle-create").click();
       await new Promise((r) => setTimeout(r, 15));
       expect(document.querySelector("#bundle-create").textContent).toContain("created");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Clipboard copy failed",
+        expect.objectContaining({
+          function: "handleBundleClick",
+          operation: "clipboard.writeText",
+          category: "ClipboardFailure",
+          errorMessage: "Error: denied",
+        }),
+      );
       delete navigator.clipboard;
     });
 

@@ -48,6 +48,24 @@ describe("logger", () => {
     expect(event.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("prevents caller context from overwriting core event identity", () => {
+    logInfo("Trusted message", {
+      level: "error",
+      message: "Spoofed message",
+      sessionId: "spoofed-session",
+      timestamp: "not-a-date",
+    });
+
+    const [message, event] = console.info.mock.calls[0];
+    expect(message).toBe("[DocuAlign] Trusted message");
+    expect(event).toMatchObject({
+      level: "info",
+      message: "Trusted message",
+      sessionId,
+    });
+    expect(event.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
   it("routes each level to the matching console method", () => {
     logDebug("d");
     logInfo("i");
@@ -58,6 +76,17 @@ describe("logger", () => {
     expect(console.info).toHaveBeenCalledTimes(1);
     expect(console.warn).toHaveBeenCalledTimes(1);
     expect(console.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("supplies classification defaults when a caller omits context", () => {
+    logInfo("Unclassified event");
+
+    expect(console.info.mock.calls[0][1]).toMatchObject({
+      feature: "Application",
+      function: "unknown",
+      operation: "unknown",
+      category: "General",
+    });
   });
 
   it("attaches error details and passes the raw error to the console", () => {
@@ -142,10 +171,19 @@ describe("logger", () => {
       const result = await trackOperation("Load data", context, async () => 42);
 
       expect(result).toBe(42);
-      const [message, event] = console.info.mock.calls[0];
+      expect(console.info).toHaveBeenCalledTimes(2);
+      const [, startedEvent] = console.info.mock.calls[0];
+      const [message, event] = console.info.mock.calls[1];
       expect(message).toBe("[DocuAlign] Load data succeeded");
       expect(event).toMatchObject({ ...context, outcome: "success" });
+      expect(event.category).toBe("OperationLifecycle");
       expect(event.durationMs).toBeTypeOf("number");
+      expect(startedEvent).toMatchObject({
+        ...context,
+        outcome: "started",
+        category: "OperationLifecycle",
+        operationId: event.operationId,
+      });
     });
 
     it("logs a failure event and rethrows", async () => {
@@ -164,6 +202,11 @@ describe("logger", () => {
         category: "unavailable",
       });
       expect(event.durationMs).toBeTypeOf("number");
+      expect(console.info.mock.calls[0][1]).toMatchObject({
+        ...context,
+        outcome: "started",
+        operationId: event.operationId,
+      });
     });
 
     it("prefers an explicit category over the error code", async () => {
@@ -177,6 +220,33 @@ describe("logger", () => {
 
       const [, , event] = console.error.mock.calls[0];
       expect(event.category).toBe("DatabaseReadFailure");
+    });
+
+    it("records configured expected failures as warnings and still rethrows", async () => {
+      const denial = Object.assign(new Error("denied"), {
+        code: "permission-denied",
+      });
+
+      await expect(
+        trackOperation(
+          "Probe access",
+          { ...context, category: "AuthorizationProbe" },
+          () => Promise.reject(denial),
+          { expectedErrorCodes: ["permission-denied"] },
+        ),
+      ).rejects.toBe(denial);
+
+      expect(console.error).not.toHaveBeenCalled();
+      const [message, event] = console.warn.mock.calls[0];
+      expect(message).toBe("[DocuAlign] Probe access rejected");
+      expect(event).toMatchObject({
+        errorCode: "permission-denied",
+        errorMessage: "denied",
+        category: "AuthorizationProbe",
+        outcome: "rejected",
+      });
+      expect(event.durationMs).toBeTypeOf("number");
+      expect(console.info.mock.calls[0][1].operationId).toBe(event.operationId);
     });
   });
 });
