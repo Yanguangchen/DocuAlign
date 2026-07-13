@@ -174,6 +174,42 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       );
     });
 
+    it("allows publishing optional extracted display fields", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertSucceeds(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({
+            reportTitle: "Reclamation Sand Testing Report",
+            clientName: "Xinsha Holding Pte Ltd",
+            jobRef: "X-2026-522-2",
+          }),
+        ),
+      );
+    });
+
+    it("denies oversized or non-string display fields", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({ reportTitle: "x".repeat(201) }),
+        ),
+      );
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({ clientName: 12345 }),
+        ),
+      );
+    });
+
     it("denies publishing extra fields such as staff emails", async () => {
       const context = testEnvironment.authenticatedContext("staff", {
         email: "ken@rakmat.com.sg",
