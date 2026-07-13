@@ -34,14 +34,39 @@ describe("view-report module", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    // The viewer fetches the PDF to derive file size and page count; answer
+    // with a fake 3-page document so tests stay deterministic and offline.
+    const fakePdf = new TextEncoder().encode(
+      `%PDF-1.4 /Type /Pages /Type /Page /Type /Page /Type /Page ${"x".repeat(1024 * 1024)}`,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(fakePdf.buffer),
+      }),
+    );
     document.body.innerHTML = `
       <p id="share-status"></p>
       <article id="share-report" hidden>
-        <h1 id="share-report-name"></h1>
-        <span id="share-report-status"></span>
-        <p id="share-source"></p>
-        <span id="share-published"></span>
+        <h2 id="share-report-name">RAK Concrete Test Report</h2>
+        <p id="share-report-subtitle" hidden></p>
+        <p id="share-report-status"></p>
+        <dl>
+          <dd id="share-shared-by">By RAK Materials Consultants</dd>
+          <dd id="share-published"></dd>
+          <dd id="share-reference"></dd>
+          <div id="share-size-row" hidden><dd id="share-size"></dd></div>
+          <div id="share-pages-row" hidden><dd id="share-pages"></dd></div>
+        </dl>
         <a id="share-pdf-link" href="#"></a>
+        <a id="share-download-link" href="#"></a>
+        <details id="share-source-details" hidden>
+          <p id="share-source"></p>
+        </details>
+        <iframe id="share-preview-frame" src="about:blank"></iframe>
+        <a id="share-preview-overlay" href="#"></a>
+        <p id="share-preview-caption">First page preview</p>
       </article>
       <article id="share-bundle" hidden>
         <strong id="share-bundle-name"></strong>
@@ -115,6 +140,34 @@ describe("view-report module", () => {
     });
   });
 
+  describe("formatShareStatus", () => {
+    it("maps known statuses to recipient-facing labels", async () => {
+      const { formatShareStatus } = await import("./view-report.js");
+      expect(formatShareStatus("complete")).toEqual({ icon: "✓", label: "Report complete" });
+      expect(formatShareStatus("saved").label).toBe("Report complete");
+      expect(formatShareStatus(null).label).toBe("Report complete");
+      expect(formatShareStatus("expired")).toMatchObject({
+        label: "Link expired",
+        hint: "Ask the report owner for a new link.",
+      });
+      expect(formatShareStatus("processing").label).toBe("Processing");
+    });
+
+    it("shows unknown statuses verbatim instead of hiding them", async () => {
+      const { formatShareStatus } = await import("./view-report.js");
+      expect(formatShareStatus("archived")).toEqual({ label: "archived" });
+    });
+  });
+
+  describe("formatFileSize", () => {
+    it("formats megabyte and kilobyte sizes", async () => {
+      const { formatFileSize } = await import("./view-report.js");
+      expect(formatFileSize(1.8 * 1024 * 1024)).toBe("1.8 MB");
+      expect(formatFileSize(512 * 1024)).toBe("512 KB");
+      expect(formatFileSize(10)).toBe("1 KB");
+    });
+  });
+
   describe("initViewer", () => {
     it("renders the shared report and links its PDF output", async () => {
       mockFetchSharedReport.mockResolvedValueOnce(share());
@@ -125,13 +178,59 @@ describe("view-report module", () => {
       expect(mockFetchSharedReport).toHaveBeenCalledWith({}, VALID_TOKEN);
       expect(document.querySelector("#share-report").hidden).toBe(false);
       expect(document.querySelector("#share-status").hidden).toBe(true);
-      expect(document.querySelector("#share-report-name").textContent).toBe("rak-report");
-      expect(document.querySelector("#share-report-status").textContent).toBe("complete");
+      expect(document.querySelector("#share-reference").textContent).toBe("rak-report");
+      expect(document.querySelector("#share-report-status").textContent).toContain(
+        "Report complete",
+      );
+      expect(document.querySelector("#share-source-details").hidden).toBe(false);
       expect(document.querySelector("#share-source").textContent).toContain("rak-report.xlsx");
       expect(document.querySelector("#share-published").textContent).not.toBe("");
       expect(document.querySelector("#share-pdf-link").getAttribute("href")).toBe(
         "SampleDocuments/SampleOutput.pdf",
       );
+      expect(document.querySelector("#share-download-link").getAttribute("href")).toBe(
+        "SampleDocuments/SampleOutput.pdf",
+      );
+      expect(document.querySelector("#share-preview-frame").getAttribute("src")).toBe(
+        "SampleDocuments/SampleOutput.pdf#page=1&toolbar=0&navpanes=0&scrollbar=0",
+      );
+      expect(document.querySelector("#share-preview-overlay").getAttribute("href")).toBe(
+        "SampleDocuments/SampleOutput.pdf",
+      );
+
+      // Without extracted title fields the card shows the generic title.
+      expect(document.querySelector("#share-report-name").textContent).toBe(
+        "RAK Concrete Test Report",
+      );
+      expect(document.querySelector("#share-report-subtitle").hidden).toBe(true);
+
+      // File size and page count arrive from a follow-up fetch of the PDF.
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(document.querySelector("#share-size-row").hidden).toBe(false);
+      expect(document.querySelector("#share-size").textContent).toBe("1.0 MB");
+      expect(document.querySelector("#share-pages-row").hidden).toBe(false);
+      expect(document.querySelector("#share-pages").textContent).toBe("3 pages");
+      expect(document.querySelector("#share-preview-caption").textContent).toBe("Page 1 of 3");
+    });
+
+    it("renders a data-driven title when the share carries extracted fields", async () => {
+      mockFetchSharedReport.mockResolvedValueOnce(
+        share({
+          reportTitle: "Reclamation Sand Testing Report",
+          clientName: "Xinsha Holding Pte Ltd",
+          jobRef: "X-2026-522-2",
+        }),
+      );
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+
+      expect(document.querySelector("#share-report-name").textContent).toBe(
+        "Reclamation Sand Testing Report",
+      );
+      const subtitle = document.querySelector("#share-report-subtitle");
+      expect(subtitle.hidden).toBe(false);
+      expect(subtitle.textContent).toBe("Xinsha Holding Pte Ltd · Job reference X-2026-522-2");
     });
 
     it("renders fallbacks when optional share fields are missing", async () => {
@@ -142,8 +241,11 @@ describe("view-report module", () => {
 
       await initViewer(`?share=${VALID_TOKEN}`);
 
-      expect(document.querySelector("#share-report-name").textContent).toBe("Untitled report");
-      expect(document.querySelector("#share-report-status").textContent).toBe("saved");
+      expect(document.querySelector("#share-reference").textContent).toBe("Untitled report");
+      expect(document.querySelector("#share-report-status").textContent).toContain(
+        "Report complete",
+      );
+      expect(document.querySelector("#share-source-details").hidden).toBe(true);
       expect(document.querySelector("#share-source").textContent).toBe("");
       expect(document.querySelector("#share-published").textContent).toBe("Date unavailable");
     });
@@ -155,7 +257,7 @@ describe("view-report module", () => {
 
       expect(mockFetchSharedReport).not.toHaveBeenCalled();
       expect(document.querySelector("#share-report").hidden).toBe(true);
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is not valid. Check the URL and try again.",
       );
     });
@@ -167,7 +269,7 @@ describe("view-report module", () => {
       await initViewer(`?share=${VALID_TOKEN}`);
 
       expect(document.querySelector("#share-report").hidden).toBe(true);
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is no longer available. Ask the report owner for a new link.",
       );
     });
@@ -216,7 +318,7 @@ describe("view-report module", () => {
       );
       const item = document.querySelector("#share-bundle-list li");
       expect(item.textContent).toContain("Untitled report");
-      expect(item.textContent).toContain("saved");
+      expect(item.textContent).toContain("Report complete");
     });
 
     it("shows the revoked message when a bundle no longer exists", async () => {
@@ -226,7 +328,7 @@ describe("view-report module", () => {
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
       expect(document.querySelector("#share-bundle").hidden).toBe(true);
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is no longer available. Ask the report owner for a new link.",
       );
     });
@@ -237,7 +339,7 @@ describe("view-report module", () => {
       await initViewer("?bundle=guessable");
 
       expect(mockFetchSharedBundle).not.toHaveBeenCalled();
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is not valid. Check the URL and try again.",
       );
     });
@@ -249,7 +351,7 @@ describe("view-report module", () => {
 
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "Could not load this shared report. Check your connection and try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(
@@ -264,13 +366,13 @@ describe("view-report module", () => {
       const { initViewer } = await import("./view-report.js");
 
       await initViewer();
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is not valid. Check the URL and try again.",
       );
 
       vi.stubGlobal("location", undefined);
       await initViewer();
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is not valid. Check the URL and try again.",
       );
       vi.unstubAllGlobals();
@@ -284,7 +386,7 @@ describe("view-report module", () => {
 
       await initViewer(`?share=${VALID_TOKEN}`);
 
-      expect(document.querySelector("#share-status").textContent).toBe(
+      expect(document.querySelector("#share-status").textContent).toContain(
         "Could not load this shared report. Check your connection and try again.",
       );
       expect(consoleSpy).toHaveBeenCalledWith(

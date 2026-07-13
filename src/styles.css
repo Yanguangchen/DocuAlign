@@ -394,6 +394,7 @@ h1 {
 
 .upload-symbol svg,
 .primary-button svg,
+.share-pdf-button svg,
 .file-icon svg {
   width: 26px;
   fill: none;
@@ -890,6 +891,379 @@ a:focus-visible {
   justify-content: center;
   margin-top: 12px;
   text-decoration: none;
+}
+
+.share-pdf-button svg {
+  width: 20px;
+}
+
+/* Public share viewer: compact hero so the report panel sits above the fold. */
+.share-main {
+  padding: 34px 0 44px;
+}
+
+.share-intro {
+  margin-bottom: 28px;
+}
+
+.share-heading {
+  max-width: 640px;
+  font-size: clamp(1.9rem, 3.8vw, 2.7rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.share-intro-copy {
+  margin-top: 10px;
+  font-size: 0.98rem;
+}
+
+.share-state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 0;
+}
+
+.share-state strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+/* Report details on the left, first-page PDF preview on the right (~52/48). */
+.share-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 26fr) minmax(260px, 24fr);
+  gap: 20px 40px;
+  padding: clamp(24px, 3.4vw, 36px);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 12px 12px 0 rgba(21, 45, 50, 0.09);
+  animation: rise-in 500ms 80ms ease-out both;
+}
+
+.share-panel::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 9rem;
+  height: 4px;
+  background: var(--accent);
+}
+
+.share-details {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.share-report-title {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.65rem, 3.2vw, 2.3rem);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.share-report-subtitle {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.share-status-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--teal);
+  font-size: 0.92rem;
+}
+
+.share-status-check {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  align-self: center;
+  color: #fffdf7;
+  background: var(--teal);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.share-status-line strong {
+  font-weight: 750;
+}
+
+.share-status-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.share-meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 22px;
+  padding: 18px 0;
+  border-top: 1px solid rgba(21, 45, 50, 0.1);
+  border-bottom: 1px solid rgba(21, 45, 50, 0.1);
+}
+
+.share-meta-row dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.share-meta-row dd {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 14px 18px;
+}
+
+.share-actions .share-pdf-button {
+  width: auto;
+  min-height: 52px;
+  margin-top: 0;
+  padding: 0 24px;
+}
+
+.share-pdf-button .share-external-icon {
+  width: 15px;
+  opacity: 0.75;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.share-download-link {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  color: var(--teal);
+  border: 1px solid var(--teal);
+  text-decoration: none;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.share-download-link svg {
+  width: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.share-download-link:hover {
+  background: var(--teal);
+  color: var(--paper);
+}
+
+.share-source-details summary {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.share-source-details[open] summary {
+  color: var(--ink);
+}
+
+.share-source-details .report-source {
+  margin-top: 8px;
+}
+
+.share-access-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.share-preview {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2dfd4;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(242, 239, 231, 0.72);
+  box-shadow: 0 10px 26px rgba(21, 45, 50, 0.1);
+}
+
+.share-preview-viewport {
+  position: relative;
+  flex: 1;
+}
+
+.share-preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1.3;
+  border: 0;
+  background: #fff;
+}
+
+/* Full-surface link over the iframe: clicking the preview opens the report,
+   and the visible chip labels that affordance. */
+.share-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 12px;
+  text-decoration: none;
+}
+
+.share-preview-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  color: #fffdf7;
+  border-radius: 3px;
+  background: rgba(21, 45, 50, 0.82);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: background 160ms ease;
+}
+
+.share-preview-expand svg {
+  width: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.share-preview-overlay:hover .share-preview-expand,
+.share-preview-overlay:focus-visible .share-preview-expand {
+  background: var(--teal);
+}
+
+.share-preview-caption {
+  margin: 0;
+  padding: 10px 14px;
+  color: var(--muted);
+  border-top: 1px solid #e2dfd4;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Sender trust strip across the bottom of the panel. */
+.share-sender {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(21, 45, 50, 0.1);
+}
+
+.share-sender-mark {
+  flex: 0 0 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #f7f0df;
+  background: var(--ink);
+  transform: rotate(-3deg);
+  font-family: Georgia, serif;
+  font-size: 1rem;
+}
+
+.share-sender p {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-sender strong {
+  font-size: 0.88rem;
+  letter-spacing: -0.01em;
+}
+
+.share-sender span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.share-footer a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.share-footer a:hover {
+  color: var(--ink);
+}
+
+@media (max-width: 900px) {
+  .share-main {
+    padding: 26px 0 36px;
+  }
+
+  .share-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .share-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .share-actions .share-pdf-button {
+    width: 100%;
+  }
+
+  .share-download-link {
+    justify-content: center;
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .share-meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .bundle-select {

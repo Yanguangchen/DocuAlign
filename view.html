@@ -37,38 +37,132 @@
         </span>
       </header>
 
-      <main>
-        <section class="intro" aria-labelledby="share-title">
+      <main class="share-main">
+        <section class="intro share-intro" aria-labelledby="share-title">
           <p class="eyebrow">Shared report</p>
-          <h1 id="share-title">A report was shared with you.</h1>
-          <p class="intro-copy">
-            This page shows a read-only snapshot of a DocuAlign report. Anyone with
-            this exact link can view it and open the PDF output below.
-          </p>
+          <h1 id="share-title" class="share-heading">A report has been shared with you</h1>
+          <p class="intro-copy share-intro-copy">Shared securely through DocuAlign.</p>
         </section>
 
         <section class="dashboard-list" aria-label="Shared report">
-          <p class="dashboard-status" id="share-status" aria-live="polite">
+          <p class="dashboard-status share-state" id="share-status" aria-live="polite">
             Loading shared report…
           </p>
-          <article class="report-card share-card" id="share-report" hidden>
-            <div class="report-card-head">
-              <strong id="share-report-name"></strong>
-              <span class="report-status" id="share-report-status"></span>
+          <article class="share-panel" id="share-report" hidden>
+            <div class="share-details">
+              <div class="share-title-block">
+                <h2 class="share-report-title" id="share-report-name">
+                  RAK Concrete Test Report
+                </h2>
+                <p class="share-report-subtitle" id="share-report-subtitle" hidden></p>
+              </div>
+              <p class="share-status-line" id="share-report-status"></p>
+              <dl class="share-meta">
+                <div class="share-meta-row">
+                  <dt>Shared by</dt>
+                  <dd id="share-shared-by">By RAK Materials Consultants</dd>
+                </div>
+                <div class="share-meta-row">
+                  <dt>Report generated</dt>
+                  <dd id="share-published"></dd>
+                </div>
+                <div class="share-meta-row">
+                  <dt>Report reference</dt>
+                  <dd id="share-reference"></dd>
+                </div>
+                <div class="share-meta-row">
+                  <dt>Document type</dt>
+                  <dd id="share-doc-type">PDF</dd>
+                </div>
+                <div class="share-meta-row" id="share-size-row" hidden>
+                  <dt>File size</dt>
+                  <dd id="share-size"></dd>
+                </div>
+                <div class="share-meta-row" id="share-pages-row" hidden>
+                  <dt>Page count</dt>
+                  <dd id="share-pages"></dd>
+                </div>
+              </dl>
+              <div class="share-actions">
+                <a
+                  class="google-button share-pdf-button"
+                  id="share-pdf-link"
+                  href="SampleDocuments/SampleOutput.pdf"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" />
+                    <path d="M14 3v5h5" />
+                    <path d="M9 13h6M9 17h6" />
+                  </svg>
+                  Open report
+                  <svg class="share-external-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M15 4h5v5" />
+                    <path d="M20 4 11 13" />
+                    <path d="M18 14v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h5" />
+                  </svg>
+                  <span class="visually-hidden">(opens in a new tab)</span>
+                </a>
+                <a
+                  class="share-download-link"
+                  id="share-download-link"
+                  href="SampleDocuments/SampleOutput.pdf"
+                  download
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 4v11" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M5 19h14" />
+                  </svg>
+                  Download PDF
+                </a>
+              </div>
+              <p class="share-access-note">
+                Anyone with this link can access this report. No account is required.
+              </p>
+              <details class="share-source-details" id="share-source-details" hidden>
+                <summary>Report details</summary>
+                <p class="report-source" id="share-source"></p>
+              </details>
             </div>
-            <p class="report-source" id="share-source"></p>
-            <div class="report-card-meta">
-              <span class="report-meta-item" id="share-published"></span>
+            <aside class="share-preview" aria-label="Report preview">
+              <div class="share-preview-viewport">
+                <iframe
+                  id="share-preview-frame"
+                  class="share-preview-frame"
+                  src="about:blank"
+                  title="First page of the report PDF"
+                  loading="lazy"
+                  tabindex="-1"
+                ></iframe>
+                <a
+                  class="share-preview-overlay"
+                  id="share-preview-overlay"
+                  href="SampleDocuments/SampleOutput.pdf"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <span class="share-preview-expand">
+                    Expand preview
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M15 4h5v5" />
+                      <path d="M20 4 11 13" />
+                      <path d="M9 20H4v-5" />
+                      <path d="m4 20 9-9" />
+                    </svg>
+                  </span>
+                </a>
+              </div>
+              <p class="share-preview-caption" id="share-preview-caption">First page preview</p>
+            </aside>
+            <div class="share-sender">
+              <span class="share-sender-mark" aria-hidden="true">R</span>
+              <p>
+                <strong>Shared by RAK Materials Consultants</strong>
+                <span>Generated and delivered securely through DocuAlign</span>
+              </p>
             </div>
-            <a
-              class="google-button share-pdf-button"
-              id="share-pdf-link"
-              href="SampleDocuments/SampleOutput.pdf"
-              target="_blank"
-              rel="noopener"
-            >
-              Open PDF report
-            </a>
           </article>
           <article class="report-card share-card share-bundle-card" id="share-bundle" hidden>
             <div class="report-card-head">
@@ -83,9 +177,11 @@
         </section>
       </main>
 
-      <footer>
-        <span>RAK report workspace</span>
-        <span>Excel in / Structured data / PDF out</span>
+      <footer class="share-footer">
+        <span>Powered by DocuAlign</span>
+        <a href="mailto:yanguangchensp@gmail.com?subject=DocuAlign%20shared%20report%20issue">
+          Report an issue
+        </a>
       </footer>
     </div>
 

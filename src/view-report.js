@@ -18,11 +18,25 @@ import {
 
 const status = document.querySelector("#share-status");
 const reportPanel = document.querySelector("#share-report");
-const reportName = document.querySelector("#share-report-name");
+const reportTitle = document.querySelector("#share-report-name");
+const reportSubtitle = document.querySelector("#share-report-subtitle");
 const reportStatus = document.querySelector("#share-report-status");
+const reportReference = document.querySelector("#share-reference");
+const reportSourceDetails = document.querySelector("#share-source-details");
 const reportSource = document.querySelector("#share-source");
 const reportPublished = document.querySelector("#share-published");
+const reportSizeRow = document.querySelector("#share-size-row");
+const reportSize = document.querySelector("#share-size");
+const reportPagesRow = document.querySelector("#share-pages-row");
+const reportPages = document.querySelector("#share-pages");
 const pdfLink = document.querySelector("#share-pdf-link");
+const downloadLink = document.querySelector("#share-download-link");
+const previewFrame = document.querySelector("#share-preview-frame");
+const previewOverlay = document.querySelector("#share-preview-overlay");
+const previewCaption = document.querySelector("#share-preview-caption");
+
+// Shown when the share document carries no extracted title of its own.
+const FALLBACK_REPORT_TITLE = "RAK Concrete Test Report";
 const bundlePanel = document.querySelector("#share-bundle");
 const bundleName = document.querySelector("#share-bundle-name");
 const bundleCount = document.querySelector("#share-bundle-count");
@@ -69,21 +83,140 @@ export function safePdfUrl(url) {
   return PUBLIC_PDF_PATH;
 }
 
-function setStatus(message) {
-  if (message) status.textContent = message;
+/**
+ * Recipient-facing wording for each report state. Saved snapshots are complete
+ * outputs, so they read as complete; every failure state names a next action
+ * instead of relying on a colour-coded badge.
+ */
+export const SHARE_STATUS_PRESENTATION = new Map([
+  ["complete", { icon: "✓", label: "Report complete" }],
+  ["saved", { icon: "✓", label: "Report complete" }],
+  ["processing", { label: "Processing", hint: "The PDF is still being generated. Check back shortly." }],
+  ["expired", { label: "Link expired", hint: "Ask the report owner for a new link." }],
+  ["revoked", { label: "Access revoked", hint: "Ask the report owner for a new link." }],
+  ["unavailable", { label: "Report unavailable", hint: "Ask the report owner for a new link." }],
+  ["failed", { label: "Generation failed", hint: "Ask the report owner to regenerate the report." }],
+]);
+
+/**
+ * Map a stored report status onto its viewer presentation. Unknown statuses
+ * degrade to showing the raw value so nothing is silently hidden.
+ * @param {unknown} value - The status field from the share document.
+ * @returns {{icon?: string, label: string, hint?: string}} Display descriptor.
+ */
+export function formatShareStatus(value) {
+  const key = typeof value === "string" && value ? value.toLowerCase() : "saved";
+  return SHARE_STATUS_PRESENTATION.get(key) ?? { label: key };
+}
+
+function renderStatusLine(element, value) {
+  const { icon, label, hint } = formatShareStatus(value);
+  element.replaceChildren();
+  if (icon) {
+    const mark = document.createElement("span");
+    mark.className = "share-status-check";
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = icon;
+    element.append(mark);
+  }
+  const text = document.createElement("strong");
+  text.textContent = label;
+  element.append(text);
+  if (hint) {
+    const help = document.createElement("span");
+    help.className = "share-status-hint";
+    help.textContent = hint;
+    element.append(help);
+  }
+}
+
+/**
+ * Format a byte count for the trust section (e.g. "1.8 MB").
+ * @param {number} bytes - File size in bytes.
+ * @returns {string} Human-readable size.
+ */
+export function formatFileSize(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Count the pages of a PDF by scanning its raw bytes for page objects.
+ * @param {string} rawPdf - The PDF file decoded as latin1/binary text.
+ * @returns {number} Page count, or 0 when none could be identified.
+ */
+export function countPdfPages(rawPdf) {
+  return (rawPdf.match(/\/Type\s*\/Page(?![a-zA-Z])/g) ?? []).length;
+}
+
+// The share document records neither file size nor page count, so derive both
+// from the PDF itself. Each detail only appears when it is genuinely known.
+async function loadPdfDetails(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return;
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > 0) {
+      reportSize.textContent = formatFileSize(buffer.byteLength);
+      reportSizeRow.hidden = false;
+    }
+    const pages = countPdfPages(new TextDecoder("latin1").decode(buffer));
+    if (pages > 0) {
+      reportPages.textContent = `${pages} ${pages === 1 ? "page" : "pages"}`;
+      reportPagesRow.hidden = false;
+      previewCaption.textContent = `Page 1 of ${pages}`;
+    }
+  } catch {
+    // Details stay hidden; they are a nicety, not a load failure.
+  }
+}
+
+/**
+ * Show a viewer state (loading or error) in place of the report panel.
+ * A title makes failure states scannable; the message carries the next action.
+ * @param {string} message - Explanation and next action, or "" to clear.
+ * @param {string} [title] - Optional short heading for the state.
+ */
+function setStatus(message, title) {
+  status.replaceChildren();
+  if (title) {
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    status.append(heading);
+  }
+  if (message) {
+    const detail = document.createElement("span");
+    detail.textContent = message;
+    status.append(detail);
+  }
   status.hidden = !message;
   reportPanel.hidden = true;
   bundlePanel.hidden = true;
 }
 
 function renderSharedReport(share) {
-  reportName.textContent = share.reportName || "Untitled report";
-  reportStatus.textContent = share.status || "saved";
-  reportSource.textContent = share.sourceFileName ? `Source: ${share.sourceFileName}` : "";
+  reportTitle.textContent = share.reportTitle || FALLBACK_REPORT_TITLE;
+  const subtitle = [share.clientName, share.jobRef ? `Job reference ${share.jobRef}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  reportSubtitle.textContent = subtitle;
+  reportSubtitle.hidden = !subtitle;
+  reportReference.textContent = share.reportName || "Untitled report";
+  renderStatusLine(reportStatus, share.status);
+  reportSourceDetails.hidden = !share.sourceFileName;
+  reportSource.textContent = share.sourceFileName
+    ? `Source spreadsheet: ${share.sourceFileName}`
+    : "";
   reportPublished.textContent = share.publishedAt
     ? dateFormatter.format(share.publishedAt)
     : "Date unavailable";
-  pdfLink.setAttribute("href", safePdfUrl(share.pdfUrl));
+  const pdfUrl = safePdfUrl(share.pdfUrl);
+  pdfLink.setAttribute("href", pdfUrl);
+  downloadLink.setAttribute("href", pdfUrl);
+  previewOverlay.setAttribute("href", pdfUrl);
+  // Ask the browser's PDF viewer for a clean first-page render.
+  previewFrame.setAttribute("src", `${pdfUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`);
+  loadPdfDetails(pdfUrl);
   setStatus("");
   reportPanel.hidden = false;
 }
@@ -100,7 +233,7 @@ function bundleReportItem(report) {
   title.textContent = report.reportName || "Untitled report";
   const statusLabel = document.createElement("span");
   statusLabel.className = "report-status";
-  statusLabel.textContent = report.status || "saved";
+  statusLabel.textContent = formatShareStatus(report.status).label;
   head.append(title, statusLabel);
   item.append(head);
 
@@ -116,7 +249,7 @@ function bundleReportItem(report) {
   anchor.href = safePdfUrl(report.pdfUrl);
   anchor.target = "_blank";
   anchor.rel = "noopener";
-  anchor.textContent = "Open PDF report";
+  anchor.textContent = "View report";
   item.append(anchor);
 
   return item;
@@ -145,7 +278,7 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
   const bundleToken = getBundleTokenFromUrl(search);
   const shareToken = getShareTokenFromUrl(search);
   if (!bundleToken && !shareToken) {
-    setStatus("This share link is not valid. Check the URL and try again.");
+    setStatus("This share link is not valid. Check the URL and try again.", "Link not valid");
     logWarn("Share link rejected: missing or malformed token", {
       feature: "PublicShare",
       function: "initViewer",
@@ -170,13 +303,19 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
         () => fetchSharedBundle(db, bundleToken),
       );
       if (!sharedBundle) {
-        setStatus("This share link is no longer available. Ask the report owner for a new link.");
+        setStatus(
+          "This share link is no longer available. Ask the report owner for a new link.",
+          "Report unavailable",
+        );
         return;
       }
       renderSharedBundle(sharedBundle);
     } catch {
       // Failure already logged by trackOperation; show the recovery message.
-      setStatus("Could not load this shared report. Check your connection and try again.");
+      setStatus(
+        "Could not load this shared report. Check your connection and try again.",
+        "Something went wrong",
+      );
     }
     return;
   }
@@ -193,7 +332,10 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
       () => fetchSharedReport(db, shareToken),
     );
     if (!share) {
-      setStatus("This share link is no longer available. Ask the report owner for a new link.");
+      setStatus(
+        "This share link is no longer available. Ask the report owner for a new link.",
+        "Report unavailable",
+      );
       return;
     }
     renderSharedReport(share);
