@@ -1210,6 +1210,9 @@ service cloud.firestore {
           'sourceFileName',
           'status',
           'pdfUrl',
+          'reportTitle',
+          'clientName',
+          'jobRef',
           'publishedAt'
         ]) &&
         strWithin(data.reportId, 1, 128) &&
@@ -1219,6 +1222,19 @@ service cloud.firestore {
           (data.sourceFileName is string && data.sourceFileName.size() <= 200)) &&
         strWithin(data.status, 1, 40) &&
         strWithin(data.pdfUrl, 1, 500) &&
+        // Optional display fields extracted from the source workbook (cover-page
+        // values surfaced by the public viewer). Each is nullable and, when
+        // present, a string capped at 200 chars. Kept in sync with
+        // toPublicReportPayload in src/lib/share.js.
+        (!('reportTitle' in data) ||
+          data.reportTitle == null ||
+          (data.reportTitle is string && data.reportTitle.size() <= 200)) &&
+        (!('clientName' in data) ||
+          data.clientName == null ||
+          (data.clientName is string && data.clientName.size() <= 200)) &&
+        (!('jobRef' in data) ||
+          data.jobRef == null ||
+          (data.jobRef is string && data.jobRef.size() <= 200)) &&
         (data.publishedAt == request.time || data.publishedAt is timestamp);
     }
 
