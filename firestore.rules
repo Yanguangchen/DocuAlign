@@ -1078,6 +1078,16 @@ service cloud.firestore {
       }
     }
 
+    // Collection-group read for the metrics activity leaderboard and daily
+    // completions chart (listAllEditHistory in firestore.js). The nested
+    // editHistory match above cannot satisfy collection-group queries, which
+    // require a /{path=**} match. editHistory is a CubeSync-only subcollection
+    // name (no WorkGrid collection uses it), reads stay gated to CubeSync
+    // staff, and writes remain governed solely by the nested match above.
+    match /{path=**}/editHistory/{sessionId} {
+      allow read: if isCubeSyncStaff();
+    }
+
     function isValidFormFieldConfig(data) {
       return data.keys().hasOnly(['requestFields', 'resultFields', 'requestLabels', 'resultLabels', 'customRequestFields', 'showResultsSection', 'updatedAt']) &&
         data.requestFields is map &&
@@ -1186,15 +1196,6 @@ service cloud.firestore {
     // design so anyone with the link can read that ONE report snapshot and its
     // PDF output. `list` stays closed so tokens can never be enumerated, and
     // the payload allowlist keeps PII (e.g. staff emails) out of public reach.
-    // Optional public display fields: absent, null, or a short string. These
-    // are workbook cover-page values (project title, client, job reference)
-    // that the sender explicitly published, never derived PII.
-    function isNullOrShortStr(data, key) {
-      return !(key in data) ||
-        data[key] == null ||
-        (data[key] is string && data[key].size() <= 200);
-    }
-
     function isValidDocuAlignPublicShare(data) {
       return data.keys().hasAll([
           'reportId',
@@ -1209,10 +1210,7 @@ service cloud.firestore {
           'sourceFileName',
           'status',
           'pdfUrl',
-          'publishedAt',
-          'reportTitle',
-          'clientName',
-          'jobRef'
+          'publishedAt'
         ]) &&
         strWithin(data.reportId, 1, 128) &&
         strWithin(data.reportName, 1, 200) &&
@@ -1221,9 +1219,6 @@ service cloud.firestore {
           (data.sourceFileName is string && data.sourceFileName.size() <= 200)) &&
         strWithin(data.status, 1, 40) &&
         strWithin(data.pdfUrl, 1, 500) &&
-        isNullOrShortStr(data, 'reportTitle') &&
-        isNullOrShortStr(data, 'clientName') &&
-        isNullOrShortStr(data, 'jobRef') &&
         (data.publishedAt == request.time || data.publishedAt is timestamp);
     }
 
