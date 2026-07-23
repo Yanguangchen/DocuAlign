@@ -552,17 +552,18 @@ modified or bypassed client.
 
 ## PDF Export Asset Contract
 
-The frontend now reads every worksheet in an uploaded `.xlsx` or `.xls` file
-and generates a new PDF from those parsed worksheet values. Each workbook tab,
-including hidden tabs, starts a new PDF section; long rows and wide tables are
-paginated. The generated Blob is downloaded locally and
-`SampleDocuments/SampleOutput.pdf` is no longer used as the export payload.
+The frontend reads every worksheet in an uploaded `.xlsx` or `.xls` file,
+discovers the repeated CV/TR/DS/SB report groups, and maps each group to the
+five-page RAK layout represented by `SampleOutput.pdf`. The sample workbook has
+six groups, so its download contains six consecutive five-page reports (30
+pages). Shared calculation tabs remain upstream and are not dumped as raw
+worksheet grids.
 
-`SampleOutput.pdf` remains the verified five-page layout reference for future
-semantic-template rendering. The field mappings in
-`src/lib/excel-mapping.js` remain available for that controlled report layout;
-the current all-tab export intentionally preserves worksheet data rather than
-substituting the sample report.
+The generated Blob contains mapped workbook values, regenerated charts, and
+embedded signatures/photos. `SampleOutput.pdf` remains the immutable visual
+reference and is not used as the export payload. The field-level source and
+transform contract is documented in
+[`documentation/workbook-pdf-mapping.md`](./documentation/workbook-pdf-mapping.md).
 
 The same PDF must exist at both locations below:
 
@@ -624,6 +625,7 @@ For detailed technical design specifications, UML diagrams, E/R diagrams, and de
   - **UML component, state-machine, and sequence diagrams**;
   - **implemented Firestore E/R diagram and schema contracts**;
   - authentication, public sharing, deployment, testing, and known limitations.
+* **[documentation/workbook-pdf-mapping.md](./documentation/workbook-pdf-mapping.md)** — Page-by-page CV/TR/DS/SB cell, range, transform, chart, signature, and appendix-photo mapping.
 * **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** — Firestore's 1,000-expression-per-request rules evaluation cap: how it presents (identical error to a real permission denial), how to confirm it against the emulator, and the concrete incidents in this codebase (CubeSync batch edits, DocuAlign bundle design) that hit it.
 * **[design.md](./design.md)** — Stable compatibility link to the canonical guide.
 * **[AGENTS.md](./AGENTS.md)** — AI agent coding standards, shared database rules constraints, and testing protocols.
@@ -649,7 +651,9 @@ DocuAlign/
 │   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
 │   ├── dashboard.js                 # Dashboard grid, date filtering & public share links
 │   ├── save-report.js               # Cloud persistence wiring for ETL workspace
-│   ├── workbook-pdf.js              # All-tab workbook parser and PDF renderer
+│   ├── workbook-pdf.js              # Workbook cells and embedded-media parser
+│   ├── report-mapping.js            # Repeated-group semantic field mapping
+│   ├── rak-report-pdf.js            # Fixed five-page RAK PDF renderer
 │   ├── view-report.js               # Public share viewer controller (unauthenticated)
 │   └── styles.css                   # Premium vanilla CSS tokenized design system
 ├── index.html                       # Primary ingestion & ETL pipeline workspace
@@ -670,5 +674,4 @@ DocuAlign/
 6. Audit log for report edits
 7. PDF preview before export
 8. Template version control
-9. Auto generated charts
-10. Search by client, vessel, job reference, or sample ID
+9. Search by client, vessel, job reference, or sample ID
