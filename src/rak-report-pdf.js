@@ -12,11 +12,11 @@
     compress: true,
   });
   const TERMS = Object.freeze([
-    "1. Results are reported in accordance with the terms of accreditation under the Singapore Accreditation Council.",
-    "2. This report is based on the required experiments and materials presented to RAK Materials Consultants Pte Ltd. Results and conclusions relate only to the sample tested.",
-    "3. RAK uses reasonable diligence in performing tests, inspections and services; no direct or indirect warranties are given.",
+    "1. The results reported herein have been performed in accordance with the terms of accreditation under the Singapore Accreditation Council.",
+    "2. The report is prepared on the basis of the required experiments and the particular materials presented for testing to RAK Materials Consultants Pte Ltd (RAK). RAK assumes no liability for differences in the quality or other features of presented products under circumstances that are not controlled by RAK. This report is not a recommendation for the product or material being tested or endorsed. The test results and conclusions relate to the sample tested as described herein.",
+    "3. RAK agrees to use a reasonable degree of diligence in the way tests, inspections or services are performed, but no warranties are given and none can be implied directly or indirectly in relation to the test results, services or facilities of RAK. RAK shall not be responsible for any unique, consequential or collateral harm.",
     "4. The report shall not be reproduced except in full unless written approval has been given by RAK.",
-    "5. No third party may receive the report through RAK without the authority's written instructions.",
+    "5. No other third party can receive the Report through RAK unless it is stipulated in the RAK Request Form or has obtained written instructions from the authority to authorize RAK to do so.",
     "6. The report shall not be used in advertising without RAK's written permission.",
   ]);
 
@@ -49,11 +49,6 @@
     return y + lines.length * lineHeight;
   }
 
-  function drawFooter(document, pageNumber) {
-    setTextStyle(document, 8, false, [80, 91, 96]);
-    document.text(`-- ${pageNumber} of 5 --`, 94, 290);
-  }
-
   function drawReportHeader(document, report, pageNumber) {
     setTextStyle(document, 8, true);
     document.text(`JOB REF: ${report.jobRef}`, 12, 11);
@@ -83,7 +78,7 @@
 
     const rows = [
       ["Client Name", cover.clientName],
-      ["Address", cover.addressLines.join(", ")],
+      ["Address", cover.addressLines.join("\n")],
       ["Tel No/Fax No", cover.telephoneFax],
       ["Email", cover.email],
       ["Attention to", cover.attentionTo],
@@ -139,7 +134,6 @@
     for (const term of TERMS) {
       termsY = writeWrapped(document, term, 12, termsY, 186, 2.8) + 1;
     }
-    drawFooter(document, 1);
   }
 
   function numeric(value) {
@@ -230,7 +224,7 @@
 
     drawSectionTitle(
       document,
-      "2. Silt Content and Coral / Shell Content",
+      "2. Silt Content (BS 812-103.1:1985) and Coral / Shell Content (SANS 5840:2008)",
       169,
     );
     setTextStyle(document, 8);
@@ -253,13 +247,12 @@
 
     drawSectionTitle(
       document,
-      "3. Determination of Moisture Content (BS 1377-2:1990 Clause 3)",
+      "3. Determination of Moisture Content (BS 1377-2:1990 Clause 3(Part 3.2))",
       208,
     );
     setTextStyle(document, 8);
     document.text(`Moisture Content (%)    ${report.moisture.percent}`, 16, 217);
     document.text(`Remarks: ${report.moisture.remark}`, 16, 225);
-    drawFooter(document, 2);
   }
 
   function drawShearCharts(document, rows) {
@@ -296,7 +289,7 @@
     drawReportHeader(document, report, 3);
     drawSectionTitle(
       document,
-      "4. Shear Strength by Direct Shear (Small Shearbox Apparatus)",
+      "4. Shear Strength by Direct Shear (Small Shearbox Apparatus) (BS 1377-7:1990 Clause 4 (Part 4.5.4))",
       21,
     );
     setTextStyle(document, 7.4);
@@ -334,12 +327,11 @@
     drawShearCharts(document, summary.rows);
     drawSectionTitle(
       document,
-      "5. Determination of Organic Matter Content (BS 1377-3:2018, Section 4)",
+      "5. Determination of Organic Matter Content (BS 1377-3: 2018, Section 4)",
       228,
     );
     setTextStyle(document, 8);
     document.text(`Organic Matter Content (%)    ${report.organicMatter.percent}`, 16, 238);
-    drawFooter(document, 3);
   }
 
   function imageFormat(image) {
@@ -392,7 +384,6 @@
     document.text(report.signoff.preparedByTitle, 28, 251);
     document.text(report.signoff.authorisedByName, 126, 245);
     document.text(report.signoff.authorisedByTitle, 126, 251);
-    drawFooter(document, 4);
   }
 
   function renderPageFive(document, report) {
@@ -417,7 +408,6 @@
         );
       }
     });
-    drawFooter(document, 5);
   }
 
   function renderReport(document, report, table, isFirstReport) {

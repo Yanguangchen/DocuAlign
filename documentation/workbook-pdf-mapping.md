@@ -67,8 +67,8 @@ All dynamic cover values come from the group's `CV1` tab.
 | Total Pages | `total_pages` | `K36` | Trim text |
 | Remarks | `cover_remarks` | `K37` | Trim text |
 
-The RAK company block, `TEST REPORT` title, field labels, Terms & Conditions,
-and page footer are fixed template content taken from the sample PDF.
+The RAK company block, `TEST REPORT` title, field labels, and Terms &
+Conditions are fixed template content taken from the sample PDF.
 
 ## 4. Page 2 — PSD, silt/coral, and moisture
 
