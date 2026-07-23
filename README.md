@@ -552,30 +552,40 @@ modified or bypassed client.
 
 ## PDF Export Asset Contract
 
-The current frontend exports the verified full five-page report reference at
-`SampleDocuments/SampleOutput.pdf`. This is a static reference export;
-generating a new dynamic PDF from arbitrary imported workbook data is supported via
-the domain extraction mappings (`src/lib/excel-mapping.js`).
+The frontend now reads every worksheet in an uploaded `.xlsx` or `.xls` file
+and generates a new PDF from those parsed worksheet values. Each workbook tab,
+including hidden tabs, starts a new PDF section; long rows and wide tables are
+paginated. The generated Blob is downloaded locally and
+`SampleDocuments/SampleOutput.pdf` is no longer used as the export payload.
+
+`SampleOutput.pdf` remains the verified five-page layout reference for future
+semantic-template rendering. The field mappings in
+`src/lib/excel-mapping.js` remain available for that controlled report layout;
+the current all-tab export intentionally preserves worksheet data rather than
+substituting the sample report.
 
 The same PDF must exist at both locations below:
 
-1. `SampleDocuments/SampleOutput.pdf` supports opening `index.html`
-   directly with a `file://` URL.
+1. `SampleDocuments/SampleOutput.pdf` supports direct reference access.
 2. `public/SampleDocuments/SampleOutput.pdf` is copied into the Vite
-   production build and supports HTTP deployments.
+   production build.
+
+The browser parser and PDF libraries follow the same direct-file/build
+convention under `vendor/` and `public/vendor/`.
 
 ### Missing Export Incident
 
-The export button originally generated a valid relative URL, but the PDF only
+The former export button generated a valid relative URL, but the PDF only
 existed under `public/` and `output/`. When `index.html` was opened directly,
 the browser resolved the URL against the repository root and requested the
 missing `SampleDocuments/SampleOutput.pdf` file. Chrome therefore
 reported "File wasn't on site" and no download was produced.
 
-The UI also advanced to the cloud-save stage immediately after clicking the
+The former UI also advanced to the cloud-save stage immediately after clicking the
 link, which made the missing asset look like a successful export. The source
 asset was added at the direct-file path, and `src/pdf-export.test.js` now checks
-the URL contract, PDF signature, source/public equality, and five-page format.
+the preserved reference PDF signature, source/public equality, five-page
+format, and that active exports use generated workbook Blobs.
 
 ## Testing & Coverage
 
@@ -628,6 +638,8 @@ DocuAlign/
 │   ├── SampleOutput-cover.pdf       # Verified 1-page cover PDF reference
 │   └── SampleOutput.pdf             # Legacy full report reference
 ├── public/SampleDocuments/          # Copied assets for Vite HTTP deployment
+├── vendor/                          # Direct-file workbook/PDF browser runtimes
+├── public/vendor/                   # Vite copies of browser runtimes
 ├── src/
 │   ├── lib/
 │   │   ├── firebase.js              # Firebase SDK v12 singleton initialization
@@ -637,6 +649,7 @@ DocuAlign/
 │   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
 │   ├── dashboard.js                 # Dashboard grid, date filtering & public share links
 │   ├── save-report.js               # Cloud persistence wiring for ETL workspace
+│   ├── workbook-pdf.js              # All-tab workbook parser and PDF renderer
 │   ├── view-report.js               # Public share viewer controller (unauthenticated)
 │   └── styles.css                   # Premium vanilla CSS tokenized design system
 ├── index.html                       # Primary ingestion & ETL pipeline workspace
