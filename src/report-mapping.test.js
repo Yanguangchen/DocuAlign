@@ -206,7 +206,7 @@ describe("semantic workbook report mapping", () => {
     expect(serialized).not.toMatch(/TR1 \(4\)|DS1\s+\(4\)|SB1\s+\(4\)|OM1|MET1/);
     expect(
       mappingDoc.mapping
-        .filter((entry) => entry.pdf_page > 1 && entry.excel_source)
+        .filter((entry) => entry.pdf_page > 1 && entry.excel_source.startsWith("'TR1"))
         .every((entry) => entry.excel_source.includes("TR1 (2)")),
     ).toBe(true);
   });

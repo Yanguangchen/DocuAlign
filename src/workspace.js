@@ -24,7 +24,7 @@ const cloudSave = document.querySelector("#cloud-save");
 const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
 
 let selectedSourceName = "";
-let processedWorkbook = null;
+let processedReports = null;
 let pipelineRun = 0;
 
 function formatFileSize(bytes) {
@@ -44,7 +44,7 @@ function setFeedback(message, emphasized) {
 }
 
 function resetPipeline() {
-  processedWorkbook = null;
+  processedReports = null;
   pipelineStep.classList.remove("is-active", "is-complete");
   exportStep.classList.remove("is-active", "is-complete");
   saveStep.classList.remove("is-active");
@@ -81,40 +81,41 @@ async function startPipeline(file) {
 
   try {
     const workbookPdf = globalThis.docuAlignWorkbookPdf;
-    if (!workbookPdf) {
+    const reportMapping = globalThis.docuAlignReportMapping;
+    if (!workbookPdf || !reportMapping) {
       throw new Error("Workbook processing is unavailable.");
     }
 
     const workbook = await workbookPdf.parseWorkbook(file);
     if (currentRun !== pipelineRun) return null;
 
-    advancePipeline(1, `Preparing ${workbook.sheets.length} worksheets for PDF export.`);
-    const validation = workbookPdf.validateWorkbook(workbook);
-    advancePipeline(2, "Validating the parsed worksheet data.");
+    advancePipeline(1, `Mapping ${workbook.sheets.length} worksheets to RAK report fields.`);
+    const reports = reportMapping.buildMappedReports(workbook);
+    advancePipeline(2, "Validating the mapped five-page reports.");
 
-    if (!validation.isValid) {
-      failPipeline("This workbook has no readable worksheets to export.");
+    if (!Array.isArray(reports) || reports.length === 0) {
+      failPipeline("This workbook has no complete report groups to export.");
       return null;
     }
 
-    processedWorkbook = workbook;
+    processedReports = reports;
     pipelineStages.forEach((stage) => {
       stage.classList.remove("is-active");
       stage.classList.add("is-complete");
     });
     pipelineStep.classList.add("is-complete");
     pipelineCopy.textContent =
-      `${validation.sheetCount} worksheets were processed and are ready for export.`;
+      `${reports.length} five-page reports were mapped and are ready for export.`;
     pipelineState.textContent = "Complete";
     fileMeta.textContent =
-      `${formatFileSize(file.size)} / ${validation.sheetCount} worksheets processed`;
+      `${formatFileSize(file.size)} / ${reports.length} reports mapped`;
     exportStep.classList.add("is-active");
     pdfExport.disabled = false;
     setFeedback(
-      `ETL complete. The PDF will include all ${validation.sheetCount} workbook worksheets.`,
+      `ETL complete. The PDF will include all ${reports.length} mapped report groups.`,
       true,
     );
-    return workbook;
+    return reports;
   } catch {
     if (currentRun !== pipelineRun) return null;
     failPipeline("The workbook could not be processed. Check the file and try again.");
@@ -169,7 +170,7 @@ document.querySelector("#remove-file").addEventListener("click", () => {
 });
 
 function exportPdf() {
-  if (!selectedSourceName || !processedWorkbook) {
+  if (!selectedSourceName || !processedReports) {
     setFeedback("Select and process a workbook before exporting the PDF.", true);
     return;
   }
@@ -179,7 +180,7 @@ function exportPdf() {
       .replace(/\.(xlsx|xls)$/i, "")
       .replace(/[^a-z0-9_-]+/gi, "-")
       .replace(/^-+|-+$/g, "") || "report";
-    const pdfBlob = globalThis.docuAlignWorkbookPdf.createWorkbookPdf(processedWorkbook);
+    const pdfBlob = globalThis.docuAlignRakReportPdf.createRakReportPdf(processedReports);
     const pdfUrl = globalThis.URL.createObjectURL(pdfBlob);
     const download = document.createElement("a");
     download.href = pdfUrl;

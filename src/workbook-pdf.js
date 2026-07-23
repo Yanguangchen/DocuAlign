@@ -5,6 +5,13 @@
  * can still be processed when the workspace is opened directly over file://.
  */
 (() => {
+  const OFFICE_RELATIONSHIPS =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  const SPREADSHEET_MAIN =
+    "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  const SPREADSHEET_DRAWING =
+    "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+  const DRAWING_MAIN = "http://schemas.openxmlformats.org/drawingml/2006/main";
   const PDF_OPTIONS = Object.freeze({
     orientation: "landscape",
     unit: "mm",
@@ -42,6 +49,151 @@
     };
   }
 
+  function normalizeZipPath(baseFile, target) {
+    if (target.startsWith("/")) return target.slice(1);
+    const segments = baseFile.split("/");
+    segments.pop();
+    for (const part of target.split("/")) {
+      if (part === "..") {
+        segments.pop();
+      } else if (part !== "." && part !== "") {
+        segments.push(part);
+      }
+    }
+    return segments.join("/");
+  }
+
+  function relationshipPath(filePath) {
+    const segments = filePath.split("/");
+    const fileName = segments.pop();
+    return [...segments, "_rels", `${fileName}.rels`].join("/");
+  }
+
+  function fileContent(files, filePath) {
+    const entry = Reflect.get(files, filePath);
+    if (!entry?.content) return null;
+    if (typeof entry.content === "string") return entry.content;
+    return new TextDecoder().decode(entry.content);
+  }
+
+  function parseXml(files, filePath) {
+    const content = fileContent(files, filePath);
+    if (!content) return null;
+    return new DOMParser().parseFromString(content, "application/xml");
+  }
+
+  function relationshipMap(document, baseFile) {
+    const relationships = new Map();
+    if (!document) return relationships;
+    for (const relationship of document.getElementsByTagNameNS("*", "Relationship")) {
+      const id = relationship.getAttribute("Id");
+      const target = relationship.getAttribute("Target");
+      if (id && target) relationships.set(id, {
+        path: normalizeZipPath(baseFile, target),
+        type: relationship.getAttribute("Type") ?? "",
+      });
+    }
+    return relationships;
+  }
+
+  function mediaType(filePath) {
+    const extension = filePath.split(".").at(-1)?.toLowerCase();
+    if (extension === "png") return "image/png";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    return null;
+  }
+
+  function mediaBytes(files, filePath) {
+    const content = Reflect.get(files, filePath)?.content;
+    if (content instanceof Uint8Array) return content;
+    if (content instanceof ArrayBuffer) return new Uint8Array(content);
+    return null;
+  }
+
+  function anchoredImages(files, drawingPath) {
+    const drawing = parseXml(files, drawingPath);
+    const drawingRelationships = relationshipMap(
+      parseXml(files, relationshipPath(drawingPath)),
+      drawingPath,
+    );
+    if (!drawing) return [];
+
+    const images = [];
+    for (const anchor of drawing.documentElement.children) {
+      const blip = anchor.getElementsByTagNameNS(DRAWING_MAIN, "blip").item(0);
+      const relationshipId = blip?.getAttributeNS(OFFICE_RELATIONSHIPS, "embed");
+      const mediaPath = drawingRelationships.get(relationshipId)?.path;
+      const mimeType = mediaPath ? mediaType(mediaPath) : null;
+      const bytes = mediaPath ? mediaBytes(files, mediaPath) : null;
+      if (!mimeType || !bytes) continue;
+
+      const from = anchor.getElementsByTagNameNS(SPREADSHEET_DRAWING, "from").item(0);
+      const row = from
+        ? Number(from.getElementsByTagNameNS(SPREADSHEET_DRAWING, "row").item(0)?.textContent)
+        : -1;
+      const column = from
+        ? Number(from.getElementsByTagNameNS(SPREADSHEET_DRAWING, "col").item(0)?.textContent)
+        : -1;
+      const properties = anchor
+        .getElementsByTagNameNS(SPREADSHEET_DRAWING, "cNvPr")
+        .item(0);
+      images.push({
+        name: properties?.getAttribute("name") ?? "Workbook image",
+        row,
+        column,
+        mimeType,
+        bytes,
+      });
+    }
+    return images;
+  }
+
+  /**
+   * Associate embedded workbook pictures with their worksheet and anchor cell.
+   * @param {object} workbook - SheetJS workbook parsed with `bookFiles: true`.
+   * @returns {Map<string, Array<object>>} Images keyed by worksheet name.
+   */
+  function extractWorkbookImages(workbook) {
+    const files = workbook.files;
+    if (!files) return new Map();
+    const workbookPath = "xl/workbook.xml";
+    const workbookXml = parseXml(files, workbookPath);
+    const workbookRelationships = relationshipMap(
+      parseXml(files, relationshipPath(workbookPath)),
+      workbookPath,
+    );
+    if (!workbookXml) return new Map();
+
+    const imagesBySheet = new Map();
+    for (const sheet of workbookXml.getElementsByTagNameNS(SPREADSHEET_MAIN, "sheet")) {
+      const sheetName = sheet.getAttribute("name");
+      const relationshipId = sheet.getAttributeNS(OFFICE_RELATIONSHIPS, "id");
+      const worksheetPath = workbookRelationships.get(relationshipId)?.path;
+      if (!sheetName || !worksheetPath) continue;
+
+      const worksheetRelationships = relationshipMap(
+        parseXml(files, relationshipPath(worksheetPath)),
+        worksheetPath,
+      );
+      const drawing = Array.from(worksheetRelationships.values())
+        .find((relationship) => relationship.type.endsWith("/drawing"));
+      imagesBySheet.set(
+        sheetName,
+        drawing ? anchoredImages(files, drawing.path) : [],
+      );
+    }
+    return imagesBySheet;
+  }
+
+  function displayCells(worksheet) {
+    const cells = {};
+    for (const [address, cell] of Object.entries(worksheet ?? {})) {
+      if (!/^[A-Z]+\d+$/.test(address) || !cell || typeof cell !== "object") continue;
+      Reflect.set(cells, address, cell.w ?? cell.v ?? "");
+    }
+    return cells;
+  }
+
   /**
    * Parse every worksheet in an uploaded XLS/XLSX file in workbook tab order.
    * @param {File|{name?: string, arrayBuffer: () => Promise<ArrayBuffer>}} file
@@ -62,6 +214,7 @@
 
     const workbookBytes = await file.arrayBuffer();
     const workbook = xlsxApi.read(workbookBytes, {
+      bookFiles: true,
       cellDates: true,
       cellStyles: true,
     });
@@ -74,6 +227,7 @@
     const sheetMetadata = Array.isArray(workbook.Workbook?.Sheets)
       ? workbook.Workbook.Sheets
       : [];
+    const imagesBySheet = extractWorkbookImages(workbook);
     const sheets = sheetNames.map((name, index) => {
       const worksheet = Reflect.get(workbook.Sheets ?? {}, name);
       const metadata = sheetMetadata.at(index);
@@ -87,6 +241,8 @@
       return {
         name,
         hidden: Number(metadata?.Hidden ?? 0) > 0,
+        cells: displayCells(worksheet),
+        images: imagesBySheet.get(name) ?? [],
         rows: populatedRows(rows),
       };
     });
@@ -188,6 +344,8 @@
 
   globalThis.docuAlignWorkbookPdf = Object.freeze({
     createWorkbookPdf,
+    displayCells,
+    extractWorkbookImages,
     parseWorkbook,
     populatedRows,
     validateWorkbook,
