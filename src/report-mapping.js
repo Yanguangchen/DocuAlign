@@ -20,7 +20,8 @@
   });
 
   function sheetIdentity(sheetName) {
-    const normalized = sheetName.trim();
+    let normalized = sheetName.trim();
+    while (normalized.includes("  ")) normalized = normalized.replaceAll("  ", " ");
     for (const role of Object.keys(ROLE_FIELDS)) {
       if (normalized === role) return { role, index: 1 };
       const prefix = `${role} (`;
