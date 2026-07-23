@@ -16,6 +16,7 @@ export default [
       "output/**",
       "public/**",
       "SampleDocuments/**",
+      "vendor/**",
     ],
   },
   js.configs.recommended,

@@ -32,20 +32,20 @@ describe("excel-mapping domain module (Full 5-page report format)", () => {
   it("extracts unique Excel sheet and tab names across the full report mapping", () => {
     const sheets = getSheetNames();
     expect(sheets).toContain("'CV1 (2)'");
-    expect(sheets).toContain("'TR1 (4)'");
+    expect(sheets).toContain("'TR1 (2)'");
   });
 
   it("extracts a structured report dictionary from raw cell lookup values", () => {
     const rawCells = {
       "'CV1 (2)'!K5": "Xinsha Holding Pte Ltd",
       "'CV1 (2)'!K28": "X-2026-522-3",
-      "'TR1 (4)'!AE2": "X-2026-522-4",
+      "'TR1 (2)'!AE2": "X-2026-522-2",
     };
 
     const report = extractMappedReport(rawCells);
     expect(report.client_name).toBe("Xinsha Holding Pte Ltd");
     expect(report.job_ref).toBe("X-2026-522-3");
-    expect(report.page_2_job_ref).toBe("X-2026-522-4");
+    expect(report.page_2_job_ref).toBe("X-2026-522-2");
   });
 
   it("validates full report structure and returns missing required keys if incomplete", () => {

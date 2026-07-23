@@ -8,7 +8,13 @@ import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const classicScripts = ["early-observability.js", "workspace.js"];
+const classicScripts = [
+  "early-observability.js",
+  "workbook-pdf.js",
+  "report-mapping.js",
+  "rak-report-pdf.js",
+  "workspace.js",
+];
 
 function emitClassicScripts() {
   return {

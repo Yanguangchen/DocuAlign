@@ -9,16 +9,19 @@ This distinction is important:
 | Capability | Current implementation | Status |
 | --- | --- | --- |
 | Select `.xlsx` or `.xls` files | Validates the filename extension and displays the selected file | Implemented |
-| Extract workbook cells | Mapping utilities accept an already-created cell lookup; the UI does not read workbook bytes | Domain utility only |
-| ETL progress | Timed UI transitions labelled Extract, Transform, and Validate | Prototype simulation |
+| Extract workbook cells | Reads every worksheet in tab order, including hidden tabs, into display-value rows | Implemented |
+| ETL progress | Reflects real workbook reading, preparation, and validation states | Implemented |
 | Review or edit extracted data | No review form is connected | Not implemented |
 | Save reports | Saves report name, source filename, status, creator email, and server timestamp | Implemented metadata only |
-| PDF generation | Downloads the bundled five-page `SampleOutput.pdf` reference | Static reference export |
+| PDF generation | Generates five portrait sample-layout pages per complete CV/TR/DS/SB report group | Implemented |
 | Saved-report dashboard | Lists, date-filters, deletes, and shares report metadata | Implemented |
 | Single public links | Publishes an immutable, sanitized Firestore snapshot | Implemented |
 | Group public links | Publishes 1–25 single shares and a bundle of their tokens | Implemented |
 
-The UI wording describes the target workflow, but selecting a workbook does not currently parse or upload its contents. Any future implementation should preserve the semantic mapping contract in `rak_pdf_excel_field_mapping.json` and should update this status table when behavior changes.
+Workbook parsing and PDF generation stay local to the browser; workbook bytes
+are not uploaded. Each complete report group is mapped into the semantic
+five-page RAK template. The sample workbook contains six groups and therefore
+exports as one 30-page PDF.
 
 ## 2. Technology and execution model
 
@@ -35,23 +38,28 @@ The HTML pages contain an import map for direct browser module loading from the 
 
 | Path | Responsibility |
 | --- | --- |
-| `index.html` | Protected new-report page; file selection, simulated pipeline, static PDF download |
+| `index.html` | Protected new-report page; semantic workbook ingestion and generated PDF download |
 | `dashboard.html` | Protected saved-report dashboard shell |
 | `view.html` | Unauthenticated single-share and bundle viewer shell |
 | `src/auth-gate.js` | Google sign-in, session handling, verified-email check, Firestore access probe |
 | `src/save-report.js` | Persists metadata from the selected filename |
 | `src/dashboard.js` | Fetch, render, filter, delete, publish, group, and copy-link behavior |
 | `src/view-report.js` | Resolves public tokens, renders safe text, guards PDF URLs |
+| `src/workbook-pdf.js` | Reads workbook display cells and associates embedded media with sheet anchors |
+| `src/report-mapping.js` | Discovers repeated report groups and builds semantic five-page models |
+| `src/rak-report-pdf.js` | Renders mapped models to the fixed portrait RAK layout |
 | `src/lib/firebase.js` | Firebase singleton initialization |
 | `src/lib/reports.js` | Firestore report CRUD, timestamp normalization, inclusive date filtering |
 | `src/lib/share.js` | Token generation, public payload allowlisting, share and bundle persistence |
-| `src/lib/excel-mapping.js` | Query, extraction-from-lookup, and minimum-structure validation for 66 mappings |
-| `rak_pdf_excel_field_mapping.json` | Five-page, 66-field semantic mapping specification |
+| `src/lib/excel-mapping.js` | Queries the checked-in logical mapping dictionary |
+| `rak_pdf_excel_field_mapping.json` | Five-page, 67-field sample-2 mapping specification |
+| `documentation/workbook-pdf-mapping.md` | Page-by-page runtime source, transform, chart, and media contract |
 | `src/styles.css` | Shared visual tokens and page styling |
 | `firestore.rules` | Shared production authorization boundary |
 | `src/firestore.rules.test.js` | Emulator-gated authorization contract tests |
 | `SampleDocuments/` | Direct-filesystem sample input and PDF references |
 | `public/SampleDocuments/` | Copies emitted by Vite into the production build |
+| `vendor/`, `public/vendor/` | Direct-file and Vite copies of SheetJS, jsPDF, and AutoTable |
 | `vite.config.js` | MPA entries and coverage configuration |
 
 ## 4. UML component diagram
@@ -78,7 +86,9 @@ flowchart LR
     subgraph Domain[Domain modules]
         reports[lib/reports.js]
         shares[lib/share.js]
-        mapping[lib/excel-mapping.js]
+        mapping[report-mapping.js]
+        workbookPdf[workbook-pdf.js]
+        rakPdf[rak-report-pdf.js]
         firebase[lib/firebase.js]
     end
 
@@ -89,7 +99,8 @@ flowchart LR
         storage[Cloud Storage\ninitialized, unused]
     end
 
-    pdf[(SampleOutput.pdf\ndual static copies)]
+    pdf[(SampleOutput.pdf\nreference copies)]
+    browserLibs[(SheetJS + jsPDF + AutoTable)]
     mapJson[(mapping JSON)]
 
     actor --> index
@@ -97,7 +108,11 @@ flowchart LR
     visitor --> view
     index --> auth
     index --> save
-    index --> pdf
+    index --> workbookPdf
+    workbookPdf --> browserLibs
+    workbookPdf --> mapping
+    mapping --> rakPdf
+    rakPdf --> browserLibs
     dashboard --> auth
     dashboard --> dash
     view --> viewer
@@ -105,6 +120,7 @@ flowchart LR
     dash --> reports
     dash --> shares
     viewer --> shares
+    viewer --> pdf
     mapping --> mapJson
     auth --> firebase
     reports --> firebase
@@ -116,7 +132,10 @@ flowchart LR
     react -. not mounted .-> Pages
 ```
 
-`src/lib/excel-mapping.js` is tested but not connected to `index.html`. No Excel parsing library is installed, and the selected `File` object is not read.
+The three classic runtime modules form an explicit pipeline:
+`workbook-pdf.js` reads display cells and embedded media,
+`report-mapping.js` applies the repeated-group coordinate contract, and
+`rak-report-pdf.js` renders the five reference pages with regenerated charts.
 
 ## 5. Runtime workflows
 
@@ -141,16 +160,20 @@ stateDiagram-v2
     AccessProbe --> SignedOut: unverified or unauthorized
     AccessProbe --> Waiting: authorized
     Waiting --> Waiting: reject non-Excel extension
-    Waiting --> SimulatedETL: select .xlsx or .xls
-    SimulatedETL --> ExportReady: timers complete
-    ExportReady --> SaveReady: static PDF download triggered
+    Waiting --> ParsingWorkbook: select .xlsx or .xls
+    ParsingWorkbook --> ExportReady: complete report groups mapped
+    ParsingWorkbook --> Waiting: invalid or unreadable workbook
+    ExportReady --> SaveReady: generated PDF Blob downloaded
     SaveReady --> Saved: metadata write succeeds
     SaveReady --> SaveReady: metadata write fails
-    Saved --> SimulatedETL: replace workbook
-    SimulatedETL --> Waiting: remove workbook
+    Saved --> ParsingWorkbook: replace workbook
+    ParsingWorkbook --> Waiting: remove workbook
 ```
 
-The `SimulatedETL` state does not inspect workbook content. Its timers only update CSS classes and messages.
+Parsing reads the selected file's bytes locally, walks `SheetNames`, retains
+display cells, and resolves drawing relationships for signatures and appendix
+photos. Mapping then validates complete CV/TR groups. A replacement or removal
+invalidates any in-flight parse result.
 
 ### 5.3 Report save sequence
 
@@ -162,10 +185,11 @@ sequenceDiagram
     participant Reports as lib/reports.js
     participant DB as Firestore
 
-    Staff->>Page: Select workbook filename
-    Page->>Page: Run timed progress UI
+    Staff->>Page: Select workbook
+    Page->>Page: Parse cells/media and map every report group
     Staff->>Page: Export final PDF
-    Page-->>Staff: Download static SampleOutput.pdf
+    Page->>Page: Render five pages per report group
+    Page-->>Staff: Download generated semantic PDF
     Page->>Page: Enable cloud-save button
     Staff->>Save: Save data to cloud
     Save->>Save: Slugify displayed filename
@@ -367,7 +391,7 @@ If repeatable data is introduced, prefer references or subcollections where deep
 
 ## 7. Excel mapping contract
 
-`rak_pdf_excel_field_mapping.json` contains 66 mappings over PDF pages 1–5 and these sections: Cover, Header, Particle Size Distribution, Silt and Coral/Shell Content, Moisture Content, Direct Shear, Organic Matter, Metallic Analysis, Sign off, and Appendix.
+`rak_pdf_excel_field_mapping.json` contains 67 mappings over PDF pages 1–5 and these sections: Cover, Header, Particle Size Distribution, Silt and Coral/Shell Content, Moisture Content, Direct Shear, Organic Matter, Metallic Analysis, Sign off, and Appendix. The relative-density condition on page 3 is included explicitly.
 
 Every mapping supplies a semantic `suggested_key`; many also identify an Excel sheet/range, a displayed PDF value, transformation guidance, confidence, and notes. These keys are application-domain identifiers, not AcroForm names: the reference PDF has no usable form dictionary.
 
@@ -379,7 +403,18 @@ Every mapping supplies a semantic `suggested_key`; many also identify an Excel s
 - `extractMappedReport(rawCellLookup)`, which maps exact cell-reference keys to semantic keys;
 - `validateFullReportStructure(reportData)`, which requires five representative keys.
 
-The module does not open XLS/XLSX files, calculate workbook formulas, expand ranges, normalize values, or render a PDF. A production ingestion pipeline needs an explicit workbook reader and tests using `SampleDocuments/SampleInput.xlsx`.
+The reference dictionary is anchored to report group 2 because
+`SampleOutput.pdf` is sourced from `CV1 (2)` and `TR1 (2)`. Runtime applies the
+same coordinates to every discovered group:
+
+- `src/workbook-pdf.js` reads cell display values and XLSX drawing/media relationships;
+- `src/report-mapping.js` expands ranges, paired columns, and scattered cells into semantic arrays;
+- `src/rak-report-pdf.js` renders the five portrait pages, regenerates charts, and places signatures/photos.
+
+The complete field and transform inventory is
+[`workbook-pdf-mapping.md`](./workbook-pdf-mapping.md). Integration coverage
+parses all 26 tabs, maps six reports, verifies sample-2 golden values, and
+checks five pages per report.
 
 ## 8. Security model and invariants
 
@@ -403,11 +438,19 @@ Protected reports use the shared staff decision through `isDocuAlignStaff()` →
 
 Capability URLs should be treated as secrets. Anyone holding one can read its public snapshot until a staff user deletes the corresponding share. There is no expiry, audience restriction, access log, share-management UI, or automatic cascade revocation.
 
-## 9. Static PDF and asset contract
+## 9. PDF and browser asset contract
 
 `SampleDocuments/SampleOutput.pdf` supports relative URLs when the root HTML file is opened directly. `public/SampleDocuments/SampleOutput.pdf` is copied into Vite output for HTTP/HTTPS deployments. Both copies must remain byte-identical. The same dual-location convention currently exists for `SampleOutput-cover.pdf`.
 
-`src/pdf-export.test.js` checks the full report's PDF signature, five-page marker, and SHA-256 equality. The application does not modify this PDF with selected workbook data.
+The active workspace export does not download or modify this reference PDF. It
+creates a new Blob from parsed cells/media, semantic report models, and the
+fixed renderer.
+`src/pdf-export.test.js` checks both the dynamic export contract and the
+reference PDF's signature, five-page marker, and SHA-256 equality.
+
+SheetJS, jsPDF, and AutoTable are also kept in mirrored `vendor/` and
+`public/vendor/` paths so both direct-file and Vite execution can load the same
+browser runtimes.
 
 Authentication cannot operate on `file://`; use the Vite server or a deployed authorized domain. Direct-file asset compatibility does not imply that the full application works without HTTP.
 
@@ -452,21 +495,22 @@ Before deployment:
 
 ## 11. Known limitations and next implementation boundaries
 
-1. Workbook selection is not ingestion. Add a parser before claiming extracted or validated report data.
-2. The ETL timer should be replaced with observable processing states and validation errors.
-3. `extractMappedReport` needs an adapter from real workbook cells/ranges and formula behavior.
-4. Saved reports need a versioned structured schema before CRUD can cover laboratory values.
-5. PDF export needs a deterministic renderer that consumes saved data; the sample PDF must remain identified as a reference until then.
-6. Share revocation exists in rules/domain semantics but has no dashboard control for locating and deleting a share document.
-7. Deleting a private report does not revoke its existing snapshots.
-8. Bundle publication is not atomic: if a later write fails, earlier member shares remain published.
-9. `src/App.jsx` duplicates part of the vanilla import UI and should either be integrated deliberately or retired.
-10. Firebase Storage is initialized but unused; appendix-photo storage and its authorization contract remain undefined.
+1. SheetJS reads cached formula results; the browser does not recalculate Excel formulas. Source workbooks must be saved after calculation.
+2. Charts are regenerated from mapped report values and are not pixel-level copies of Excel chart objects. The displacement chart uses the mapped summary rows rather than the full SB1 time series.
+3. The base report group's source shear sheet has incomplete first/second stress-series cells; blank cached values remain blank instead of being invented.
+4. There is no review/edit form between parsing and export.
+5. Saved reports need a versioned structured schema before CRUD can cover laboratory values; cloud save remains metadata-only.
+6. Public shares still reference the bundled sample PDF because generated Blob URLs are local and transient.
+7. Share revocation exists in rules/domain semantics but has no dashboard control for locating and deleting a share document.
+8. Deleting a private report does not revoke its existing snapshots.
+9. Bundle publication is not atomic: if a later write fails, earlier member shares remain published.
+10. Firebase Storage is initialized but unused; generated PDF and workbook persistence remain undefined.
 
 ## 12. Documentation index
 
 - `README.md`: product context, domain fields, and feature overview.
 - `design.md`: compatibility entry point to this canonical guide.
 - `rak_pdf_excel_field_mapping.json`: authoritative semantic field mapping.
+- `documentation/workbook-pdf-mapping.md`: executable page, cell/range, transform, chart, and embedded-media mapping.
 - `documentation/firestore-rules-expression-limit.md`: rules-cost diagnosis and design constraints.
 - `AGENTS.md`: mandatory contributor rules and quality gates.

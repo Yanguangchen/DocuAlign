@@ -552,30 +552,41 @@ modified or bypassed client.
 
 ## PDF Export Asset Contract
 
-The current frontend exports the verified full five-page report reference at
-`SampleDocuments/SampleOutput.pdf`. This is a static reference export;
-generating a new dynamic PDF from arbitrary imported workbook data is supported via
-the domain extraction mappings (`src/lib/excel-mapping.js`).
+The frontend reads every worksheet in an uploaded `.xlsx` or `.xls` file,
+discovers the repeated CV/TR/DS/SB report groups, and maps each group to the
+five-page RAK layout represented by `SampleOutput.pdf`. The sample workbook has
+six groups, so its download contains six consecutive five-page reports (30
+pages). Shared calculation tabs remain upstream and are not dumped as raw
+worksheet grids.
+
+The generated Blob contains mapped workbook values, regenerated charts, and
+embedded signatures/photos. `SampleOutput.pdf` remains the immutable visual
+reference and is not used as the export payload. The field-level source and
+transform contract is documented in
+[`documentation/workbook-pdf-mapping.md`](./documentation/workbook-pdf-mapping.md).
 
 The same PDF must exist at both locations below:
 
-1. `SampleDocuments/SampleOutput.pdf` supports opening `index.html`
-   directly with a `file://` URL.
+1. `SampleDocuments/SampleOutput.pdf` supports direct reference access.
 2. `public/SampleDocuments/SampleOutput.pdf` is copied into the Vite
-   production build and supports HTTP deployments.
+   production build.
+
+The browser parser and PDF libraries follow the same direct-file/build
+convention under `vendor/` and `public/vendor/`.
 
 ### Missing Export Incident
 
-The export button originally generated a valid relative URL, but the PDF only
+The former export button generated a valid relative URL, but the PDF only
 existed under `public/` and `output/`. When `index.html` was opened directly,
 the browser resolved the URL against the repository root and requested the
 missing `SampleDocuments/SampleOutput.pdf` file. Chrome therefore
 reported "File wasn't on site" and no download was produced.
 
-The UI also advanced to the cloud-save stage immediately after clicking the
+The former UI also advanced to the cloud-save stage immediately after clicking the
 link, which made the missing asset look like a successful export. The source
 asset was added at the direct-file path, and `src/pdf-export.test.js` now checks
-the URL contract, PDF signature, source/public equality, and five-page format.
+the preserved reference PDF signature, source/public equality, five-page
+format, and that active exports use generated workbook Blobs.
 
 ## Testing & Coverage
 
@@ -614,6 +625,7 @@ For detailed technical design specifications, UML diagrams, E/R diagrams, and de
   - **UML component, state-machine, and sequence diagrams**;
   - **implemented Firestore E/R diagram and schema contracts**;
   - authentication, public sharing, deployment, testing, and known limitations.
+* **[documentation/workbook-pdf-mapping.md](./documentation/workbook-pdf-mapping.md)** — Page-by-page CV/TR/DS/SB cell, range, transform, chart, signature, and appendix-photo mapping.
 * **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** — Firestore's 1,000-expression-per-request rules evaluation cap: how it presents (identical error to a real permission denial), how to confirm it against the emulator, and the concrete incidents in this codebase (CubeSync batch edits, DocuAlign bundle design) that hit it.
 * **[design.md](./design.md)** — Stable compatibility link to the canonical guide.
 * **[AGENTS.md](./AGENTS.md)** — AI agent coding standards, shared database rules constraints, and testing protocols.
@@ -628,6 +640,8 @@ DocuAlign/
 │   ├── SampleOutput-cover.pdf       # Verified 1-page cover PDF reference
 │   └── SampleOutput.pdf             # Legacy full report reference
 ├── public/SampleDocuments/          # Copied assets for Vite HTTP deployment
+├── vendor/                          # Direct-file workbook/PDF browser runtimes
+├── public/vendor/                   # Vite copies of browser runtimes
 ├── src/
 │   ├── lib/
 │   │   ├── firebase.js              # Firebase SDK v12 singleton initialization
@@ -637,6 +651,9 @@ DocuAlign/
 │   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
 │   ├── dashboard.js                 # Dashboard grid, date filtering & public share links
 │   ├── save-report.js               # Cloud persistence wiring for ETL workspace
+│   ├── workbook-pdf.js              # Workbook cells and embedded-media parser
+│   ├── report-mapping.js            # Repeated-group semantic field mapping
+│   ├── rak-report-pdf.js            # Fixed five-page RAK PDF renderer
 │   ├── view-report.js               # Public share viewer controller (unauthenticated)
 │   └── styles.css                   # Premium vanilla CSS tokenized design system
 ├── index.html                       # Primary ingestion & ETL pipeline workspace
@@ -657,5 +674,4 @@ DocuAlign/
 6. Audit log for report edits
 7. PDF preview before export
 8. Template version control
-9. Auto generated charts
-10. Search by client, vessel, job reference, or sample ID
+9. Search by client, vessel, job reference, or sample ID
