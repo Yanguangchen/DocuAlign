@@ -233,8 +233,8 @@ describe("semantic workbook report mapping", () => {
     const { mapping } = await loadMappingModules();
     const reports = mapping.buildMappedReports({
       sheets: [
-        { name: "CV1 (2)", cells: { K5: null } },
-        { name: "TR1 (2)", cells: { AE2: "FALLBACK-JOB" } },
+        { name: "CV1 (2)" },
+        { name: "TR1 (2)", cells: { AE2: "FALLBACK-JOB", E24: null } },
       ],
     });
 
