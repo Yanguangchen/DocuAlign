@@ -113,10 +113,18 @@ describe("workbook PDF pipeline", () => {
   beforeEach(() => {
     vi.resetModules();
     delete globalThis.docuAlignWorkbookPdf;
+    delete globalThis.XLSX;
+    delete globalThis.jspdf;
+    delete globalThis.jspdfAutoTable;
+    delete globalThis.autoTable;
   });
 
   afterEach(() => {
     delete globalThis.docuAlignWorkbookPdf;
+    delete globalThis.XLSX;
+    delete globalThis.jspdf;
+    delete globalThis.jspdfAutoTable;
+    delete globalThis.autoTable;
   });
 
   it("reads the uploaded bytes and parses every workbook tab in tab order", async () => {
@@ -180,16 +188,46 @@ describe("workbook PDF pipeline", () => {
   });
 
   it("validates parsed workbooks and rejects unreadable or sheetless inputs", async () => {
-    const { parseWorkbook, validateWorkbook } = await loadModule();
+    const { parseWorkbook, populatedRows, validateWorkbook } = await loadModule();
 
     expect(validateWorkbook(parsedFixture)).toEqual({ isValid: true, sheetCount: 3 });
     expect(validateWorkbook({ sheets: [] })).toEqual({ isValid: false, sheetCount: 0 });
+    expect(validateWorkbook({})).toEqual({ isValid: false, sheetCount: 0 });
+    expect(populatedRows(null)).toEqual([]);
+    expect(populatedRows(["Title", null, ["", null], ["Result", null]])).toEqual([
+      ["Title"],
+      ["Result", ""],
+    ]);
     await expect(parseWorkbook({}, xlsxAdapter())).rejects.toThrow("could not be read");
     await expect(parseWorkbook(workbookFile(), null)).rejects.toThrow("parser is unavailable");
 
     const noSheets = xlsxAdapter();
     noSheets.read.mockReturnValue({ SheetNames: [], Sheets: {} });
     await expect(parseWorkbook(workbookFile(), noSheets)).rejects.toThrow("does not contain any worksheets");
+    noSheets.read.mockReturnValue({ SheetNames: null });
+    await expect(parseWorkbook(workbookFile(), noSheets)).rejects.toThrow("does not contain any worksheets");
+  });
+
+  it("uses browser globals and safe workbook metadata defaults", async () => {
+    const sparseXlsx = {
+      read: vi.fn(() => ({ SheetNames: ["Only tab"] })),
+      utils: {
+        sheet_to_json: vi.fn(() => [["Value"]]),
+      },
+    };
+    globalThis.XLSX = sparseXlsx;
+    const { parseWorkbook } = await loadModule();
+    const file = {
+      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(1)),
+    };
+
+    const parsed = await parseWorkbook(file);
+
+    expect(parsed).toEqual({
+      sourceName: "workbook",
+      sheets: [{ name: "Only tab", hidden: false, rows: [["Value"]] }],
+    });
+    expect(sparseXlsx.utils.sheet_to_json).toHaveBeenCalledWith(undefined, expect.any(Object));
   });
 
   it("renders every parsed tab into a new PDF instead of returning the sample asset", async () => {
@@ -232,5 +270,33 @@ describe("workbook PDF pipeline", () => {
     expect(() => createWorkbookPdf(parsedFixture, { jsPDF: adapter.api.jsPDF })).toThrow(
       "PDF table renderer is unavailable",
     );
+    expect(() => createWorkbookPdf(parsedFixture)).toThrow("PDF generator is unavailable");
+  });
+
+  it("supports each browser PDF global exposed by the vendored UMD libraries", async () => {
+    const { createWorkbookPdf } = await loadModule();
+
+    const namespaced = pdfAdapter();
+    globalThis.jspdf = { jsPDF: namespaced.api.jsPDF };
+    globalThis.jspdfAutoTable = { autoTable: namespaced.autoTable };
+    expect(createWorkbookPdf(parsedFixture)).toBe(namespaced.blob);
+    expect(namespaced.autoTable).toHaveBeenCalled();
+
+    delete globalThis.jspdfAutoTable;
+    const directGlobal = pdfAdapter();
+    globalThis.jspdf = { jsPDF: directGlobal.api.jsPDF };
+    globalThis.autoTable = directGlobal.autoTable;
+    expect(createWorkbookPdf(parsedFixture)).toBe(directGlobal.blob);
+    expect(directGlobal.autoTable).toHaveBeenCalled();
+
+    delete globalThis.autoTable;
+    const documentPlugin = pdfAdapter();
+    const autoTableMethod = vi.fn();
+    documentPlugin.api.jsPDF.prototype.autoTable = autoTableMethod;
+    globalThis.jspdf = { jsPDF: documentPlugin.api.jsPDF };
+    expect(createWorkbookPdf(parsedFixture)).toBe(documentPlugin.blob);
+    expect(autoTableMethod).toHaveBeenCalledWith(expect.objectContaining({
+      horizontalPageBreak: true,
+    }));
   });
 });

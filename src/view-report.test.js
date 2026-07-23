@@ -213,6 +213,18 @@ describe("view-report module", () => {
       expect(document.querySelector("#share-preview-caption").textContent).toBe("Page 1 of 3");
     });
 
+    it("renders recipient guidance for a status with a hint", async () => {
+      mockFetchSharedReport.mockResolvedValueOnce(share({ status: "expired" }));
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+
+      expect(document.querySelector("#share-report-status").textContent).toContain("Link expired");
+      expect(document.querySelector(".share-status-hint").textContent).toBe(
+        "Ask the report owner for a new link.",
+      );
+    });
+
     it("renders a data-driven title when the share carries extracted fields", async () => {
       mockFetchSharedReport.mockResolvedValueOnce(
         share({

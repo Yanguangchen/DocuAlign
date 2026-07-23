@@ -147,6 +147,18 @@ describe("workspace controller", () => {
     expect(document.querySelector("#dropzone-prompt").hidden).toBe(false);
     expect(document.querySelector("#pipeline-state").textContent).toBe("Waiting");
     expect(document.querySelector("#cloud-save").disabled).toBe(true);
+
+    let rejectParsing;
+    globalThis.docuAlignWorkbookPdf.parseWorkbook = vi.fn(
+      () => new Promise((_, reject) => {
+        rejectParsing = reject;
+      }),
+    );
+    const rejectedProcessing = selectFile(workbook("replaced.xlsx"));
+    clearFile();
+    rejectParsing(new Error("stale parse failure"));
+    await rejectedProcessing;
+    expect(document.querySelector("#pipeline-state").textContent).toBe("Waiting");
   });
 
   it("wires replace and remove controls", async () => {
@@ -257,5 +269,22 @@ describe("workspace controller", () => {
     await selectFile(workbook("empty.xlsx"));
     expect(document.querySelector("#feedback").textContent).toContain("no readable worksheets");
     expect(document.querySelector("#pdf-export").disabled).toBe(true);
+
+    delete globalThis.docuAlignWorkbookPdf;
+    await selectFile(workbook("runtime-missing.xlsx"));
+    expect(document.querySelector("#feedback").textContent).toContain("could not be processed");
+  });
+
+  it("recovers when PDF generation fails", async () => {
+    const { selectFile } = await loadWorkspace();
+    await selectFile(workbook());
+    globalThis.docuAlignWorkbookPdf.createWorkbookPdf.mockImplementation(() => {
+      throw new Error("PDF rendering failed");
+    });
+
+    document.querySelector("#pdf-export").click();
+
+    expect(document.querySelector("#feedback").textContent).toContain("could not be generated");
+    expect(document.querySelector("#cloud-save").disabled).toBe(true);
   });
 });
