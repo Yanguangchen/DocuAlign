@@ -161,10 +161,11 @@ describe("view-report module", () => {
 
   describe("formatFileSize", () => {
     it("formats megabyte and kilobyte sizes", async () => {
-      const { formatFileSize } = await import("./view-report.js");
+      const { countPdfPages, formatFileSize } = await import("./view-report.js");
       expect(formatFileSize(1.8 * 1024 * 1024)).toBe("1.8 MB");
       expect(formatFileSize(512 * 1024)).toBe("512 KB");
       expect(formatFileSize(10)).toBe("1 KB");
+      expect(countPdfPages("PDF without page objects")).toBe(0);
     });
   });
 
@@ -223,6 +224,36 @@ describe("view-report module", () => {
       expect(document.querySelector(".share-status-hint").textContent).toBe(
         "Ask the report owner for a new link.",
       );
+    });
+
+    it("only reveals PDF details that can be derived", async () => {
+      mockFetchSharedReport.mockResolvedValue(share());
+      fetch.mockReset().mockResolvedValueOnce({ ok: false });
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(document.querySelector("#share-size-row").hidden).toBe(true);
+      expect(document.querySelector("#share-pages-row").hidden).toBe(true);
+
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+      });
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(document.querySelector("#share-size-row").hidden).toBe(true);
+      expect(document.querySelector("#share-pages-row").hidden).toBe(true);
+
+      const onePagePdf = new TextEncoder().encode("%PDF-1.4 /Type /Page");
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(onePagePdf.buffer),
+      });
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+      expect(document.querySelector("#share-size-row").hidden).toBe(false);
+      expect(document.querySelector("#share-pages").textContent).toBe("1 page");
     });
 
     it("renders a data-driven title when the share carries extracted fields", async () => {
