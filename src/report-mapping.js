@@ -5,7 +5,6 @@
  * This classic-script module is shared by direct-file and Vite execution.
  */
 (() => {
-  const SHEET_NAME_PATTERN = /^(CV1|TR1|DS1|SB1)\s*(?:\((\d+)\))?\s*$/;
   const ROLE_FIELDS = Object.freeze({
     CV1: "coverSheetName",
     TR1: "reportSheetName",
@@ -20,6 +19,21 @@
     authorisedByTitle: "Managing Director",
   });
 
+  function sheetIdentity(sheetName) {
+    const normalized = sheetName.trim();
+    for (const role of Object.keys(ROLE_FIELDS)) {
+      if (normalized === role) return { role, index: 1 };
+      const prefix = `${role} (`;
+      if (!normalized.startsWith(prefix) || !normalized.endsWith(")")) continue;
+      const indexText = normalized.slice(prefix.length, -1);
+      const index = Number(indexText);
+      if (Number.isInteger(index) && index >= 2 && String(index) === indexText) {
+        return { role, index };
+      }
+    }
+    return null;
+  }
+
   /**
    * Identify complete report groups while normalizing the workbook's
    * inconsistent spaces and base-group naming convention.
@@ -29,11 +43,11 @@
   function discoverReportGroups(sheetNames = []) {
     const groups = new Map();
     for (const sheetName of sheetNames) {
-      const match = sheetName.match(SHEET_NAME_PATTERN);
-      if (!match) continue;
-      const index = match[2] ? Number(match[2]) : 1;
+      const identity = sheetIdentity(sheetName);
+      if (!identity) continue;
+      const { index, role } = identity;
       if (!groups.has(index)) groups.set(index, { index });
-      const field = Reflect.get(ROLE_FIELDS, match[1]);
+      const field = Reflect.get(ROLE_FIELDS, role);
       Reflect.set(groups.get(index), field, sheetName);
     }
 
