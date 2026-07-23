@@ -26,17 +26,24 @@ describe("classic runtime assets", () => {
     }
   });
 
-  it("loads the workspace controller as a classic script before Firebase modules", () => {
+  it("loads workbook processing before the workspace controller and Firebase modules", () => {
     const html = readProjectFile("index.html");
+    const workbookPdf = html.indexOf('<script vite-ignore src="./src/workbook-pdf.js"></script>');
     const workspace = html.indexOf('<script vite-ignore src="./src/workspace.js"></script>');
     const firstModule = html.indexOf('<script type="module"');
 
+    expect(workbookPdf).toBeGreaterThan(-1);
     expect(workspace).toBeGreaterThan(-1);
+    expect(workbookPdf).toBeLessThan(workspace);
     expect(workspace).toBeLessThan(firstModule);
   });
 
-  it("keeps both direct-file scripts free of module-only syntax", () => {
-    for (const file of ["src/early-observability.js", "src/workspace.js"]) {
+  it("keeps direct-file controllers free of module-only syntax", () => {
+    for (const file of [
+      "src/early-observability.js",
+      "src/workbook-pdf.js",
+      "src/workspace.js",
+    ]) {
       const source = readProjectFile(file);
       expect(source, `${file} must not import modules`).not.toMatch(/^\s*import\s/m);
       expect(source, `${file} must not export bindings`).not.toMatch(/^\s*export\s/m);
