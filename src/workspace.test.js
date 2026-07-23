@@ -233,6 +233,10 @@ describe("workspace controller", () => {
       parsedWorkbook("Client Sample 01.xlsx"),
     );
     expect(globalThis.URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith(
+      "blob:https://docualign.test/generated",
+    );
     expect(document.querySelector("#cloud-save").disabled).toBe(false);
     clearFile();
   });
