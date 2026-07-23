@@ -1,8 +1,8 @@
 /**
  * @file workspace.js
- * @description Primary ETL workspace controller. Manages workbook selection,
- * drag/drop interaction, simulated pipeline progression, PDF export readiness,
- * and the direct-file authentication warning. This file intentionally remains
+ * @description Primary ETL workspace controller. Reads every worksheet from an
+ * uploaded workbook, coordinates local processing state, generates the final
+ * PDF, and handles the direct-file authentication warning. This file remains
  * classic-script compatible so the workspace keeps working over `file://`.
  */
 const input = document.querySelector("#excel-file");
@@ -23,8 +23,9 @@ const saveStep = document.querySelector("#save-step");
 const cloudSave = document.querySelector("#cloud-save");
 const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
 
-let pipelineTimers = [];
 let selectedSourceName = "";
+let processedWorkbook = null;
+let pipelineRun = 0;
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -43,8 +44,7 @@ function setFeedback(message, emphasized) {
 }
 
 function resetPipeline() {
-  pipelineTimers.forEach((timer) => clearTimeout(timer));
-  pipelineTimers = [];
+  processedWorkbook = null;
   pipelineStep.classList.remove("is-active", "is-complete");
   exportStep.classList.remove("is-active", "is-complete");
   saveStep.classList.remove("is-active");
@@ -63,33 +63,67 @@ function advancePipeline(activeIndex, copy) {
   pipelineCopy.textContent = copy;
 }
 
-function startPipeline() {
+function failPipeline(message) {
+  pipelineStages.forEach((stage) => stage.classList.remove("is-active", "is-complete"));
+  pipelineStep.classList.remove("is-active", "is-complete");
+  pipelineState.textContent = "Failed";
+  pipelineCopy.textContent = message;
+  pdfExport.disabled = true;
+  setFeedback(message, true);
+}
+
+async function startPipeline(file) {
   resetPipeline();
+  const currentRun = ++pipelineRun;
   pipelineStep.classList.add("is-active");
   pipelineState.textContent = "Processing";
-  advancePipeline(0, "Extracting mapped report fields from the workbook.");
+  advancePipeline(0, "Reading every worksheet in the workbook.");
 
-  pipelineTimers.push(setTimeout(() => {
-    advancePipeline(1, "Transforming values into the report data model.");
-  }, 450));
-  pipelineTimers.push(setTimeout(() => {
-    advancePipeline(2, "Validating the processed report data.");
-  }, 900));
-  pipelineTimers.push(setTimeout(() => {
+  try {
+    const workbookPdf = globalThis.docuAlignWorkbookPdf;
+    if (!workbookPdf) {
+      throw new Error("Workbook processing is unavailable.");
+    }
+
+    const workbook = await workbookPdf.parseWorkbook(file);
+    if (currentRun !== pipelineRun) return null;
+
+    advancePipeline(1, `Preparing ${workbook.sheets.length} worksheets for PDF export.`);
+    const validation = workbookPdf.validateWorkbook(workbook);
+    advancePipeline(2, "Validating the parsed worksheet data.");
+
+    if (!validation.isValid) {
+      failPipeline("This workbook has no readable worksheets to export.");
+      return null;
+    }
+
+    processedWorkbook = workbook;
     pipelineStages.forEach((stage) => {
       stage.classList.remove("is-active");
       stage.classList.add("is-complete");
     });
     pipelineStep.classList.add("is-complete");
-    pipelineCopy.textContent = "Workbook processing is complete and ready for review.";
+    pipelineCopy.textContent =
+      `${validation.sheetCount} worksheets were processed and are ready for export.`;
     pipelineState.textContent = "Complete";
+    fileMeta.textContent =
+      `${formatFileSize(file.size)} / ${validation.sheetCount} worksheets processed`;
     exportStep.classList.add("is-active");
     pdfExport.disabled = false;
-    setFeedback("ETL complete. Review the processed data and export the final PDF.", true);
-  }, 1350));
+    setFeedback(
+      `ETL complete. The PDF will include all ${validation.sheetCount} workbook worksheets.`,
+      true,
+    );
+    return workbook;
+  } catch {
+    if (currentRun !== pipelineRun) return null;
+    failPipeline("The workbook could not be processed. Check the file and try again.");
+    return null;
+  }
 }
 
 function clearFile() {
+  pipelineRun += 1;
   input.value = "";
   selectedSourceName = "";
   prompt.hidden = false;
@@ -98,13 +132,13 @@ function clearFile() {
   resetPipeline();
 }
 
-function selectFile(file) {
-  if (!file) return;
+async function selectFile(file) {
+  if (!file) return null;
 
   if (!isExcelFile(file)) {
     clearFile();
     setFeedback("Choose an Excel workbook in .xlsx or .xls format.", true);
-    return;
+    return null;
   }
 
   prompt.hidden = true;
@@ -114,7 +148,7 @@ function selectFile(file) {
   fileName.textContent = file.name;
   fileMeta.textContent = `${formatFileSize(file.size)} / Processing started`;
   setFeedback("Workbook received. Running the ETL pipeline now.", true);
-  startPipeline();
+  return startPipeline(file);
 }
 
 function applyRuntimeNotice(protocol = globalThis.location.protocol) {
@@ -134,29 +168,38 @@ document.querySelector("#remove-file").addEventListener("click", () => {
   setFeedback(defaultFeedback, false);
 });
 
-pdfExport.addEventListener("click", () => {
-  if (!selectedSourceName) {
+function exportPdf() {
+  if (!selectedSourceName || !processedWorkbook) {
     setFeedback("Select and process a workbook before exporting the PDF.", true);
     return;
   }
 
-  const reportName = selectedSourceName
-    .replace(/\.(xlsx|xls)$/i, "")
-    .replace(/[^a-z0-9_-]+/gi, "-")
-    .replace(/^-+|-+$/g, "") || "report";
-  const download = document.createElement("a");
-  download.href = new URL("./SampleDocuments/SampleOutput.pdf", globalThis.location.href).href;
-  download.download = `${reportName}-final-report.pdf`;
-  download.rel = "noopener";
-  document.body.appendChild(download);
-  download.click();
-  download.remove();
+  try {
+    const reportName = selectedSourceName
+      .replace(/\.(xlsx|xls)$/i, "")
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "") || "report";
+    const pdfBlob = globalThis.docuAlignWorkbookPdf.createWorkbookPdf(processedWorkbook);
+    const pdfUrl = globalThis.URL.createObjectURL(pdfBlob);
+    const download = document.createElement("a");
+    download.href = pdfUrl;
+    download.download = `${reportName}-final-report.pdf`;
+    download.rel = "noopener";
+    document.body.appendChild(download);
+    download.click();
+    download.remove();
+    setTimeout(() => globalThis.URL.revokeObjectURL(pdfUrl), 0);
 
-  exportStep.classList.add("is-complete");
-  saveStep.classList.add("is-active");
-  cloudSave.disabled = false;
-  setFeedback("Final PDF download started. Cloud save is now available.", true);
-});
+    exportStep.classList.add("is-complete");
+    saveStep.classList.add("is-active");
+    cloudSave.disabled = false;
+    setFeedback("Generated workbook PDF download started. Cloud save is now available.", true);
+  } catch {
+    setFeedback("The workbook PDF could not be generated. Check the file and try again.", true);
+  }
+}
+
+pdfExport.addEventListener("click", exportPdf);
 
 dropzone.addEventListener("dragenter", (event) => {
   event.preventDefault();
@@ -190,5 +233,6 @@ globalThis.docuAlignWorkspace = Object.freeze({
   resetPipeline,
   selectFile,
   setFeedback,
+  exportPdf,
   startPipeline,
 });
