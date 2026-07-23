@@ -84,12 +84,16 @@ describe("RAK semantic report PDF renderer", () => {
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
+    delete globalThis.jspdf;
+    delete globalThis.autoTable;
   });
 
   afterEach(() => {
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
+    delete globalThis.jspdf;
+    delete globalThis.autoTable;
   });
 
   it("renders each mapped report as the five sample-layout pages", async () => {
@@ -160,5 +164,50 @@ describe("RAK semantic report PDF renderer", () => {
       [sample],
       { jsPDF: pdfAdapter().api.jsPDF },
     )).toThrow("PDF table renderer is unavailable");
+    expect(() => globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).toThrow(
+      "PDF generator is unavailable",
+    );
+  });
+
+  it("supports UMD PDF globals, document plugins, and optional image data", async () => {
+    const reports = await sampleReports();
+    const sample = reports.find((report) => report.groupIndex === 2);
+
+    const globalAdapter = pdfAdapter();
+    globalThis.jspdf = { jsPDF: globalAdapter.api.jsPDF };
+    globalThis.autoTable = globalAdapter.table;
+    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).toBe(
+      globalAdapter.blob,
+    );
+
+    delete globalThis.autoTable;
+    const pluginAdapter = pdfAdapter();
+    const documentTable = vi.fn();
+    pluginAdapter.api.jsPDF.prototype.autoTable = documentTable;
+    globalThis.jspdf = { jsPDF: pluginAdapter.api.jsPDF };
+    const reportWithoutImages = {
+      ...sample,
+      cover: { ...sample.cover, clientName: null },
+      psd: {
+        ...sample.psd,
+        rows: [
+          { ...sample.psd.rows[0], sieveSizeMm: "not-a-number" },
+          ...sample.psd.rows.slice(1),
+        ],
+      },
+      assets: {
+        preparedSignature: null,
+        authorisedSignature: null,
+      },
+      appendix: {
+        ...sample.appendix,
+        photos: [...sample.appendix.photos, sample.appendix.photos[0]],
+      },
+    };
+
+    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([reportWithoutImages])).toBe(
+      pluginAdapter.blob,
+    );
+    expect(documentTable).toHaveBeenCalledTimes(3);
   });
 });

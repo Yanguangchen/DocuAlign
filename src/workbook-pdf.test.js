@@ -312,4 +312,107 @@ describe("workbook PDF pipeline", () => {
       horizontalPageBreak: true,
     }));
   });
+
+  it("resolves workbook drawing relationships and ignores unsupported media", async () => {
+    const { extractWorkbookImages } = await loadModule();
+    const relationshipsNamespace =
+      "http://schemas.openxmlformats.org/package/2006/relationships";
+    const officeRelationships =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const drawingNamespace =
+      "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    const drawingMain = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    const files = {
+      "xl/workbook.xml": {
+        content: `<workbook xmlns:r="${officeRelationships}">
+          <sheets>
+            <sheet name="Images" r:id="rId1"/>
+            <sheet name="Missing drawing" r:id="rId2"/>
+            <sheet name="Orphan" r:id="missing"/>
+            <sheet name="" r:id="rId1"/>
+          </sheets>
+        </workbook>`,
+      },
+      "xl/_rels/workbook.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="rId1" Type="${officeRelationships}/worksheet"
+            Target="/xl/worksheets/sheet1.xml"/>
+          <Relationship Id="rId2" Type="${officeRelationships}/worksheet"
+            Target="./worksheets//sheet2.xml"/>
+          <Relationship/>
+        </Relationships>`,
+      },
+      "xl/worksheets/_rels/sheet1.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="drawing" Type="${officeRelationships}/drawing"
+            Target="../drawings/drawing1.xml"/>
+          <Relationship Id="no-type" Target="../drawings/ignored.xml"/>
+        </Relationships>`,
+      },
+      "xl/worksheets/_rels/sheet2.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="drawing" Type="${officeRelationships}/drawing"
+            Target="../drawings/missing.xml"/>
+        </Relationships>`,
+      },
+      "xl/drawings/drawing1.xml": {
+        content: `<xdr:wsDr xmlns:xdr="${drawingNamespace}"
+          xmlns:a="${drawingMain}" xmlns:r="${officeRelationships}">
+          <xdr:twoCellAnchor>
+            <xdr:from><xdr:col>5</xdr:col><xdr:row>147</xdr:row></xdr:from>
+            <xdr:pic>
+              <xdr:nvPicPr><xdr:cNvPr name="JPEG photo"/></xdr:nvPicPr>
+              <xdr:blipFill><a:blip r:embed="img1"/></xdr:blipFill>
+            </xdr:pic>
+          </xdr:twoCellAnchor>
+          <xdr:twoCellAnchor>
+            <xdr:pic><xdr:blipFill><a:blip r:embed="img2"/></xdr:blipFill></xdr:pic>
+          </xdr:twoCellAnchor>
+          <xdr:twoCellAnchor>
+            <xdr:pic><xdr:blipFill><a:blip r:embed="gif"/></xdr:blipFill></xdr:pic>
+          </xdr:twoCellAnchor>
+          <xdr:twoCellAnchor>
+            <xdr:pic><xdr:blipFill><a:blip r:embed="missing"/></xdr:blipFill></xdr:pic>
+          </xdr:twoCellAnchor>
+          <xdr:twoCellAnchor><xdr:pic><xdr:blipFill><a:blip/></xdr:blipFill></xdr:pic></xdr:twoCellAnchor>
+        </xdr:wsDr>`,
+      },
+      "xl/drawings/_rels/drawing1.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="img1" Type="${officeRelationships}/image"
+            Target="../media/photo.jpg"/>
+          <Relationship Id="img2" Type="${officeRelationships}/image"
+            Target="../media/photo.png"/>
+          <Relationship Id="gif" Type="${officeRelationships}/image"
+            Target="../media/photo.gif"/>
+          <Relationship Id="missing" Type="${officeRelationships}/image"
+            Target="../media/missing.png"/>
+        </Relationships>`,
+      },
+      "xl/media/photo.jpg": { content: new ArrayBuffer(4) },
+      "xl/media/photo.png": { content: new Uint8Array([1, 2, 3]) },
+      "xl/media/photo.gif": { content: new Uint8Array([4, 5, 6]) },
+    };
+
+    const images = extractWorkbookImages({ files });
+
+    expect(images.get("Images")).toEqual([
+      expect.objectContaining({
+        name: "JPEG photo",
+        row: 147,
+        column: 5,
+        mimeType: "image/jpeg",
+      }),
+      expect.objectContaining({
+        name: "Workbook image",
+        row: -1,
+        column: -1,
+        mimeType: "image/png",
+      }),
+    ]);
+    expect(images.get("Missing drawing")).toEqual([]);
+    expect(images.has("Orphan")).toBe(false);
+    expect(extractWorkbookImages({ files: {} })).toEqual(new Map());
+    expect(extractWorkbookImages({})).toEqual(new Map());
+  });
 });

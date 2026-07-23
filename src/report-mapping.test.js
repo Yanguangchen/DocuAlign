@@ -217,6 +217,44 @@ describe("semantic workbook report mapping", () => {
     expect(() => mapping.buildMappedReports({ sheets: [] })).toThrow(
       "does not contain any complete report groups",
     );
+    expect(() => mapping.buildMappedReports({ sheets: null })).toThrow(
+      "does not contain any complete report groups",
+    );
     expect(mapping.discoverReportGroups(["CV1 (2)", "DS1  (2)"])).toEqual([]);
+    expect(mapping.discoverReportGroups([
+      "CV1 (x)",
+      "TR1 (01)",
+      "CV1 (0)",
+      "TR1 (-2)",
+    ])).toEqual([]);
+  });
+
+  it("uses documented defaults when optional cells and images are absent", async () => {
+    const { mapping } = await loadMappingModules();
+    const reports = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1 (2)", cells: { K5: null } },
+        { name: "TR1 (2)", cells: { AE2: "FALLBACK-JOB" } },
+      ],
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      sourceName: "workbook",
+      jobRef: "FALLBACK-JOB",
+      cover: {
+        clientName: "",
+        jobRef: "FALLBACK-JOB",
+      },
+      assets: {
+        preparedSignature: null,
+        authorisedSignature: null,
+      },
+      appendix: {
+        title: "APPENDIX",
+        label: "Photographs of sample received:",
+        photos: [],
+      },
+    });
   });
 });
