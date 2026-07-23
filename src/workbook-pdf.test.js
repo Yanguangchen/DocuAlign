@@ -3,6 +3,9 @@
  * @description Unit coverage for parsing every worksheet in an uploaded
  * workbook and rendering those parsed sheets into a generated PDF Blob.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import * as XLSX from "xlsx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const parsedFixture = {
@@ -131,6 +134,49 @@ describe("workbook PDF pipeline", () => {
     expect(xlsx.utils.sheet_to_json).toHaveBeenCalledTimes(3);
     expect(parsed).toEqual(parsedFixture);
     expect(parsed.sheets.map((sheet) => sheet.name)).toEqual(["Cover", "Results", "Empty"]);
+  });
+
+  it("parses all 26 tabs from the real reference workbook", async () => {
+    const bytes = readFileSync(resolve("SampleDocuments/SampleInput.xlsx"));
+    const file = {
+      name: "SampleInput.xlsx",
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+    const { parseWorkbook } = await loadModule();
+
+    const parsed = await parseWorkbook(file, XLSX);
+
+    expect(parsed.sheets).toHaveLength(26);
+    expect(parsed.sheets.map((sheet) => sheet.name)).toEqual([
+      "Summary",
+      "coral + org",
+      "CV1",
+      "TR1",
+      "DS1 ",
+      "SB1 ",
+      "CV1 (2)",
+      "TR1 (2)",
+      "DS1  (2)",
+      "SB1  (2)",
+      "CV1 (3)",
+      "TR1 (3)",
+      "DS1  (3)",
+      "SB1  (3)",
+      "CV1 (4)",
+      "TR1 (4)",
+      "DS1  (4)",
+      "SB1  (4)",
+      "CV1 (5)",
+      "TR1 (5)",
+      "DS1  (5)",
+      "SB1  (5)",
+      "CV1 (6)",
+      "TR1 (6)",
+      "DS1  (6)",
+      "SB1  (6)",
+    ]);
+    expect(parsed.sheets.every((sheet) => sheet.rows.length > 0)).toBe(true);
   });
 
   it("validates parsed workbooks and rejects unreadable or sheetless inputs", async () => {
