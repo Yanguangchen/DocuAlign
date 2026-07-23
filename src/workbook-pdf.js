@@ -7,11 +7,6 @@
 (() => {
   const OFFICE_RELATIONSHIPS =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-  const SPREADSHEET_MAIN =
-    "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-  const SPREADSHEET_DRAWING =
-    "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
-  const DRAWING_MAIN = "http://schemas.openxmlformats.org/drawingml/2006/main";
   const PDF_OPTIONS = Object.freeze({
     orientation: "landscape",
     unit: "mm",
@@ -82,10 +77,25 @@
     return new DOMParser().parseFromString(content, "application/xml");
   }
 
+  function elementsByLocalName(parent, localName) {
+    return Array.from(parent.getElementsByTagName("*"))
+      .filter((element) => element.localName === localName);
+  }
+
+  function firstByLocalName(parent, localName) {
+    return elementsByLocalName(parent, localName).at(0) ?? null;
+  }
+
+  function relationshipAttribute(element, localName, qualifiedName) {
+    return element?.getAttributeNS(OFFICE_RELATIONSHIPS, localName)
+      ?? element?.getAttribute(qualifiedName)
+      ?? null;
+  }
+
   function relationshipMap(document, baseFile) {
     const relationships = new Map();
     if (!document) return relationships;
-    for (const relationship of document.getElementsByTagNameNS("*", "Relationship")) {
+    for (const relationship of elementsByLocalName(document, "Relationship")) {
       const id = relationship.getAttribute("Id");
       const target = relationship.getAttribute("Target");
       if (id && target) relationships.set(id, {
@@ -120,23 +130,21 @@
 
     const images = [];
     for (const anchor of drawing.documentElement.children) {
-      const blip = anchor.getElementsByTagNameNS(DRAWING_MAIN, "blip").item(0);
-      const relationshipId = blip?.getAttributeNS(OFFICE_RELATIONSHIPS, "embed");
+      const blip = firstByLocalName(anchor, "blip");
+      const relationshipId = relationshipAttribute(blip, "embed", "r:embed");
       const mediaPath = drawingRelationships.get(relationshipId)?.path;
       const mimeType = mediaPath ? mediaType(mediaPath) : null;
       const bytes = mediaPath ? mediaBytes(files, mediaPath) : null;
       if (!mimeType || !bytes) continue;
 
-      const from = anchor.getElementsByTagNameNS(SPREADSHEET_DRAWING, "from").item(0);
+      const from = firstByLocalName(anchor, "from");
       const row = from
-        ? Number(from.getElementsByTagNameNS(SPREADSHEET_DRAWING, "row").item(0)?.textContent)
+        ? Number(firstByLocalName(from, "row")?.textContent)
         : -1;
       const column = from
-        ? Number(from.getElementsByTagNameNS(SPREADSHEET_DRAWING, "col").item(0)?.textContent)
+        ? Number(firstByLocalName(from, "col")?.textContent)
         : -1;
-      const properties = anchor
-        .getElementsByTagNameNS(SPREADSHEET_DRAWING, "cNvPr")
-        .item(0);
+      const properties = firstByLocalName(anchor, "cNvPr");
       images.push({
         name: properties?.getAttribute("name") ?? "Workbook image",
         row,
@@ -165,9 +173,9 @@
     if (!workbookXml) return new Map();
 
     const imagesBySheet = new Map();
-    for (const sheet of workbookXml.getElementsByTagNameNS(SPREADSHEET_MAIN, "sheet")) {
+    for (const sheet of elementsByLocalName(workbookXml, "sheet")) {
       const sheetName = sheet.getAttribute("name");
-      const relationshipId = sheet.getAttributeNS(OFFICE_RELATIONSHIPS, "id");
+      const relationshipId = relationshipAttribute(sheet, "id", "r:id");
       const worksheetPath = workbookRelationships.get(relationshipId)?.path;
       if (!sheetName || !worksheetPath) continue;
 
