@@ -18,7 +18,7 @@ function sha256(buffer) {
 
 describe("PDF export asset", () => {
   it("generates exports from parsed workbooks instead of downloading the sample", () => {
-    expect(workspaceSource).toContain("createWorkbookPdf");
+    expect(workspaceSource).toContain("createRakReportPdf");
     expect(workspaceSource).toContain("URL.createObjectURL");
     expect(workspaceSource).not.toContain("SampleOutput.pdf");
   });

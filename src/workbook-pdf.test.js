@@ -14,6 +14,8 @@ const parsedFixture = {
     {
       name: "Cover",
       hidden: false,
+      cells: {},
+      images: [],
       rows: [
         ["Client", "Acme"],
         ["Job", "JOB-42"],
@@ -22,6 +24,8 @@ const parsedFixture = {
     {
       name: "Results",
       hidden: true,
+      cells: {},
+      images: [],
       rows: [
         ["Test", "Value"],
         ["Moisture", 12.4],
@@ -30,6 +34,8 @@ const parsedFixture = {
     {
       name: "Empty",
       hidden: false,
+      cells: {},
+      images: [],
       rows: [],
     },
   ],
@@ -136,6 +142,7 @@ describe("workbook PDF pipeline", () => {
 
     expect(file.arrayBuffer).toHaveBeenCalledOnce();
     expect(xlsx.read).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
+      bookFiles: true,
       cellDates: true,
       cellStyles: true,
     });
@@ -225,7 +232,13 @@ describe("workbook PDF pipeline", () => {
 
     expect(parsed).toEqual({
       sourceName: "workbook",
-      sheets: [{ name: "Only tab", hidden: false, rows: [["Value"]] }],
+      sheets: [{
+        name: "Only tab",
+        hidden: false,
+        cells: {},
+        images: [],
+        rows: [["Value"]],
+      }],
     });
     expect(sparseXlsx.utils.sheet_to_json).toHaveBeenCalledWith(undefined, expect.any(Object));
   });

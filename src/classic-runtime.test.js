@@ -29,12 +29,20 @@ describe("classic runtime assets", () => {
   it("loads workbook processing before the workspace controller and Firebase modules", () => {
     const html = readProjectFile("index.html");
     const workbookPdf = html.indexOf('<script vite-ignore src="./src/workbook-pdf.js"></script>');
+    const reportMapping = html.indexOf(
+      '<script vite-ignore src="./src/report-mapping.js"></script>',
+    );
+    const reportPdf = html.indexOf(
+      '<script vite-ignore src="./src/rak-report-pdf.js"></script>',
+    );
     const workspace = html.indexOf('<script vite-ignore src="./src/workspace.js"></script>');
     const firstModule = html.indexOf('<script type="module"');
 
     expect(workbookPdf).toBeGreaterThan(-1);
+    expect(reportMapping).toBeGreaterThan(workbookPdf);
+    expect(reportPdf).toBeGreaterThan(reportMapping);
     expect(workspace).toBeGreaterThan(-1);
-    expect(workbookPdf).toBeLessThan(workspace);
+    expect(reportPdf).toBeLessThan(workspace);
     expect(workspace).toBeLessThan(firstModule);
   });
 
@@ -42,6 +50,8 @@ describe("classic runtime assets", () => {
     for (const file of [
       "src/early-observability.js",
       "src/workbook-pdf.js",
+      "src/report-mapping.js",
+      "src/rak-report-pdf.js",
       "src/workspace.js",
     ]) {
       const source = readProjectFile(file);
