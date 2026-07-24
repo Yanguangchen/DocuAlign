@@ -162,7 +162,7 @@
     addHeaderJob(plan, report);
     const valueTops = [149.6, 168.08, 186.56, 205.04, 223.52, 242.0, 260.48];
     report.psd.rows.forEach((row, index) => {
-      addValue(plan, row.cumulativePassingPercent, 206.42, valueTops[index], {
+      addValue(plan, row.cumulativePassingPercent, 206.42, valueTops.at(index), {
         eraseX: 196,
         eraseWidth: 32,
       });
@@ -233,7 +233,7 @@
         [row.horizontalDisplacementMm, 288.83],
       ];
       for (const [text, top] of values) {
-        addValue(plan, text, xPositions[index], top, {
+        addValue(plan, text, xPositions.at(index), top, {
           eraseWidth: 28,
         });
       }
@@ -270,7 +270,7 @@
     addHeaderJob(plan, report);
     const valueTops = Array.from({ length: 12 }, (_, index) => 143.72 + index * 14.52);
     report.metals.rows.forEach((row, index) => {
-      addValue(plan, row.resultPpm, 276.29, valueTops[index], {
+      addValue(plan, row.resultPpm, 276.29, valueTops.at(index), {
         eraseX: 265,
         eraseWidth: 42,
       });
