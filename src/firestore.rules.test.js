@@ -174,24 +174,24 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       );
     });
 
-    it("allows publishing optional extracted display fields", async () => {
+    it("denies customer display fields, including null keys sent by older clients", async () => {
       const context = testEnvironment.authenticatedContext("staff", {
         email: "ken@rakmat.com.sg",
         email_verified: true,
       });
-      await assertSucceeds(
+      await assertFails(
         setDoc(
           doc(context.firestore(), SHARES, TOKEN),
           sharePayload({
-            reportTitle: "Reclamation Sand Testing Report",
-            clientName: "Xinsha Holding Pte Ltd",
-            jobRef: "X-2026-522-2",
+            reportTitle: null,
+            clientName: null,
+            jobRef: null,
           }),
         ),
       );
     });
 
-    it("denies oversized or non-string display fields", async () => {
+    it("denies oversized or non-string required fields", async () => {
       const context = testEnvironment.authenticatedContext("staff", {
         email: "ken@rakmat.com.sg",
         email_verified: true,
@@ -199,13 +199,13 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       await assertFails(
         setDoc(
           doc(context.firestore(), SHARES, TOKEN),
-          sharePayload({ reportTitle: "x".repeat(201) }),
+          sharePayload({ reportName: "x".repeat(201) }),
         ),
       );
       await assertFails(
         setDoc(
           doc(context.firestore(), SHARES, TOKEN),
-          sharePayload({ clientName: 12345 }),
+          sharePayload({ status: 12345 }),
         ),
       );
     });
