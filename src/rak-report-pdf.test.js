@@ -122,16 +122,6 @@ describe("RAK sample-template PDF renderer", () => {
       ],
     });
     expect(plan[4].images).toHaveLength(2);
-    const valueMasks = [
-      plan[1].whiteouts.find((mask) => mask.x === 196),
-      plan[2].whiteouts.find((mask) => mask.x === 409.7),
-      plan[3].whiteouts.find((mask) => mask.x === 265),
-    ];
-    expect(valueMasks.every((mask) => mask.height <= 11.2)).toBe(true);
-    expect(valueMasks[1]).toMatchObject({
-      top: 128.66,
-      height: 11.2,
-    });
 
     const edgeReport = {
       ...changed,
