@@ -16,6 +16,20 @@
   ]);
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
+  const GRADING_SERIES_STYLES = Object.freeze({
+    cumulativePassingPercent: Object.freeze({
+      color: Object.freeze([0.31, 0.55, 0.78]),
+      dashArray: null,
+    }),
+    lowerLimit: Object.freeze({
+      color: Object.freeze([0.8, 0.3, 0.28]),
+      dashArray: Object.freeze([5, 3]),
+    }),
+    upperLimit: Object.freeze({
+      color: Object.freeze([0.55, 0.72, 0.3]),
+      dashArray: Object.freeze([5, 3]),
+    }),
+  });
 
   function stringHash(value) {
     let hash = 2166136261;
@@ -368,13 +382,28 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function line(page, x1, top1, x2, top2, pdfLib, lineColor, thickness = 1) {
-    page.drawLine({
+  function line(
+    page,
+    x1,
+    top1,
+    x2,
+    top2,
+    pdfLib,
+    lineColor,
+    thickness = 1,
+    dashArray = null,
+  ) {
+    const options = {
       start: { x: x1, y: PAGE_HEIGHT - top1 },
       end: { x: x2, y: PAGE_HEIGHT - top2 },
       color: color(pdfLib, lineColor),
       thickness,
-    });
+    };
+    if (dashArray) {
+      options.dashArray = dashArray;
+      options.dashPhase = 0;
+    }
+    page.drawLine(options);
   }
 
   function circle(page, x, top, pdfLib, fill, size = 2.2) {
@@ -442,11 +471,11 @@
         - (numeric(Reflect.get(row, field)) / 100) * (plot.bottom - plot.top),
     });
     const series = [
-      ["cumulativePassingPercent", [0.31, 0.55, 0.78]],
-      ["lowerLimit", [0.8, 0.3, 0.28]],
-      ["upperLimit", [0.55, 0.72, 0.3]],
+      ["cumulativePassingPercent", GRADING_SERIES_STYLES.cumulativePassingPercent],
+      ["lowerLimit", GRADING_SERIES_STYLES.lowerLimit],
+      ["upperLimit", GRADING_SERIES_STYLES.upperLimit],
     ];
-    for (const [field, seriesColor] of series) {
+    for (const [field, style] of series) {
       const points = chart.rows.map((row) => toPoint(row, field))
         .sort((left, right) => left.x - right.x);
       points.forEach((point, index) => {
@@ -459,11 +488,12 @@
             point.x,
             point.top,
             pdfLib,
-            seriesColor,
+            style.color,
             1.6,
+            style.dashArray,
           );
         }
-        circle(page, point.x, point.top, pdfLib, seriesColor, 2.2);
+        circle(page, point.x, point.top, pdfLib, style.color, 2.2);
       });
     }
     chartText(page, "Cumulative % passing", 51, 390, 9.2, fonts, pdfLib, {
@@ -471,13 +501,23 @@
     });
     chartText(page, "Sieve Size (mm)", 250, 410, 9.2, fonts, pdfLib);
     const legends = [
-      ["Grading Curve", 190, [0.31, 0.55, 0.78]],
-      ["Lower Limit", 285, [0.8, 0.3, 0.28]],
-      ["Upper Limit", 370, [0.55, 0.72, 0.3]],
+      ["Grading Curve", 190, GRADING_SERIES_STYLES.cumulativePassingPercent],
+      ["Lower Limit", 285, GRADING_SERIES_STYLES.lowerLimit],
+      ["Upper Limit", 370, GRADING_SERIES_STYLES.upperLimit],
     ];
-    for (const [label, x, legendColor] of legends) {
-      line(page, x - 14, 438, x + 8, 438, pdfLib, legendColor, 1.5);
-      circle(page, x - 3, 438, pdfLib, legendColor, 2);
+    for (const [label, x, style] of legends) {
+      line(
+        page,
+        x - 14,
+        438,
+        x + 8,
+        438,
+        pdfLib,
+        style.color,
+        1.5,
+        style.dashArray,
+      );
+      circle(page, x - 3, 438, pdfLib, style.color, 2);
       chartText(page, label, x + 12, 433.5, 8.5, fonts, pdfLib);
     }
   }
@@ -680,6 +720,7 @@
   }
 
   globalThis.docuAlignRakReportPdf = Object.freeze({
+    GRADING_SERIES_STYLES,
     buildOverlayPlan,
     createRakReportPdf,
     matchesReferenceReport,
