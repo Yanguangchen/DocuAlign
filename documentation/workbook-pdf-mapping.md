@@ -93,7 +93,9 @@ already contain cached values from the corresponding `DS1` tab.
 
 The grading chart is regenerated from the seven PSD rows. Sieve size uses a
 logarithmic X axis; cumulative passing, lower limit, and upper limit are drawn
-as separate series.
+as separate series. The measured grading curve is solid; the JTC lower and
+upper limits use matching `5pt line / 3pt gap` dashed patterns in both the plot
+and legend, following the sample PDF.
 
 ## 5. Page 3 — direct shear and organic matter
 
