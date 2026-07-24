@@ -1,66 +1,15 @@
 /**
  * @file rak-report-pdf.test.js
- * @description Rendering coverage for the fixed five-page RAK report template
- * and multi-report workbook export.
+ * @description Verifies that generated reports reuse the exact five-page
+ * SampleOutput.pdf geometry and apply mapped values through template overlays.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { autoTable } from "jspdf-autotable";
-import { jsPDF } from "jspdf";
+import * as PDFLib from "pdf-lib";
 import * as XLSX from "xlsx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function pdfAdapter() {
-  const blob = new Blob(["%PDF-semantic"], { type: "application/pdf" });
-  const documents = [];
-  const table = vi.fn();
-
-  class FakePdf {
-    constructor(options) {
-      this.options = options;
-      this.pages = 1;
-      this.textCalls = [];
-      this.imageCalls = [];
-      documents.push(this);
-    }
-
-    addPage() { this.pages += 1; }
-
-    addImage(...args) { this.imageCalls.push(args); }
-
-    circle() {}
-
-    line() {}
-
-    rect() {}
-
-    setDrawColor() {}
-
-    setFillColor() {}
-
-    setFont() {}
-
-    setFontSize() {}
-
-    setLineWidth() {}
-
-    setTextColor() {}
-
-    text(value, x, y) { this.textCalls.push({ value, x, y }); }
-
-    output(type) {
-      expect(type).toBe("blob");
-      return blob;
-    }
-  }
-
-  return {
-    api: { jsPDF: FakePdf, autoTable: table },
-    blob,
-    documents,
-    table,
-  };
-}
+const templateBytes = readFileSync(resolve("SampleDocuments/SampleOutput.pdf"));
 
 async function sampleReports() {
   const bytes = readFileSync(resolve("SampleDocuments/SampleInput.xlsx"));
@@ -78,121 +27,102 @@ async function sampleReports() {
   return globalThis.docuAlignReportMapping.buildMappedReports(parsed);
 }
 
-describe("RAK semantic report PDF renderer", () => {
+function templateOptions(overrides = {}) {
+  return {
+    pdfLib: PDFLib,
+    templateBytes,
+    ...overrides,
+  };
+}
+
+describe("RAK sample-template PDF renderer", () => {
   beforeEach(() => {
     vi.resetModules();
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
-    delete globalThis.jspdf;
-    delete globalThis.autoTable;
+    delete globalThis.PDFLib;
   });
 
   afterEach(() => {
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
-    delete globalThis.jspdf;
-    delete globalThis.autoTable;
+    delete globalThis.PDFLib;
+    vi.unstubAllGlobals();
   });
 
-  it("renders each mapped report as the five sample-layout pages", async () => {
-    const reports = await sampleReports();
-    const sample = reports.find((report) => report.groupIndex === 2);
-    const pdf = pdfAdapter();
-
-    const result = globalThis.docuAlignRakReportPdf.createRakReportPdf([sample], pdf.api);
-
-    expect(result).toBe(pdf.blob);
-    expect(pdf.documents[0].options).toMatchObject({
-      orientation: "portrait",
-      unit: "mm",
-      format: "a4",
-    });
-    expect(pdf.documents[0].pages).toBe(5);
-    const renderedText = pdf.documents[0].textCalls
-      .flatMap((call) => Array.isArray(call.value) ? call.value : [call.value])
-      .join("\n");
-    expect(renderedText).toContain("TEST REPORT");
-    expect(renderedText).toContain("JOB REF: X-2026-522-2");
-    expect(renderedText).toContain("Determination of Particle Size Distribution");
-    expect(renderedText).toContain("Shear Strength by Direct Shear");
-    expect(renderedText).toContain("12 Metallic Analysis");
-    expect(renderedText).toContain("Jocelyn Lee Jia Min");
-    expect(renderedText).toContain("APPENDIX");
-    expect(pdf.table).toHaveBeenCalledTimes(3);
-    expect(pdf.documents[0].imageCalls.length).toBeGreaterThanOrEqual(4);
-  });
-
-  it("combines all six workbook reports into one 30-page export", async () => {
-    const reports = await sampleReports();
-    const pdf = pdfAdapter();
-
-    globalThis.docuAlignRakReportPdf.createRakReportPdf(reports, pdf.api);
-
-    expect(pdf.documents[0].pages).toBe(30);
-    expect(pdf.documents[0].textCalls.some((call) =>
-      String(call.value).includes("X-2026-522-6"))).toBe(true);
-  });
-
-  it("produces a real five-page PDF for the reference sample", async () => {
+  it("copies the exact five reference pages for the matching sample report", async () => {
     const reports = await sampleReports();
     const sample = reports.find((report) => report.groupIndex === 2);
 
-    const blob = globalThis.docuAlignRakReportPdf.createRakReportPdf(
+    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport(sample)).toBe(true);
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
       [sample],
-      { jsPDF, autoTable },
+      templateOptions(),
     );
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const rawPdf = new TextDecoder("latin1").decode(bytes);
+    const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+    const template = await PDFLib.PDFDocument.load(templateBytes);
 
-    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
-    expect(rawPdf.match(/\/Type\s*\/Page\b/g) ?? []).toHaveLength(5);
-  });
-
-  it("rejects missing report data or unavailable PDF libraries", async () => {
-    const reports = await sampleReports();
-    const sample = reports[0];
-
-    expect(() => globalThis.docuAlignRakReportPdf.createRakReportPdf([])).toThrow(
-      "at least one mapped report",
-    );
-    expect(() => globalThis.docuAlignRakReportPdf.createRakReportPdf([sample], null)).toThrow(
-      "PDF generator is unavailable",
-    );
-    expect(() => globalThis.docuAlignRakReportPdf.createRakReportPdf(
-      [sample],
-      { jsPDF: pdfAdapter().api.jsPDF },
-    )).toThrow("PDF table renderer is unavailable");
-    expect(() => globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).toThrow(
-      "PDF generator is unavailable",
+    expect(blob.type).toBe("application/pdf");
+    expect(output.getPageCount()).toBe(5);
+    expect(output.getPages().map((page) => page.getSize())).toEqual(
+      template.getPages().map((page) => page.getSize()),
     );
   });
 
-  it("supports UMD PDF globals, document plugins, and optional image data", async () => {
+  it("builds overlays at the measured sample-PDF coordinates", async () => {
     const reports = await sampleReports();
     const sample = reports.find((report) => report.groupIndex === 2);
-
-    const globalAdapter = pdfAdapter();
-    globalThis.jspdf = { jsPDF: globalAdapter.api.jsPDF };
-    globalThis.autoTable = globalAdapter.table;
-    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).toBe(
-      globalAdapter.blob,
-    );
-
-    delete globalThis.autoTable;
-    const pluginAdapter = pdfAdapter();
-    const documentTable = vi.fn();
-    pluginAdapter.api.jsPDF.prototype.autoTable = documentTable;
-    globalThis.jspdf = { jsPDF: pluginAdapter.api.jsPDF };
-    const reportWithoutImages = {
+    const changed = {
       ...sample,
-      cover: { ...sample.cover, clientName: null },
+      jobRef: "X-2026-522-9",
+      cover: {
+        ...sample.cover,
+        jobRef: "X-2026-522-9",
+        clientName: "Replacement Client",
+      },
+    };
+
+    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport(changed)).toBe(false);
+    const plan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(changed);
+
+    expect(plan).toHaveLength(5);
+    expect(plan[0].texts).toContainEqual(expect.objectContaining({
+      text: "Replacement Client",
+      x: 181.1,
+      top: 139.64,
+      size: 9.48,
+    }));
+    expect(plan[0].texts).toContainEqual(expect.objectContaining({
+      text: "X-2026-522-9",
+      x: 181.1,
+      top: 457.21,
+      bold: true,
+    }));
+    expect(plan[1]).toMatchObject({
+      chart: { kind: "grading", x: 38.28, top: 277.5 },
+    });
+    expect(plan[2]).toMatchObject({
+      charts: [
+        { kind: "normal-shear", x: 38.28 },
+        { kind: "displacement-shear", x: 289.5 },
+      ],
+    });
+    expect(plan[4].images).toHaveLength(2);
+
+    const edgeReport = {
+      ...changed,
+      cover: {
+        ...changed.cover,
+        clientName: null,
+        testMethods: ["MethodOnly", ...changed.cover.testMethods.slice(1)],
+      },
       psd: {
-        ...sample.psd,
+        ...changed.psd,
         rows: [
-          { ...sample.psd.rows[0], sieveSizeMm: "not-a-number" },
-          ...sample.psd.rows.slice(1),
+          { ...changed.psd.rows[0], sieveSizeMm: "invalid" },
+          ...changed.psd.rows.slice(1),
         ],
       },
       assets: {
@@ -200,14 +130,84 @@ describe("RAK semantic report PDF renderer", () => {
         authorisedSignature: null,
       },
       appendix: {
-        ...sample.appendix,
-        photos: [...sample.appendix.photos, sample.appendix.photos[0]],
+        ...changed.appendix,
+        photos: [null, changed.appendix.photos[1], changed.appendix.photos[0]],
       },
     };
+    const edgePlan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(edgeReport);
+    expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "" }));
+    expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "MethodOnly" }));
+    expect(edgePlan[4].images).toHaveLength(2);
+    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport({
+      ...changed,
+      assets: {},
+      appendix: undefined,
+    })).toBe(false);
 
-    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([reportWithoutImages])).toBe(
-      pluginAdapter.blob,
+    const edgeBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [edgeReport],
+      templateOptions(),
     );
-    expect(documentTable).toHaveBeenCalledTimes(3);
+    expect(edgeBlob.type).toBe("application/pdf");
+  });
+
+  it("combines all six workbook reports into 30 copied template pages", async () => {
+    const reports = await sampleReports();
+
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      reports,
+      templateOptions(),
+    );
+    const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+
+    expect(output.getPageCount()).toBe(30);
+  });
+
+  it("loads the template through browser globals in the production call shape", async () => {
+    const reports = await sampleReports();
+    const sample = reports.find((report) => report.groupIndex === 2);
+    globalThis.PDFLib = PDFLib;
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () =>
+        templateBytes.buffer.slice(
+          templateBytes.byteOffset,
+          templateBytes.byteOffset + templateBytes.byteLength,
+        ),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf([sample]);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(
+      "SampleDocuments/SampleOutput.pdf",
+    ));
+    expect(blob.type).toBe("application/pdf");
+  });
+
+  it("rejects missing reports, runtime libraries, and template responses", async () => {
+    const reports = await sampleReports();
+    const sample = reports[0];
+
+    await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([])).rejects.toThrow(
+      "at least one mapped report",
+    );
+    await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [sample],
+      { pdfLib: null, templateBytes },
+    )).rejects.toThrow("PDF template library is unavailable");
+
+    globalThis.PDFLib = PDFLib;
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404 })));
+    await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).rejects.toThrow(
+      "sample PDF template",
+    );
+
+    const invalidTemplate = await PDFLib.PDFDocument.create();
+    invalidTemplate.addPage();
+    await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [sample],
+      templateOptions({ templateBytes: await invalidTemplate.save() }),
+    )).rejects.toThrow("exactly five pages");
   });
 });

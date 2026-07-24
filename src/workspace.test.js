@@ -70,7 +70,7 @@ function mappingApi(overrides = {}) {
 
 function rendererApi(overrides = {}) {
   return {
-    createRakReportPdf: vi.fn(() =>
+    createRakReportPdf: vi.fn(async () =>
       new Blob(["%PDF-generated"], { type: "application/pdf" })),
     ...overrides,
   };
@@ -247,6 +247,7 @@ describe("workspace controller", () => {
 
     await selectFile(workbook("Client Sample 01.xlsx"));
     exportButton.click();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
     const download = clickSpy.mock.contexts[0];
     expect(download.download).toBe("Client-Sample-01-final-report.pdf");
     expect(download.href).toBe("blob:https://docualign.test/generated");
@@ -268,6 +269,7 @@ describe("workspace controller", () => {
 
     await selectFile(workbook("---.xlsx"));
     document.querySelector("#pdf-export").click();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
     expect(clickSpy.mock.contexts[0].download).toBe("report-final-report.pdf");
 
     applyRuntimeNotice("https:");
@@ -304,13 +306,17 @@ describe("workspace controller", () => {
   it("recovers when PDF generation fails", async () => {
     const { selectFile } = await loadWorkspace();
     await selectFile(workbook());
-    globalThis.docuAlignRakReportPdf.createRakReportPdf.mockImplementation(() => {
-      throw new Error("PDF rendering failed");
-    });
+    globalThis.docuAlignRakReportPdf.createRakReportPdf.mockRejectedValueOnce(
+      new Error("PDF rendering failed"),
+    );
 
     document.querySelector("#pdf-export").click();
 
-    expect(document.querySelector("#feedback").textContent).toContain("could not be generated");
+    await vi.waitFor(() => {
+      expect(document.querySelector("#feedback").textContent).toContain(
+        "could not be generated",
+      );
+    });
     expect(document.querySelector("#cloud-save").disabled).toBe(true);
   });
 });

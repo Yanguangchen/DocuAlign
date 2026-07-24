@@ -116,24 +116,21 @@ describe("toPublicReportPayload", () => {
       sourceFileName: "rak-report.xlsx",
       status: "complete",
       pdfUrl: PUBLIC_PDF_PATH,
-      reportTitle: null,
-      clientName: null,
-      jobRef: null,
     });
     expect(payload).not.toHaveProperty("createdBy");
     expect(payload).not.toHaveProperty("internalNote");
   });
 
-  it("passes through extracted display fields when the report carries them", () => {
+  it("drops extracted customer display fields from the public capability payload", () => {
     const payload = toPublicReportPayload({
       id: "doc-4",
       reportTitle: "Reclamation Sand Testing Report",
       clientName: "Xinsha Holding Pte Ltd",
       jobRef: "X-2026-522-2",
     });
-    expect(payload.reportTitle).toBe("Reclamation Sand Testing Report");
-    expect(payload.clientName).toBe("Xinsha Holding Pte Ltd");
-    expect(payload.jobRef).toBe("X-2026-522-2");
+    expect(payload).not.toHaveProperty("reportTitle");
+    expect(payload).not.toHaveProperty("clientName");
+    expect(payload).not.toHaveProperty("jobRef");
   });
 
   it("applies dashboard-consistent fallbacks for missing metadata", () => {
@@ -144,9 +141,6 @@ describe("toPublicReportPayload", () => {
       sourceFileName: null,
       status: "saved",
       pdfUrl: PUBLIC_PDF_PATH,
-      reportTitle: null,
-      clientName: null,
-      jobRef: null,
     });
   });
 
@@ -179,9 +173,6 @@ describe("publishReport", () => {
         sourceFileName: "rak-report.xlsx",
         status: "complete",
         pdfUrl: PUBLIC_PDF_PATH,
-        reportTitle: null,
-        clientName: null,
-        jobRef: null,
         publishedAt: "MOCK_TIMESTAMP",
       },
     );

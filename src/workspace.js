@@ -169,7 +169,7 @@ document.querySelector("#remove-file").addEventListener("click", () => {
   setFeedback(defaultFeedback, false);
 });
 
-function exportPdf() {
+async function exportPdf() {
   if (!selectedSourceName || !processedReports) {
     setFeedback("Select and process a workbook before exporting the PDF.", true);
     return;
@@ -180,7 +180,8 @@ function exportPdf() {
       .replace(/\.(xlsx|xls)$/i, "")
       .replace(/[^a-z0-9_-]+/gi, "-")
       .replace(/^-+|-+$/g, "") || "report";
-    const pdfBlob = globalThis.docuAlignRakReportPdf.createRakReportPdf(processedReports);
+    setFeedback("Generating the final PDF from the approved report template…", true);
+    const pdfBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(processedReports);
     const pdfUrl = globalThis.URL.createObjectURL(pdfBlob);
     const download = document.createElement("a");
     download.href = pdfUrl;
