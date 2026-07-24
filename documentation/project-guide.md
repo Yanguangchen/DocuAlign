@@ -487,6 +487,26 @@ The ordinary `npm test` run skips emulator-backed cases unless `RUN_FIRESTORE_RU
 
 The coverage configuration includes `src/**/*.{js,jsx}`, excludes `src/main.jsx` and tests, and targets the repository's 100% statements/branches/functions/lines baseline.
 
+### 10.1 Local PDF pipeline observability
+
+`initObservability()` exposes a frozen `globalThis.docuAlignLogger` bridge so
+the classic workbook controllers can use the central structured logger without
+import syntax or direct `console.*` calls.
+
+| Event / operation | Recorded context |
+| --- | --- |
+| `Process workbook locally` | duration/outcome, source extension and byte size |
+| `Workbook processing completed` | sheet count, mapped report count, output page count |
+| `Generate PDF from approved template` | duration/outcome, report and page counts |
+| `PDF template rendering completed` | copied pages, reference/overlay report counts, chart/image overlays, value-mask count and maximum mask height, output bytes |
+| `PDF export download prepared` | report/page counts, Blob size and MIME type |
+
+Telemetry deliberately excludes filenames, client names, job references,
+workbook values, and other customer data. Support can inspect the bounded event
+tail with `globalThis.docuAlignDiagnostics.getSnapshot()`. The value-mask
+metrics specifically make table-border regressions diagnosable: normal
+template overlays report a maximum value-mask height of 11.2 points.
+
 Before deployment:
 
 1. Enable Google Authentication for Firebase project `crewhub-43647`.
