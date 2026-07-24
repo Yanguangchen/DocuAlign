@@ -107,12 +107,6 @@ export function toPublicReportPayload(report) {
     sourceFileName: report.sourceFileName ?? null,
     status: report.status || "saved",
     pdfUrl: PUBLIC_PDF_PATH,
-    // Optional display fields extracted from the source workbook (cover-page
-    // values like the project title). Null until the save flow persists the
-    // extracted report data; the public viewer falls back to a generic title.
-    reportTitle: report.reportTitle ?? null,
-    clientName: report.clientName ?? null,
-    jobRef: report.jobRef ?? null,
   };
 }
 
