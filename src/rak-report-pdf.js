@@ -95,8 +95,8 @@
       plan,
       options.eraseX ?? x - 5,
       top - 1,
-      options.eraseWidth ?? 40,
-      options.eraseHeight ?? 13,
+      options.eraseWidth,
+      13,
     );
     addText(plan, text, x, top, options);
   }
@@ -522,7 +522,7 @@
       rotate: 90,
     });
     chartText(page, "Normal Stress (kPa)", 130, 428, 9.2, fonts, pdfLib);
-    if (last) circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
+    circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
   }
 
   function drawDisplacementShearChart(page, chart, fonts, pdfLib) {

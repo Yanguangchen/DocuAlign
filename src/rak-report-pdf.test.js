@@ -110,6 +110,45 @@ describe("RAK sample-template PDF renderer", () => {
       ],
     });
     expect(plan[4].images).toHaveLength(2);
+
+    const edgeReport = {
+      ...changed,
+      cover: {
+        ...changed.cover,
+        clientName: null,
+        testMethods: ["MethodOnly", ...changed.cover.testMethods.slice(1)],
+      },
+      psd: {
+        ...changed.psd,
+        rows: [
+          { ...changed.psd.rows[0], sieveSizeMm: "invalid" },
+          ...changed.psd.rows.slice(1),
+        ],
+      },
+      assets: {
+        preparedSignature: null,
+        authorisedSignature: null,
+      },
+      appendix: {
+        ...changed.appendix,
+        photos: [null, changed.appendix.photos[1], changed.appendix.photos[0]],
+      },
+    };
+    const edgePlan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(edgeReport);
+    expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "" }));
+    expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "MethodOnly" }));
+    expect(edgePlan[4].images).toHaveLength(2);
+    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport({
+      ...changed,
+      assets: {},
+      appendix: undefined,
+    })).toBe(false);
+
+    const edgeBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [edgeReport],
+      templateOptions(),
+    );
+    expect(edgeBlob.type).toBe("application/pdf");
   });
 
   it("combines all six workbook reports into 30 copied template pages", async () => {
@@ -163,5 +202,12 @@ describe("RAK sample-template PDF renderer", () => {
     await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf([sample])).rejects.toThrow(
       "sample PDF template",
     );
+
+    const invalidTemplate = await PDFLib.PDFDocument.create();
+    invalidTemplate.addPage();
+    await expect(globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [sample],
+      templateOptions({ templateBytes: await invalidTemplate.save() }),
+    )).rejects.toThrow("exactly five pages");
   });
 });
