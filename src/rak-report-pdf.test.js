@@ -54,6 +54,25 @@ describe("RAK sample-template PDF renderer", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders only the lower and upper grading limits as dashed series", async () => {
+    await import("./rak-report-pdf.js");
+
+    expect(globalThis.docuAlignRakReportPdf.GRADING_SERIES_STYLES).toEqual({
+      cumulativePassingPercent: {
+        color: [0.31, 0.55, 0.78],
+        dashArray: null,
+      },
+      lowerLimit: {
+        color: [0.8, 0.3, 0.28],
+        dashArray: [5, 3],
+      },
+      upperLimit: {
+        color: [0.55, 0.72, 0.3],
+        dashArray: [5, 3],
+      },
+    });
+  });
+
   it("copies the exact five reference pages for the matching sample report", async () => {
     const reports = await sampleReports();
     const sample = reports.find((report) => report.groupIndex === 2);
