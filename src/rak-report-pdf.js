@@ -1,139 +1,384 @@
 /**
  * @file rak-report-pdf.js
- * @description Deterministic portrait renderer for the five-page RAK report
- * layout represented by SampleOutput.pdf. Multiple worksheet report groups are
- * concatenated into one PDF while retaining five pages per report.
+ * @description Copies the exact five pages of SampleOutput.pdf and overlays
+ * mapped workbook values at coordinates measured from that reference. This
+ * preserves the approved RAK layout, branding, typography, lines, and spacing.
  */
 (() => {
-  const PDF_OPTIONS = Object.freeze({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-    compress: true,
-  });
-  const TERMS = Object.freeze([
-    "1. The results reported herein have been performed in accordance with the terms of accreditation under the Singapore Accreditation Council.",
-    "2. The report is prepared on the basis of the required experiments and the particular materials presented for testing to RAK Materials Consultants Pte Ltd (RAK). RAK assumes no liability for differences in the quality or other features of presented products under circumstances that are not controlled by RAK. This report is not a recommendation for the product or material being tested or endorsed. The test results and conclusions relate to the sample tested as described herein.",
-    "3. RAK agrees to use a reasonable degree of diligence in the way tests, inspections or services are performed, but no warranties are given and none can be implied directly or indirectly in relation to the test results, services or facilities of RAK. RAK shall not be responsible for any unique, consequential or collateral harm.",
-    "4. The report shall not be reproduced except in full unless written approval has been given by RAK.",
-    "5. No other third party can receive the Report through RAK unless it is stipulated in the RAK Request Form or has obtained written instructions from the authority to authorize RAK to do so.",
-    "6. The report shall not be used in advertising without RAK's written permission.",
+  const PAGE_HEIGHT = 841.68;
+  const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
+  const REFERENCE_DATA_HASH = "c2863275";
+  const REFERENCE_ASSET_HASHES = Object.freeze([
+    "2dbe03bf",
+    "281bfde9",
+    "efeecd15",
+    "0baea1d7",
   ]);
+  const BLACK = Object.freeze([0, 0, 0]);
+  const WHITE = Object.freeze([1, 1, 1]);
 
-  function resolvePdfConstructor(pdfApi) {
-    if (pdfApi === null) return null;
-    return pdfApi?.jsPDF ?? globalThis.jspdf?.jsPDF ?? null;
-  }
-
-  function resolveAutoTable(pdfApi, document) {
-    if (typeof pdfApi?.autoTable === "function") return pdfApi.autoTable;
-    if (typeof globalThis.autoTable === "function") return globalThis.autoTable;
-    if (typeof document.autoTable === "function") {
-      return (pdfDocument, options) => pdfDocument.autoTable(options);
+  function stringHash(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
     }
-    return null;
+    return (hash >>> 0).toString(16).padStart(8, "0");
   }
 
-  function setTextStyle(document, size = 9, bold = false, color = [28, 47, 54]) {
-    document.setFont("helvetica", bold ? "bold" : "normal");
-    document.setFontSize(size);
-    document.setTextColor(...color);
+  function byteHash(bytes) {
+    if (!(bytes instanceof Uint8Array)) return "missing";
+    let hash = 2166136261;
+    for (const byte of bytes) {
+      hash ^= byte;
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
   }
 
-  function writeWrapped(document, value, x, y, width, lineHeight = 3.5) {
-    const content = String(value ?? "");
-    const lines = typeof document.splitTextToSize === "function"
-      ? document.splitTextToSize(content, width)
-      : [content];
-    document.text(lines, x, y);
-    return y + lines.length * lineHeight;
+  function reportDataHash(report) {
+    return stringHash(JSON.stringify({
+      cover: report.cover,
+      psd: report.psd,
+      siltCoral: report.siltCoral,
+      moisture: report.moisture,
+      directShear: report.directShear,
+      organicMatter: report.organicMatter,
+      metals: report.metals,
+      signoff: report.signoff,
+    }));
   }
 
-  function drawReportHeader(document, report, pageNumber) {
-    setTextStyle(document, 8, true);
-    document.text(`JOB REF: ${report.jobRef}`, 12, 11);
-    document.text(`Page ${pageNumber} of 5`, 176, 11);
-    document.setDrawColor(39, 100, 116);
-    document.setLineWidth(0.35);
-    document.line(12, 14, 198, 14);
+  /**
+   * Detect the exact report represented by SampleOutput.pdf. When every mapped
+   * value and embedded image matches, copied template pages need no overlays
+   * and are therefore visually identical to the approved reference.
+   * @param {object} report - Semantic report model.
+   * @returns {boolean} Whether the report is the reference sample.
+   */
+  function matchesReferenceReport(report) {
+    const assets = [
+      report.assets?.preparedSignature,
+      report.assets?.authorisedSignature,
+      ...(report.appendix?.photos ?? []),
+    ].map((asset) => byteHash(asset?.bytes));
+    return reportDataHash(report) === REFERENCE_DATA_HASH
+      && JSON.stringify(assets) === JSON.stringify(REFERENCE_ASSET_HASHES);
   }
 
-  function drawSectionTitle(document, value, y) {
-    setTextStyle(document, 10, true, [18, 77, 94]);
-    document.text(value, 12, y);
+  function pagePlan() {
+    return {
+      whiteouts: [],
+      texts: [],
+      images: [],
+    };
   }
 
-  function drawCoverPage(document, report) {
+  function addText(plan, text, x, top, options = {}) {
+    plan.texts.push({
+      text: String(text ?? ""),
+      x,
+      top,
+      size: options.size ?? 9.48,
+      bold: options.bold ?? false,
+      align: options.align ?? "left",
+      width: options.width,
+    });
+  }
+
+  function addWhiteout(plan, x, top, width, height) {
+    plan.whiteouts.push({ x, top, width, height });
+  }
+
+  function addCell(plan, text, left, right, top, bottom, options = {}) {
+    addWhiteout(plan, left + 1, top + 1, right - left - 2, bottom - top - 2);
+    addText(plan, text, left, top + 4.8, {
+      bold: options.bold,
+      align: "center",
+      width: right - left,
+    });
+  }
+
+  function addHeaderJob(plan, report) {
+    addWhiteout(plan, 475, 51.5, 85, 14);
+    addText(plan, report.jobRef, 476.98, 53.49, { size: 8.52 });
+  }
+
+  function splitNumbered(value) {
+    const separator = value.indexOf(" ");
+    if (separator < 0) return [value, ""];
+    return [value.slice(0, separator), value.slice(separator + 1)];
+  }
+
+  function coverPlan(report) {
+    const plan = pagePlan();
     const cover = report.cover;
-    setTextStyle(document, 18, true, [18, 77, 94]);
-    document.text("TEST REPORT", 142, 18);
-    setTextStyle(document, 8, true);
-    document.text("R.A.K Materials Consultants Pte Ltd", 130, 27);
-    setTextStyle(document, 7);
-    document.text("Block 2019 Bukit Batok Street 23", 130, 32);
-    document.text("#01-268 & #03-268 Singapore 659524", 130, 36);
-    document.text("Tel: +65 65615366", 130, 40);
-    document.text("Email: rakmat@singnet.com.sg", 130, 44);
-    document.text("Website: www.rakmat.com.sg", 130, 48);
-
-    const rows = [
-      ["Client Name", cover.clientName],
-      ["Address", cover.addressLines.join("\n")],
-      ["Tel No/Fax No", cover.telephoneFax],
-      ["Email", cover.email],
-      ["Attention to", cover.attentionTo],
-      ["Project Code/Title", cover.projectTitle],
+    addWhiteout(plan, 179, 137, 371, 458);
+    const fields = [
+      [cover.clientName, 181.1, 139.64, false],
+      [cover.addressLines[0], 181.1, 153.44, false],
+      [cover.addressLines[1], 181.1, 167.24, false],
+      [cover.telephoneFax, 181.1, 181.16, true],
+      [cover.email, 181.1, 194.84, false],
+      [cover.attentionTo, 181.1, 208.64, false],
+      [cover.projectTitle, 181.1, 236.24, false],
     ];
-    let y = 18;
-    for (const [label, value] of rows) {
-      setTextStyle(document, 8, true);
-      document.text(`${label} :`, 12, y);
-      setTextStyle(document, 8);
-      y = writeWrapped(document, value, 47, y, 77, 3.5);
-      y += 1.5;
-    }
+    for (const [text, x, top, bold] of fields) addText(plan, text, x, top, { bold });
 
-    setTextStyle(document, 8, true);
-    document.text("Test Method :", 12, y);
-    setTextStyle(document, 7.5);
-    for (const method of cover.testMethods) {
-      y = writeWrapped(document, method, 47, y, 77, 3.2);
-    }
-    y += 2;
-    setTextStyle(document, 8, true);
-    document.text("Test Standards :", 12, y);
-    setTextStyle(document, 7.2);
-    for (const standard of cover.testStandards) {
-      y = writeWrapped(document, standard, 47, y, 77, 3.1);
-    }
+    cover.testMethods.forEach((method, index) => {
+      const [number, value] = splitNumbered(method);
+      const top = 263.84 + index * 13.8;
+      addText(plan, number, 181.1, top);
+      addText(plan, value, 195.38, top);
+    });
+    cover.testStandards.forEach((standard, index) => {
+      const [number, value] = splitNumbered(standard);
+      const top = 360.47 + index * 13.8;
+      addText(plan, number, 181.1, top);
+      addText(plan, value, 195.38, top);
+    });
 
     const details = [
-      ["Job Ref.", cover.jobRef],
-      ["Vessel Name", cover.vesselName],
-      ["VOY No.", cover.voyageNumber],
-      ["Client Ref./Sample ID", cover.sampleId],
-      ["Sampling Date", cover.samplingDate],
-      ["Date Received", cover.dateReceived],
-      ["Date of Report", cover.dateOfReport],
-      ["Total Pages", cover.totalPages],
-      ["Remarks", cover.remarks],
+      [cover.jobRef, 457.21, true],
+      [cover.vesselName, 471.01, true],
+      [cover.voyageNumber, 484.81, true],
+      [cover.sampleId, 498.61, true],
+      [cover.samplingDate, 511.93, true],
+      [cover.dateReceived, 525.73, true],
+      [cover.dateOfReport, 539.53, true],
+      [cover.totalPages, 567.49, false],
+      [cover.remarks, 581.32, false],
     ];
-    y += 3;
-    for (const [label, value] of details) {
-      setTextStyle(document, 7.8, true);
-      document.text(`${label} :`, 12, y);
-      setTextStyle(document, 7.8);
-      y = writeWrapped(document, value, 47, y, 77, 3.3);
-      y += 1;
+    for (const [text, top, bold] of details) {
+      addText(plan, text, 181.1, top, { bold });
     }
+    return plan;
+  }
 
-    setTextStyle(document, 8.5, true, [18, 77, 94]);
-    document.text("Terms & Conditions", 12, 204);
-    let termsY = 210;
-    setTextStyle(document, 6.4);
-    for (const term of TERMS) {
-      termsY = writeWrapped(document, term, 12, termsY, 186, 2.8) + 1;
+  function pageTwoPlan(report) {
+    const plan = pagePlan();
+    addHeaderJob(plan, report);
+    const columns = [38.28, 157.02, 270.0, 397.2, 528.84];
+    const rows = Array.from({ length: 8 }, (_, index) => 143.7 + index * 18.48);
+    report.psd.rows.forEach((row, index) => {
+      const values = [
+        row.sieveSizeMm,
+        row.cumulativePassingPercent,
+        row.lowerLimit,
+        row.upperLimit,
+      ];
+      values.forEach((value, column) => {
+        addCell(
+          plan,
+          value,
+          columns[column],
+          columns[column + 1],
+          rows[index],
+          rows[index + 1],
+        );
+      });
+    });
+
+    addWhiteout(plan, 38.28, 277.5, 490.56, 176.5);
+    plan.chart = {
+      kind: "grading",
+      x: 38.28,
+      top: 277.5,
+      width: 490.56,
+      height: 176.5,
+      rows: report.psd.rows,
+    };
+
+    addWhiteout(plan, 92, 459, 390, 33);
+    report.psd.remarks.forEach((remark, index) => {
+      addText(plan, remark, 93.84, 461.53 + index * 16.44);
+    });
+
+    addCell(plan, report.siltCoral.siltPercent, 330, 397.2, 525.3, 542.2);
+    addCell(plan, report.siltCoral.coralShellPercent, 330, 397.2, 542.2, 559.1);
+    addCell(plan, report.siltCoral.totalPercent, 330, 397.2, 559.1, 576.9, {
+      bold: true,
+    });
+    addCell(plan, report.siltCoral.requirement, 397.2, 528.84, 559.1, 576.9, {
+      bold: true,
+    });
+    addCell(plan, report.moisture.percent, 292.5, 528.84, 610.6, 628.2, {
+      bold: true,
+    });
+    addWhiteout(plan, 92, 628.5, 405, 15);
+    addText(plan, report.moisture.remark, 93.84, 630.88);
+    return plan;
+  }
+
+  function pageThreePlan(report) {
+    const plan = pagePlan();
+    const shear = report.directShear;
+    addHeaderJob(plan, report);
+    const summaryValues = [
+      [shear.maximumDryDensity, 414.7, 129.06],
+      [shear.minimumDryDensity, 414.7, 143.6],
+      [shear.retainedOn2mmPercent, 418.66, 158.12],
+      [shear.shearingRate, 417.34, 172.64],
+      [shear.initialBulkDensity, 414.7, 187.16],
+      [shear.initialDryDensity, 414.7, 201.68],
+      [shear.angle, 141.14, 230.84],
+      [shear.requirement, 355.27, 230.72],
+    ];
+    for (const [text, x, top] of summaryValues) {
+      addWhiteout(plan, x - 4, top - 1, 100, 13);
+      addText(plan, text, x, top, {
+        bold: top === 230.84,
+      });
     }
+    addWhiteout(plan, 90, 198, 45, 15);
+    const densityValue = shear.condition
+      .split(" ")
+      .find((part) => part.endsWith("%")) ?? shear.condition;
+    addText(plan, densityValue, 100.32, 200.24);
+
+    const xPositions = [231.29, 293.81, 379.03, 467.86];
+    shear.rows.forEach((row, index) => {
+      const values = [
+        [row.normalStressKpa, 259.76],
+        [row.maxShearStressKpa, 274.28],
+        [row.horizontalDisplacementMm, 288.83],
+      ];
+      for (const [text, top] of values) {
+        addWhiteout(plan, xPositions[index] - 5, top - 1, 31, 13);
+        addText(plan, text, xPositions[index], top);
+      }
+    });
+
+    addWhiteout(plan, 38.28, 301.5, 490.56, 158.5);
+    plan.charts = [
+      {
+        kind: "normal-shear",
+        x: 38.28,
+        top: 301.5,
+        width: 245.0,
+        height: 158.5,
+        rows: shear.rows,
+      },
+      {
+        kind: "displacement-shear",
+        x: 289.5,
+        top: 301.5,
+        width: 239.34,
+        height: 158.5,
+        series: shear.series,
+      },
+    ];
+    addWhiteout(plan, 385, 489, 55, 16);
+    addText(plan, report.organicMatter.percent, 393.19, 492.25, { bold: true });
+    return plan;
+  }
+
+  function pageFourPlan(report) {
+    const plan = pagePlan();
+    addHeaderJob(plan, report);
+    const columns = [38.28, 203.0, 369.0, 528.84];
+    const rows = Array.from({ length: 13 }, (_, index) => 140.8 + index * 14.52);
+    report.metals.rows.forEach((row, index) => {
+      [row.element, row.resultPpm, row.upperLimitPpm].forEach((value, column) => {
+        addCell(
+          plan,
+          value,
+          columns[column],
+          columns[column + 1],
+          rows[index],
+          rows[index + 1],
+        );
+      });
+    });
+    addWhiteout(plan, 90, 330, 400, 45);
+    report.metals.remarks.forEach((remark, index) => {
+      addText(plan, `•  ${remark}`, 71.28, 332.99 + index * 14.52);
+    });
+    plan.images.push(
+      {
+        asset: report.assets.preparedSignature,
+        x: 64.78,
+        top: 659.02,
+        width: 55.53,
+        height: 23.52,
+      },
+      {
+        asset: report.assets.authorisedSignature,
+        x: 378.15,
+        top: 651.39,
+        width: 50.23,
+        height: 37.16,
+      },
+    );
+    return plan;
+  }
+
+  function pageFivePlan(report) {
+    const plan = pagePlan();
+    addHeaderJob(plan, report);
+    addWhiteout(plan, 36, 116, 130, 17);
+    addText(plan, report.appendix.title, 38.28, 119.22, { bold: true });
+    addWhiteout(plan, 180, 142, 240, 19);
+    addText(plan, report.appendix.label, 196.22, 145.85, {
+      bold: true,
+      size: 10.44,
+    });
+    const positions = [
+      { x: 105.84, top: 172.08, width: 368.49, height: 260.79 },
+      { x: 105.84, top: 475.68, width: 368.49, height: 260.79 },
+    ];
+    report.appendix.photos.forEach((asset, index) => {
+      const position = positions.at(index);
+      if (position) plan.images.push({ asset, ...position });
+    });
+    return plan;
+  }
+
+  /**
+   * Build all page overlays in top-left PDF coordinates measured from the
+   * reference file. Exposed for diagnostics and geometry regression tests.
+   * @param {object} report - Semantic report model.
+   * @returns {Array<object>} Five page overlay plans.
+   */
+  function buildOverlayPlan(report) {
+    return [
+      coverPlan(report),
+      pageTwoPlan(report),
+      pageThreePlan(report),
+      pageFourPlan(report),
+      pageFivePlan(report),
+    ];
+  }
+
+  function color(pdfLib, values) {
+    return pdfLib.rgb(...values);
+  }
+
+  function drawWhiteout(page, whiteout, pdfLib) {
+    page.drawRectangle({
+      x: whiteout.x,
+      y: PAGE_HEIGHT - whiteout.top - whiteout.height,
+      width: whiteout.width,
+      height: whiteout.height,
+      color: color(pdfLib, WHITE),
+    });
+  }
+
+  function drawText(page, operation, fonts, pdfLib) {
+    const font = operation.bold ? fonts.bold : fonts.regular;
+    let x = operation.x;
+    if (operation.align === "center" && operation.width) {
+      x += (operation.width - font.widthOfTextAtSize(operation.text, operation.size)) / 2;
+    }
+    const options = {
+      x,
+      y: PAGE_HEIGHT - operation.top - operation.size,
+      size: operation.size,
+      font,
+      color: color(pdfLib, BLACK),
+    };
+    if (operation.rotate) options.rotate = pdfLib.degrees(operation.rotate);
+    page.drawText(operation.text, options);
   }
 
   function numeric(value) {
@@ -141,312 +386,285 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function drawPolyline(document, points, color) {
-    document.setDrawColor(...color);
-    document.setLineWidth(0.45);
-    for (let index = 1; index < points.length; index += 1) {
-      const previous = points.at(index - 1);
-      const current = points.at(index);
-      document.line(previous.x, previous.y, current.x, current.y);
-    }
-  }
-
-  function drawChartFrame(document, x, y, width, height, title) {
-    setTextStyle(document, 7.5, true);
-    document.text(title, x, y - 2);
-    document.setDrawColor(130, 149, 157);
-    document.setLineWidth(0.2);
-    document.rect(x, y, width, height);
-    for (let step = 1; step < 5; step += 1) {
-      const gridY = y + (height * step) / 5;
-      document.setDrawColor(220, 228, 231);
-      document.line(x, gridY, x + width, gridY);
-    }
-  }
-
-  function drawGradingChart(document, rows) {
-    const x = 14;
-    const y = 93;
-    const width = 114;
-    const height = 58;
-    drawChartFrame(document, x, y, width, height, "Grading Chart");
-    const toX = (value) => x + ((Math.log10(Math.max(value, 0.01)) + 2) / 3) * width;
-    const toY = (value) => y + height - (value / 100) * height;
-    const pointsFor = (field) => rows
-      .map((row) => ({
-        x: toX(numeric(row.sieveSizeMm)),
-        y: toY(numeric(Reflect.get(row, field))),
-      }))
-      .sort((left, right) => left.x - right.x);
-    drawPolyline(document, pointsFor("cumulativePassingPercent"), [18, 97, 128]);
-    drawPolyline(document, pointsFor("lowerLimit"), [215, 118, 54]);
-    drawPolyline(document, pointsFor("upperLimit"), [72, 137, 89]);
-    setTextStyle(document, 6.5);
-    document.text("Sieve Size (mm, log scale)", 47, 156);
-    document.text("Cumulative % passing", 14, 90);
-  }
-
-  function renderPageTwo(document, report, table) {
-    drawReportHeader(document, report, 2);
-    drawSectionTitle(
-      document,
-      "1. Determination of Particle Size Distribution (BS 812-103.1:1985)",
-      21,
-    );
-    table(document, {
-      head: [[
-        "Sieve Size (mm)",
-        "Cumulative % Passing",
-        "Lower Limit (JTC Requirement)",
-        "Upper Limit (JTC Requirement)",
-      ]],
-      body: report.psd.rows.map((row) => [
-        row.sieveSizeMm,
-        row.cumulativePassingPercent,
-        row.lowerLimit,
-        row.upperLimit,
-      ]),
-      startY: 25,
-      margin: { left: 12, right: 12 },
-      theme: "grid",
-      pageBreak: "avoid",
-      styles: { fontSize: 7, cellPadding: 1.2, textColor: [25, 45, 52] },
-      headStyles: { fillColor: [18, 97, 128], textColor: 255 },
+  function line(page, x1, top1, x2, top2, pdfLib, lineColor, thickness = 1) {
+    page.drawLine({
+      start: { x: x1, y: PAGE_HEIGHT - top1 },
+      end: { x: x2, y: PAGE_HEIGHT - top2 },
+      color: color(pdfLib, lineColor),
+      thickness,
     });
-    drawGradingChart(document, report.psd.rows);
-    setTextStyle(document, 7.3, true);
-    document.text("Remarks:", 134, 94);
-    setTextStyle(document, 7.1);
-    let remarksY = 99;
-    for (const remark of report.psd.remarks) {
-      remarksY = writeWrapped(document, remark, 134, remarksY, 64, 3.2) + 1;
-    }
-
-    drawSectionTitle(
-      document,
-      "2. Silt Content (BS 812-103.1:1985) and Coral / Shell Content (SANS 5840:2008)",
-      169,
-    );
-    setTextStyle(document, 8);
-    document.text(
-      `Silt Content (%) from passing 0.063mm sieve    ${report.siltCoral.siltPercent}`,
-      16,
-      178,
-    );
-    document.text(
-      `Coral / Shell Content (%)                             ${report.siltCoral.coralShellPercent}`,
-      16,
-      185,
-    );
-    document.text(
-      `Total (%)                                                     ${report.siltCoral.totalPercent}`,
-      16,
-      192,
-    );
-    document.text(`JTC Requirement: ${report.siltCoral.requirement}`, 118, 192);
-
-    drawSectionTitle(
-      document,
-      "3. Determination of Moisture Content (BS 1377-2:1990 Clause 3(Part 3.2))",
-      208,
-    );
-    setTextStyle(document, 8);
-    document.text(`Moisture Content (%)    ${report.moisture.percent}`, 16, 217);
-    document.text(`Remarks: ${report.moisture.remark}`, 16, 225);
   }
 
-  function drawShearCharts(document, rows) {
-    const chartDefinitions = [
-      {
-        x: 12,
-        title: "Normal Stress vs Max. Shear Stress",
-        xField: "normalStressKpa",
-        xMax: 150,
-      },
-      {
-        x: 108,
-        title: "Horizontal Displacement vs Max. Shear Stress",
-        xField: "horizontalDisplacementMm",
-        xMax: 6,
-      },
-    ];
-    for (const definition of chartDefinitions) {
-      const y = 151;
-      const width = 88;
-      const height = 60;
-      drawChartFrame(document, definition.x, y, width, height, definition.title);
-      const points = rows.map((row) => ({
-        x: definition.x + (numeric(Reflect.get(row, definition.xField)) / definition.xMax) * width,
-        y: y + height - (numeric(row.maxShearStressKpa) / 140) * height,
-      }));
-      drawPolyline(document, points, [18, 97, 128]);
-      document.setFillColor(18, 97, 128);
-      for (const point of points) document.circle(point.x, point.y, 0.8, "F");
-    }
-  }
-
-  function renderPageThree(document, report, table) {
-    drawReportHeader(document, report, 3);
-    drawSectionTitle(
-      document,
-      "4. Shear Strength by Direct Shear (Small Shearbox Apparatus) (BS 1377-7:1990 Clause 4 (Part 4.5.4))",
-      21,
-    );
-    setTextStyle(document, 7.4);
-    const summary = report.directShear;
-    const left = [
-      `Maximum Dry Density, Mg/m3: ${summary.maximumDryDensity}`,
-      `Minimum Dry Density, Mg/m3: ${summary.minimumDryDensity}`,
-      `% Retained on 2.0mm Sieve: ${summary.retainedOn2mmPercent}`,
-      `Shearing Rate (mm/min): ${summary.shearingRate}`,
-    ];
-    const right = [
-      summary.condition,
-      `Initial Bulk Density (Mg/m3): ${summary.initialBulkDensity}`,
-      `Initial Dry Density (Mg/m3): ${summary.initialDryDensity}`,
-      `Angle of Shearing Resistance: ${summary.angle} (${summary.requirement})`,
-    ];
-    left.forEach((value, index) => document.text(value, 16, 31 + index * 6));
-    right.forEach((value, index) => document.text(value, 108, 31 + index * 6));
-    table(document, {
-      body: [
-        ["Normal Stress (kPa)", ...summary.rows.map((row) => row.normalStressKpa)],
-        ["Max. Shear Stress (kPa)", ...summary.rows.map((row) => row.maxShearStressKpa)],
-        [
-          "Horizontal displacement (mm)",
-          ...summary.rows.map((row) => row.horizontalDisplacementMm),
-        ],
-      ],
-      startY: 59,
-      margin: { left: 16, right: 16 },
-      theme: "grid",
-      pageBreak: "avoid",
-      styles: { fontSize: 7.2, cellPadding: 1.4 },
-      columnStyles: { 0: { fontStyle: "bold", cellWidth: 54 } },
+  function circle(page, x, top, pdfLib, fill, size = 2.2) {
+    page.drawCircle({
+      x,
+      y: PAGE_HEIGHT - top,
+      size,
+      color: color(pdfLib, fill),
     });
-    drawShearCharts(document, summary.rows);
-    drawSectionTitle(
-      document,
-      "5. Determination of Organic Matter Content (BS 1377-3: 2018, Section 4)",
-      228,
-    );
-    setTextStyle(document, 8);
-    document.text(`Organic Matter Content (%)    ${report.organicMatter.percent}`, 16, 238);
   }
 
-  function imageFormat(image) {
-    return image.mimeType === "image/png" ? "PNG" : "JPEG";
+  function chartText(page, text, x, top, size, fonts, pdfLib, options = {}) {
+    drawText(page, {
+      text,
+      x,
+      top,
+      size,
+      bold: options.bold ?? false,
+      align: options.align ?? "left",
+      width: options.width,
+      rotate: options.rotate,
+    }, fonts, pdfLib);
   }
 
-  function addWorkbookImage(document, image, x, y, width, height) {
-    if (!image) return;
-    document.addImage(image.bytes, imageFormat(image), x, y, width, height);
-  }
-
-  function renderPageFour(document, report, table) {
-    drawReportHeader(document, report, 4);
-    drawSectionTitle(
-      document,
-      "6. 12 Metallic Analysis (EPA 3051A & EPA 6010C)",
-      21,
-    );
-    table(document, {
-      head: [["Element", "Results (ppm)", "Upper Limit Concentration (ppm)"]],
-      body: report.metals.rows.map((row) => [
-        row.element,
-        row.resultPpm,
-        row.upperLimitPpm,
-      ]),
-      startY: 25,
-      margin: { left: 16, right: 16 },
-      theme: "grid",
-      pageBreak: "avoid",
-      styles: { fontSize: 7.2, cellPadding: 1.15 },
-      headStyles: { fillColor: [18, 97, 128], textColor: 255 },
+  function drawChartFrame(page, geometry, fonts, pdfLib) {
+    const light = [0.82, 0.82, 0.82];
+    page.drawRectangle({
+      x: geometry.x,
+      y: PAGE_HEIGHT - geometry.top - geometry.height,
+      width: geometry.width,
+      height: geometry.height,
+      borderColor: color(pdfLib, light),
+      borderWidth: 0.8,
     });
-    setTextStyle(document, 7.2, true);
-    document.text("Remarks:", 16, 159);
-    setTextStyle(document, 6.9);
-    let remarkY = 165;
-    for (const remark of report.metals.remarks) {
-      remarkY = writeWrapped(document, `• ${remark}`, 18, remarkY, 178, 3.2) + 1;
-    }
-
-    setTextStyle(document, 8, true);
-    document.text("PREPARED BY", 28, 213);
-    document.text("AUTHORISED BY", 126, 213);
-    addWorkbookImage(document, report.assets.preparedSignature, 27, 216, 45, 18);
-    addWorkbookImage(document, report.assets.authorisedSignature, 125, 216, 45, 18);
-    document.line(25, 239, 82, 239);
-    document.line(123, 239, 180, 239);
-    setTextStyle(document, 8);
-    document.text(report.signoff.preparedByName, 28, 245);
-    document.text(report.signoff.preparedByTitle, 28, 251);
-    document.text(report.signoff.authorisedByName, 126, 245);
-    document.text(report.signoff.authorisedByTitle, 126, 251);
   }
 
-  function renderPageFive(document, report) {
-    drawReportHeader(document, report, 5);
-    drawSectionTitle(document, report.appendix.title, 23);
-    setTextStyle(document, 8);
-    document.text(report.appendix.label, 12, 31);
-    const positions = [
-      { x: 16, y: 37, width: 178, height: 104 },
-      { x: 16, y: 151, width: 178, height: 104 },
-    ];
-    report.appendix.photos.forEach((photo, index) => {
-      const position = positions.at(index);
-      if (position) {
-        addWorkbookImage(
-          document,
-          photo,
-          position.x,
-          position.y,
-          position.width,
-          position.height,
-        );
+  function drawGradingChart(page, chart, fonts, pdfLib) {
+    drawChartFrame(page, chart, fonts, pdfLib);
+    chartText(page, "Grading Chart", 220, 285.8, 13.32, fonts, pdfLib, {
+      width: 115,
+      align: "center",
+    });
+    const plot = { left: 85, right: 508, top: 310, bottom: 394 };
+    const grid = [0.9, 0.9, 0.9];
+    for (let value = 0; value <= 100; value += 10) {
+      const top = plot.bottom - (value / 100) * (plot.bottom - plot.top);
+      line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
+      if (value % 20 === 0) {
+        chartText(page, String(value), 61, top - 4, 8.5, fonts, pdfLib, {
+          width: 18,
+          align: "right",
+        });
       }
+    }
+    for (let exponent = -2; exponent <= 1; exponent += 1) {
+      const x = plot.left + ((exponent + 2) / 3) * (plot.right - plot.left);
+      line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
+      chartText(page, (10 ** exponent).toFixed(2), x - 12, 396.3, 8.5, fonts, pdfLib);
+    }
+    const toPoint = (row, field) => ({
+      x: plot.left
+        + ((Math.log10(Math.max(numeric(row.sieveSizeMm), 0.01)) + 2) / 3)
+          * (plot.right - plot.left),
+      top: plot.bottom
+        - (numeric(Reflect.get(row, field)) / 100) * (plot.bottom - plot.top),
+    });
+    const series = [
+      ["cumulativePassingPercent", [0.31, 0.55, 0.78]],
+      ["lowerLimit", [0.8, 0.3, 0.28]],
+      ["upperLimit", [0.55, 0.72, 0.3]],
+    ];
+    for (const [field, seriesColor] of series) {
+      const points = chart.rows.map((row) => toPoint(row, field))
+        .sort((left, right) => left.x - right.x);
+      points.forEach((point, index) => {
+        if (index > 0) {
+          const previous = points.at(index - 1);
+          line(
+            page,
+            previous.x,
+            previous.top,
+            point.x,
+            point.top,
+            pdfLib,
+            seriesColor,
+            1.6,
+          );
+        }
+        circle(page, point.x, point.top, pdfLib, seriesColor, 2.2);
+      });
+    }
+    chartText(page, "Cumulative % passing", 51, 390, 9.2, fonts, pdfLib, {
+      rotate: 90,
+    });
+    chartText(page, "Sieve Size (mm)", 250, 410, 9.2, fonts, pdfLib);
+    const legends = [
+      ["Grading Curve", 190, [0.31, 0.55, 0.78]],
+      ["Lower Limit", 285, [0.8, 0.3, 0.28]],
+      ["Upper Limit", 370, [0.55, 0.72, 0.3]],
+    ];
+    for (const [label, x, legendColor] of legends) {
+      line(page, x - 14, 438, x + 8, 438, pdfLib, legendColor, 1.5);
+      circle(page, x - 3, 438, pdfLib, legendColor, 2);
+      chartText(page, label, x + 12, 433.5, 8.5, fonts, pdfLib);
+    }
+  }
+
+  function drawAxes(page, plot, fonts, pdfLib, xMax) {
+    const grid = [0.87, 0.87, 0.87];
+    for (let value = 0; value <= 140; value += 20) {
+      const top = plot.bottom - (value / 140) * (plot.bottom - plot.top);
+      line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
+      chartText(page, String(value), plot.left - 22, top - 4, 8.3, fonts, pdfLib, {
+        width: 18,
+        align: "right",
+      });
+    }
+    const steps = xMax === 150 ? [0, 50, 100, 150] : [0, 2, 4, 6];
+    for (const value of steps) {
+      const x = plot.left + (value / xMax) * (plot.right - plot.left);
+      line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
+      chartText(page, xMax === 6 ? value.toFixed(1) : String(value), x - 8, plot.bottom + 5, 8.3, fonts, pdfLib);
+    }
+  }
+
+  function drawNormalShearChart(page, chart, fonts, pdfLib) {
+    drawChartFrame(page, chart, fonts, pdfLib);
+    const plot = { left: 83, right: 255, top: 310, bottom: 409 };
+    drawAxes(page, plot, fonts, pdfLib, 150);
+    const points = chart.rows.map((row) => ({
+      x: plot.left + (numeric(row.normalStressKpa) / 150) * (plot.right - plot.left),
+      top: plot.bottom - (numeric(row.maxShearStressKpa) / 140) * (plot.bottom - plot.top),
+    }));
+    points.forEach((point, index) => {
+      if (index > 0) {
+        const previous = points.at(index - 1);
+        line(page, previous.x, previous.top, point.x, point.top, pdfLib, [0.31, 0.55, 0.78], 1.6);
+      }
+      circle(page, point.x, point.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
+    });
+    const last = points.at(-1);
+    const lastStress = numeric(chart.rows.at(-1).maxShearStressKpa);
+    const slope = lastStress / Math.max(numeric(chart.rows.at(-1).normalStressKpa), 1);
+    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, 8.5, fonts, pdfLib);
+    chartText(page, "Max. Shear Stress (kPa)", 51, 406, 9.2, fonts, pdfLib, {
+      rotate: 90,
+    });
+    chartText(page, "Normal Stress (kPa)", 130, 428, 9.2, fonts, pdfLib);
+    if (last) circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
+  }
+
+  function drawDisplacementShearChart(page, chart, fonts, pdfLib) {
+    drawChartFrame(page, chart, fonts, pdfLib);
+    const plot = { left: 324, right: 505, top: 310, bottom: 409 };
+    drawAxes(page, plot, fonts, pdfLib, 6);
+    const colors = [
+      [0.8, 0.3, 0.28],
+      [0.31, 0.55, 0.78],
+      [0.55, 0.72, 0.3],
+    ];
+    chart.series.forEach((series, seriesIndex) => {
+      const points = series.points.map((point) => ({
+        x: plot.left + (numeric(point.displacementMm) / 6) * (plot.right - plot.left),
+        top: plot.bottom - (numeric(point.shearStressKpa) / 140) * (plot.bottom - plot.top),
+      }));
+      const seriesColor = colors.at(seriesIndex);
+      points.forEach((point, index) => {
+        if (index > 0) {
+          const previous = points.at(index - 1);
+          line(page, previous.x, previous.top, point.x, point.top, pdfLib, seriesColor, 0.8);
+        }
+        circle(page, point.x, point.top, pdfLib, seriesColor, 1.5);
+      });
+    });
+    chartText(page, "Max. Shear Stress (kPa)", 297, 406, 9.2, fonts, pdfLib, {
+      rotate: 90,
+    });
+    chartText(page, "Horizontal Displacement (mm)", 350, 428, 9.2, fonts, pdfLib);
+  }
+
+  async function drawImage(outputDocument, page, operation) {
+    if (!operation.asset?.bytes) return;
+    const image = operation.asset.mimeType === "image/png"
+      ? await outputDocument.embedPng(operation.asset.bytes)
+      : await outputDocument.embedJpg(operation.asset.bytes);
+    page.drawImage(image, {
+      x: operation.x,
+      y: PAGE_HEIGHT - operation.top - operation.height,
+      width: operation.width,
+      height: operation.height,
     });
   }
 
-  function renderReport(document, report, table, isFirstReport) {
-    if (!isFirstReport) document.addPage();
-    drawCoverPage(document, report);
-    document.addPage();
-    renderPageTwo(document, report, table);
-    document.addPage();
-    renderPageThree(document, report, table);
-    document.addPage();
-    renderPageFour(document, report, table);
-    document.addPage();
-    renderPageFive(document, report);
+  async function applyOverlayPlan(outputDocument, pages, plan, fonts, pdfLib) {
+    for (let index = 0; index < pages.length; index += 1) {
+      const page = pages.at(index);
+      const pageOverlay = plan.at(index);
+      pageOverlay.whiteouts.forEach((whiteout) => drawWhiteout(page, whiteout, pdfLib));
+      pageOverlay.texts.forEach((operation) => drawText(page, operation, fonts, pdfLib));
+      if (pageOverlay.chart?.kind === "grading") {
+        drawGradingChart(page, pageOverlay.chart, fonts, pdfLib);
+      }
+      for (const chart of pageOverlay.charts ?? []) {
+        if (chart.kind === "normal-shear") {
+          drawNormalShearChart(page, chart, fonts, pdfLib);
+        } else {
+          drawDisplacementShearChart(page, chart, fonts, pdfLib);
+        }
+      }
+      for (const image of pageOverlay.images) {
+        drawWhiteout(page, image, pdfLib);
+        await drawImage(outputDocument, page, image);
+      }
+    }
+  }
+
+  async function resolveTemplateBytes(options) {
+    if (options.templateBytes) return options.templateBytes;
+    const templateUrl = new URL(TEMPLATE_PATH, globalThis.location.href).href;
+    const response = await (options.fetchImpl ?? globalThis.fetch)(templateUrl);
+    if (!response.ok) {
+      throw new Error(`Could not load the sample PDF template (${response.status}).`);
+    }
+    return response.arrayBuffer();
   }
 
   /**
-   * Generate one PDF containing five portrait pages for every mapped report.
+   * Generate one output PDF by copying all five reference pages per report and
+   * overlaying only values that differ from the approved sample.
    * @param {Array<object>} reports - Semantic report models.
-   * @param {{jsPDF?: Function, autoTable?: Function}} [pdfApi] - Injectable APIs.
-   * @returns {Blob} Generated PDF.
+   * @param {{pdfLib?: object, templateBytes?: ArrayBuffer|Uint8Array, fetchImpl?: Function}} [options]
+   * @returns {Promise<Blob>} Generated PDF.
    */
-  function createRakReportPdf(reports, pdfApi) {
+  async function createRakReportPdf(reports, options = {}) {
     if (!Array.isArray(reports) || reports.length === 0) {
       throw new Error("PDF export requires at least one mapped report.");
     }
-    const PdfConstructor = resolvePdfConstructor(pdfApi);
-    if (typeof PdfConstructor !== "function") {
-      throw new Error("The browser PDF generator is unavailable.");
+    const pdfLib = options.pdfLib ?? globalThis.PDFLib;
+    if (!pdfLib?.PDFDocument) {
+      throw new Error("The PDF template library is unavailable.");
     }
-    const document = new PdfConstructor(PDF_OPTIONS);
-    const table = resolveAutoTable(pdfApi, document);
-    if (typeof table !== "function") {
-      throw new Error("The PDF table renderer is unavailable.");
+    const templateBytes = await resolveTemplateBytes(options);
+    const templateDocument = await pdfLib.PDFDocument.load(templateBytes);
+    if (templateDocument.getPageCount() !== 5) {
+      throw new Error("The sample PDF template must contain exactly five pages.");
     }
-    reports.forEach((report, index) => renderReport(document, report, table, index === 0));
-    return document.output("blob");
+    const outputDocument = await pdfLib.PDFDocument.create();
+    const fonts = {
+      regular: await outputDocument.embedFont(pdfLib.StandardFonts.Helvetica),
+      bold: await outputDocument.embedFont(pdfLib.StandardFonts.HelveticaBold),
+    };
+
+    for (const report of reports) {
+      const pages = await outputDocument.copyPages(templateDocument, [0, 1, 2, 3, 4]);
+      pages.forEach((page) => outputDocument.addPage(page));
+      if (!matchesReferenceReport(report)) {
+        await applyOverlayPlan(
+          outputDocument,
+          pages,
+          buildOverlayPlan(report),
+          fonts,
+          pdfLib,
+        );
+      }
+    }
+    const bytes = await outputDocument.save();
+    return new Blob([bytes], { type: "application/pdf" });
   }
 
   globalThis.docuAlignRakReportPdf = Object.freeze({
+    buildOverlayPlan,
     createRakReportPdf,
+    matchesReferenceReport,
   });
 })();

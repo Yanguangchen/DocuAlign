@@ -112,6 +112,28 @@
     }));
   }
 
+  function buildShearSeries(shearSheet) {
+    const definitions = [
+      { normalStressKpa: "50", displacementColumn: "E", stressColumn: "F" },
+      { normalStressKpa: "100", displacementColumn: "K", stressColumn: "L" },
+      { normalStressKpa: "150", displacementColumn: "Q", stressColumn: "R" },
+    ];
+    return definitions.map((definition) => {
+      const points = [];
+      for (let row = 10; row <= 60; row += 1) {
+        const displacementMm = text(shearSheet, `${definition.displacementColumn}${row}`);
+        const shearStressKpa = text(shearSheet, `${definition.stressColumn}${row}`);
+        if (displacementMm !== "" && shearStressKpa !== "") {
+          points.push({ displacementMm, shearStressKpa });
+        }
+      }
+      return {
+        normalStressKpa: definition.normalStressKpa,
+        points,
+      };
+    });
+  }
+
   function buildMetalRows(reportSheet) {
     const elements = range(reportSheet, "A", 95, 106);
     const results = range(reportSheet, "L", 95, 106);
@@ -126,6 +148,7 @@
   function buildReport(group, sheetsByName, sourceName) {
     const coverSheet = sheetsByName.get(group.coverSheetName);
     const reportSheet = sheetsByName.get(group.reportSheetName);
+    const shearSheet = sheetsByName.get(group.shearSheetName);
     const jobRef = text(coverSheet, "K28") || text(reportSheet, "AE2");
     const preparedSignature = findImage(
       reportSheet,
@@ -187,6 +210,7 @@
         angle: text(reportSheet, "A53"),
         requirement: text(reportSheet, "P53"),
         rows: buildShearRows(reportSheet),
+        series: buildShearSeries(shearSheet),
       },
       organicMatter: {
         percent: text(reportSheet, "R71"),
