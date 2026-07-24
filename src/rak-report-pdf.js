@@ -94,9 +94,9 @@
     addWhiteout(
       plan,
       options.eraseX ?? x - 5,
-      top - 1,
+      top - 0.4,
       options.eraseWidth,
-      13,
+      11.2,
     );
     addText(plan, text, x, top, options);
   }
