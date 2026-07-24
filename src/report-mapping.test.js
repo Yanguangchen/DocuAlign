@@ -181,6 +181,20 @@ describe("semantic workbook report mapping", () => {
       { normalStressKpa: "100", maxShearStressKpa: "77", horizontalDisplacementMm: "4.61" },
       { normalStressKpa: "150", maxShearStressKpa: "114", horizontalDisplacementMm: "4.71" },
     ]);
+    expect(sample.directShear.series).toHaveLength(3);
+    expect(sample.directShear.series.map((series) => series.normalStressKpa)).toEqual([
+      "50",
+      "100",
+      "150",
+    ]);
+    expect(sample.directShear.series[0].points).toEqual(expect.arrayContaining([
+      { displacementMm: "0", shearStressKpa: "0" },
+      { displacementMm: "3.14", shearStressKpa: "34.9" },
+    ]));
+    expect(sample.directShear.series[2].points).toContainEqual({
+      displacementMm: "4.71",
+      shearStressKpa: "114.31052465",
+    });
     expect(sample.metals.rows).toHaveLength(12);
     expect(sample.metals.rows[0]).toEqual({
       element: "Arsenic, As",
