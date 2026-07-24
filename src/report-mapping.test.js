@@ -188,12 +188,12 @@ describe("semantic workbook report mapping", () => {
       "150",
     ]);
     expect(sample.directShear.series[0].points).toEqual(expect.arrayContaining([
-      { displacementMm: "0", shearStressKpa: "0" },
+      { displacementMm: "0.00", shearStressKpa: "0.0" },
       { displacementMm: "3.14", shearStressKpa: "34.9" },
     ]));
     expect(sample.directShear.series[2].points).toContainEqual({
       displacementMm: "4.71",
-      shearStressKpa: "114.31052465",
+      shearStressKpa: "114.3",
     });
     expect(sample.metals.rows).toHaveLength(12);
     expect(sample.metals.rows[0]).toEqual({
