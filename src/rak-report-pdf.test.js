@@ -42,6 +42,7 @@ describe("RAK sample-template PDF renderer", () => {
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.PDFLib;
+    globalThis.docuAlignLogger = { logInfo: vi.fn() };
   });
 
   afterEach(() => {
@@ -49,6 +50,7 @@ describe("RAK sample-template PDF renderer", () => {
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.PDFLib;
+    delete globalThis.docuAlignLogger;
     vi.unstubAllGlobals();
   });
 
@@ -68,6 +70,16 @@ describe("RAK sample-template PDF renderer", () => {
     expect(output.getPageCount()).toBe(5);
     expect(output.getPages().map((page) => page.getSize())).toEqual(
       template.getPages().map((page) => page.getSize()),
+    );
+    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
+      "PDF template rendering completed",
+      expect.objectContaining({
+        reportCount: 1,
+        copiedPageCount: 5,
+        referenceReportCount: 1,
+        overlayReportCount: 0,
+        valueMaskCount: 0,
+      }),
     );
   });
 
@@ -110,6 +122,16 @@ describe("RAK sample-template PDF renderer", () => {
       ],
     });
     expect(plan[4].images).toHaveLength(2);
+    const valueMasks = [
+      plan[1].whiteouts.find((mask) => mask.x === 196),
+      plan[2].whiteouts.find((mask) => mask.x === 409.7),
+      plan[3].whiteouts.find((mask) => mask.x === 265),
+    ];
+    expect(valueMasks.every((mask) => mask.height <= 11.2)).toBe(true);
+    expect(valueMasks[1]).toMatchObject({
+      top: 128.66,
+      height: 11.2,
+    });
 
     const edgeReport = {
       ...changed,
@@ -149,6 +171,14 @@ describe("RAK sample-template PDF renderer", () => {
       templateOptions(),
     );
     expect(edgeBlob.type).toBe("application/pdf");
+    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenLastCalledWith(
+      "PDF template rendering completed",
+      expect.objectContaining({
+        overlayReportCount: 1,
+        valueMaskCount: expect.any(Number),
+        maxValueMaskHeight: 11.2,
+      }),
+    );
   });
 
   it("combines all six workbook reports into 30 copied template pages", async () => {
@@ -161,6 +191,15 @@ describe("RAK sample-template PDF renderer", () => {
     const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
 
     expect(output.getPageCount()).toBe(30);
+    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
+      "PDF template rendering completed",
+      expect.objectContaining({
+        reportCount: 6,
+        copiedPageCount: 30,
+        referenceReportCount: 1,
+        overlayReportCount: 5,
+      }),
+    );
   });
 
   it("loads the template through browser globals in the production call shape", async () => {

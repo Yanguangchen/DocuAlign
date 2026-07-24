@@ -76,6 +76,15 @@ function rendererApi(overrides = {}) {
   };
 }
 
+function loggerApi() {
+  return {
+    logError: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    trackOperation: vi.fn((_message, _context, operation) => operation()),
+  };
+}
+
 async function loadWorkspace() {
   await import("./workspace.js");
   return globalThis.docuAlignWorkspace;
@@ -88,6 +97,7 @@ describe("workspace controller", () => {
     globalThis.docuAlignWorkbookPdf = workbookApi();
     globalThis.docuAlignReportMapping = mappingApi();
     globalThis.docuAlignRakReportPdf = rendererApi();
+    globalThis.docuAlignLogger = loggerApi();
     globalThis.URL.createObjectURL = vi.fn(() => "blob:https://docualign.test/generated");
     globalThis.URL.revokeObjectURL = vi.fn();
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -100,6 +110,7 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
+    delete globalThis.docuAlignLogger;
     vi.restoreAllMocks();
   });
 
@@ -146,6 +157,29 @@ describe("workspace controller", () => {
     expect(document.querySelector("#file-meta").textContent).toContain("2 reports mapped");
     expect(document.querySelector("#pipeline-step").classList).toContain("is-complete");
     expect(document.querySelector("#pdf-export").disabled).toBe(false);
+    expect(globalThis.docuAlignLogger.trackOperation).toHaveBeenCalledWith(
+      "Process workbook locally",
+      expect.objectContaining({
+        feature: "WorkbookPipeline",
+        function: "startPipeline",
+        operation: "workbook.parseAndMap",
+        category: "LocalProcessing",
+        sourceExtension: "xlsx",
+        sourceSizeBytes: 2048,
+      }),
+      expect.any(Function),
+    );
+    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
+      "Workbook processing completed",
+      expect.objectContaining({
+        sheetCount: 2,
+        reportCount: 2,
+        outputPageCount: 10,
+      }),
+    );
+    const [, operationContext] = globalThis.docuAlignLogger.trackOperation.mock.calls[0];
+    expect(operationContext).not.toHaveProperty("sourceFileName");
+    expect(operationContext).not.toHaveProperty("clientName");
   });
 
   it("invalidates in-flight parsing and resets the workspace", async () => {
@@ -254,6 +288,24 @@ describe("workspace controller", () => {
     expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).toHaveBeenCalledWith(
       mappedReports("Client Sample 01.xlsx"),
     );
+    expect(globalThis.docuAlignLogger.trackOperation).toHaveBeenCalledWith(
+      "Generate PDF from approved template",
+      expect.objectContaining({
+        feature: "PdfExport",
+        function: "exportPdf",
+        operation: "pdf.templateRender",
+        reportCount: 2,
+        outputPageCount: 10,
+      }),
+      expect.any(Function),
+    );
+    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
+      "PDF export download prepared",
+      expect.objectContaining({
+        blobSizeBytes: expect.any(Number),
+        mimeType: "application/pdf",
+      }),
+    );
     expect(globalThis.URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     await new Promise((resolve) => setTimeout(resolve));
     expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith(
@@ -318,5 +370,17 @@ describe("workspace controller", () => {
       );
     });
     expect(document.querySelector("#cloud-save").disabled).toBe(true);
+  });
+
+  it("continues local processing when the structured logger bridge is unavailable", async () => {
+    delete globalThis.docuAlignLogger;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const { exportPdf, selectFile } = await loadWorkspace();
+
+    await selectFile(workbook());
+    await exportPdf();
+
+    expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
+    expect(globalThis.URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
   });
 });
