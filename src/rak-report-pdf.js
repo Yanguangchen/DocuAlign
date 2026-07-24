@@ -86,8 +86,8 @@
     });
   }
 
-  function addWhiteout(plan, x, top, width, height) {
-    plan.whiteouts.push({ x, top, width, height });
+  function addWhiteout(plan, x, top, width, height, kind = "region") {
+    plan.whiteouts.push({ x, top, width, height, kind });
   }
 
   function addValue(plan, text, x, top, options = {}) {
@@ -97,6 +97,7 @@
       top - 0.4,
       options.eraseWidth,
       11.2,
+      "value-mask",
     );
     addText(plan, text, x, top, options);
   }
@@ -625,21 +626,56 @@
       regular: await outputDocument.embedFont(pdfLib.StandardFonts.Helvetica),
       bold: await outputDocument.embedFont(pdfLib.StandardFonts.HelveticaBold),
     };
+    let referenceReportCount = 0;
+    let overlayReportCount = 0;
+    let valueMaskCount = 0;
+    let maxValueMaskHeight = 0;
+    let chartCount = 0;
+    let imageOverlayCount = 0;
 
     for (const report of reports) {
       const pages = await outputDocument.copyPages(templateDocument, [0, 1, 2, 3, 4]);
       pages.forEach((page) => outputDocument.addPage(page));
-      if (!matchesReferenceReport(report)) {
+      if (matchesReferenceReport(report)) {
+        referenceReportCount += 1;
+      } else {
+        overlayReportCount += 1;
+        const plan = buildOverlayPlan(report);
+        for (const page of plan) {
+          const valueMasks = page.whiteouts.filter((mask) => mask.kind === "value-mask");
+          valueMaskCount += valueMasks.length;
+          for (const mask of valueMasks) {
+            maxValueMaskHeight = Math.max(maxValueMaskHeight, mask.height);
+          }
+          chartCount += (page.chart ? 1 : 0) + (page.charts?.length ?? 0);
+          imageOverlayCount += page.images.length;
+        }
         await applyOverlayPlan(
           outputDocument,
           pages,
-          buildOverlayPlan(report),
+          plan,
           fonts,
           pdfLib,
         );
       }
     }
     const bytes = await outputDocument.save();
+    globalThis.docuAlignLogger?.logInfo?.("PDF template rendering completed", {
+      feature: "PdfTemplate",
+      function: "createRakReportPdf",
+      operation: "pdf.copyAndOverlay",
+      category: "LocalPdfGeneration",
+      templateSource: options.templateBytes ? "injected" : "bundled",
+      reportCount: reports.length,
+      copiedPageCount: reports.length * 5,
+      referenceReportCount,
+      overlayReportCount,
+      valueMaskCount,
+      maxValueMaskHeight,
+      chartCount,
+      imageOverlayCount,
+      outputBytes: bytes.length,
+    });
     return new Blob([bytes], { type: "application/pdf" });
   }
 

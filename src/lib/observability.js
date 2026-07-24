@@ -12,9 +12,16 @@ import {
   logInfo,
   logWarn,
   sessionId,
+  trackOperation,
 } from "./logger.js";
 
 let installed = false;
+const loggerBridge = Object.freeze({
+  logError,
+  logInfo,
+  logWarn,
+  trackOperation,
+});
 
 function sourceWithoutQuery(source) {
   return String(source).split(/[?#]/, 1)[0];
@@ -65,6 +72,9 @@ export function replayEarlyEvents(
  * every page entry module can call it without double-registering.
  */
 export function initObservability() {
+  // Classic workspace scripts cannot import ES modules, so expose only the
+  // central logger's public methods through a frozen, PII-neutral bridge.
+  globalThis.docuAlignLogger = loggerBridge;
   if (installed) return;
   installed = true;
   replayEarlyEvents();

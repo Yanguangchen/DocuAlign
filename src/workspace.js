@@ -27,6 +27,29 @@ let selectedSourceName = "";
 let processedReports = null;
 let pipelineRun = 0;
 
+function sourceExtension(file) {
+  return file.name.toLowerCase().endsWith(".xlsx") ? "xlsx" : "xls";
+}
+
+function outputPageCount(reports) {
+  return reports.length * 5;
+}
+
+function trackWorkspaceOperation(message, context, operation) {
+  const tracker = globalThis.docuAlignLogger?.trackOperation;
+  return typeof tracker === "function"
+    ? tracker(message, context, operation)
+    : operation();
+}
+
+function logWorkspaceInfo(message, context) {
+  globalThis.docuAlignLogger?.logInfo?.(message, context);
+}
+
+function logWorkspaceWarning(message, context) {
+  globalThis.docuAlignLogger?.logWarn?.(message, context);
+}
+
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -86,14 +109,40 @@ async function startPipeline(file) {
       throw new Error("Workbook processing is unavailable.");
     }
 
-    const workbook = await workbookPdf.parseWorkbook(file);
-    if (currentRun !== pipelineRun) return null;
-
-    advancePipeline(1, `Mapping ${workbook.sheets.length} worksheets to RAK report fields.`);
-    const reports = reportMapping.buildMappedReports(workbook);
-    advancePipeline(2, "Validating the mapped five-page reports.");
+    const result = await trackWorkspaceOperation(
+      "Process workbook locally",
+      {
+        feature: "WorkbookPipeline",
+        function: "startPipeline",
+        operation: "workbook.parseAndMap",
+        category: "LocalProcessing",
+        sourceExtension: sourceExtension(file),
+        sourceSizeBytes: file.size,
+      },
+      async () => {
+        const workbook = await workbookPdf.parseWorkbook(file);
+        if (currentRun !== pipelineRun) return { stale: true };
+        advancePipeline(
+          1,
+          `Mapping ${workbook.sheets.length} worksheets to RAK report fields.`,
+        );
+        const reports = reportMapping.buildMappedReports(workbook);
+        advancePipeline(2, "Validating the mapped five-page reports.");
+        return { stale: false, workbook, reports };
+      },
+    );
+    if (result.stale) return null;
+    const { workbook, reports } = result;
 
     if (!Array.isArray(reports) || reports.length === 0) {
+      logWorkspaceWarning("Workbook mapping produced no complete reports", {
+        feature: "WorkbookPipeline",
+        function: "startPipeline",
+        operation: "workbook.validateMappedReports",
+        category: "Validation",
+        sheetCount: workbook.sheets.length,
+        reportCount: 0,
+      });
       failPipeline("This workbook has no complete report groups to export.");
       return null;
     }
@@ -115,6 +164,15 @@ async function startPipeline(file) {
       `ETL complete. The PDF will include all ${reports.length} mapped report groups.`,
       true,
     );
+    logWorkspaceInfo("Workbook processing completed", {
+      feature: "WorkbookPipeline",
+      function: "startPipeline",
+      operation: "workbook.parseAndMap",
+      category: "LocalProcessing",
+      sheetCount: workbook.sheets.length,
+      reportCount: reports.length,
+      outputPageCount: outputPageCount(reports),
+    });
     return reports;
   } catch {
     if (currentRun !== pipelineRun) return null;
@@ -181,7 +239,18 @@ async function exportPdf() {
       .replace(/[^a-z0-9_-]+/gi, "-")
       .replace(/^-+|-+$/g, "") || "report";
     setFeedback("Generating the final PDF from the approved report template…", true);
-    const pdfBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(processedReports);
+    const pdfBlob = await trackWorkspaceOperation(
+      "Generate PDF from approved template",
+      {
+        feature: "PdfExport",
+        function: "exportPdf",
+        operation: "pdf.templateRender",
+        category: "LocalPdfGeneration",
+        reportCount: processedReports.length,
+        outputPageCount: outputPageCount(processedReports),
+      },
+      () => globalThis.docuAlignRakReportPdf.createRakReportPdf(processedReports),
+    );
     const pdfUrl = globalThis.URL.createObjectURL(pdfBlob);
     const download = document.createElement("a");
     download.href = pdfUrl;
@@ -196,6 +265,16 @@ async function exportPdf() {
     saveStep.classList.add("is-active");
     cloudSave.disabled = false;
     setFeedback("Generated workbook PDF download started. Cloud save is now available.", true);
+    logWorkspaceInfo("PDF export download prepared", {
+      feature: "PdfExport",
+      function: "exportPdf",
+      operation: "pdf.download",
+      category: "LocalPdfGeneration",
+      reportCount: processedReports.length,
+      outputPageCount: outputPageCount(processedReports),
+      blobSizeBytes: pdfBlob.size,
+      mimeType: pdfBlob.type,
+    });
   } catch {
     setFeedback("The workbook PDF could not be generated. Check the file and try again.", true);
   }
