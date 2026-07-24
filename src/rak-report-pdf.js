@@ -90,13 +90,15 @@
     plan.whiteouts.push({ x, top, width, height });
   }
 
-  function addCell(plan, text, left, right, top, bottom, options = {}) {
-    addWhiteout(plan, left + 1, top + 1, right - left - 2, bottom - top - 2);
-    addText(plan, text, left, top + 4.8, {
-      bold: options.bold,
-      align: "center",
-      width: right - left,
-    });
+  function addValue(plan, text, x, top, options = {}) {
+    addWhiteout(
+      plan,
+      options.eraseX ?? x - 5,
+      top - 1,
+      options.eraseWidth ?? 40,
+      options.eraseHeight ?? 13,
+    );
+    addText(plan, text, x, top, options);
   }
 
   function addHeaderJob(plan, report) {
@@ -158,24 +160,11 @@
   function pageTwoPlan(report) {
     const plan = pagePlan();
     addHeaderJob(plan, report);
-    const columns = [38.28, 157.02, 270.0, 397.2, 528.84];
-    const rows = Array.from({ length: 8 }, (_, index) => 143.7 + index * 18.48);
+    const valueTops = [149.6, 168.08, 186.56, 205.04, 223.52, 242.0, 260.48];
     report.psd.rows.forEach((row, index) => {
-      const values = [
-        row.sieveSizeMm,
-        row.cumulativePassingPercent,
-        row.lowerLimit,
-        row.upperLimit,
-      ];
-      values.forEach((value, column) => {
-        addCell(
-          plan,
-          value,
-          columns[column],
-          columns[column + 1],
-          rows[index],
-          rows[index + 1],
-        );
+      addValue(plan, row.cumulativePassingPercent, 206.42, valueTops[index], {
+        eraseX: 196,
+        eraseWidth: 32,
       });
     });
 
@@ -189,20 +178,27 @@
       rows: report.psd.rows,
     };
 
-    addWhiteout(plan, 92, 459, 390, 33);
-    report.psd.remarks.forEach((remark, index) => {
-      addText(plan, remark, 93.84, 461.53 + index * 16.44);
+    addValue(plan, report.siltCoral.siltPercent, 343.51, 529.09, {
+      eraseX: 335,
+      eraseWidth: 31,
     });
-
-    addCell(plan, report.siltCoral.siltPercent, 330, 397.2, 525.3, 542.2);
-    addCell(plan, report.siltCoral.coralShellPercent, 330, 397.2, 542.2, 559.1);
-    addCell(plan, report.siltCoral.totalPercent, 330, 397.2, 559.1, 576.9, {
+    addValue(plan, report.siltCoral.coralShellPercent, 343.51, 545.65, {
+      eraseX: 335,
+      eraseWidth: 31,
+    });
+    addValue(plan, report.siltCoral.totalPercent, 343.51, 562.33, {
+      eraseX: 335,
+      eraseWidth: 31,
       bold: true,
     });
-    addCell(plan, report.siltCoral.requirement, 397.2, 528.84, 559.1, 576.9, {
+    addValue(plan, report.siltCoral.requirement, 424.78, 562.33, {
+      eraseX: 414,
+      eraseWidth: 108,
       bold: true,
     });
-    addCell(plan, report.moisture.percent, 292.5, 528.84, 610.6, 628.2, {
+    addValue(plan, report.moisture.percent, 395.83, 613.96, {
+      eraseX: 386,
+      eraseWidth: 35,
       bold: true,
     });
     addWhiteout(plan, 92, 628.5, 405, 15);
@@ -215,37 +211,31 @@
     const shear = report.directShear;
     addHeaderJob(plan, report);
     const summaryValues = [
-      [shear.maximumDryDensity, 414.7, 129.06],
-      [shear.minimumDryDensity, 414.7, 143.6],
-      [shear.retainedOn2mmPercent, 418.66, 158.12],
-      [shear.shearingRate, 417.34, 172.64],
-      [shear.initialBulkDensity, 414.7, 187.16],
-      [shear.initialDryDensity, 414.7, 201.68],
-      [shear.angle, 141.14, 230.84],
-      [shear.requirement, 355.27, 230.72],
+      [shear.maximumDryDensity, 414.7, 129.06, false],
+      [shear.minimumDryDensity, 414.7, 143.6, false],
+      [shear.retainedOn2mmPercent, 418.66, 158.12, false],
+      [shear.shearingRate, 417.34, 172.64, false],
+      [shear.initialBulkDensity, 414.7, 187.16, false],
+      [shear.initialDryDensity, 414.7, 201.68, false],
+      [shear.angle, 141.14, 230.84, true],
     ];
-    for (const [text, x, top] of summaryValues) {
-      addWhiteout(plan, x - 4, top - 1, 100, 13);
-      addText(plan, text, x, top, {
-        bold: top === 230.84,
+    for (const [text, x, top, bold] of summaryValues) {
+      addValue(plan, text, x, top, {
+        eraseWidth: 35,
+        bold,
       });
     }
-    addWhiteout(plan, 90, 198, 45, 15);
-    const densityValue = shear.condition
-      .split(" ")
-      .find((part) => part.endsWith("%")) ?? shear.condition;
-    addText(plan, densityValue, 100.32, 200.24);
 
     const xPositions = [231.29, 293.81, 379.03, 467.86];
     shear.rows.forEach((row, index) => {
       const values = [
-        [row.normalStressKpa, 259.76],
         [row.maxShearStressKpa, 274.28],
         [row.horizontalDisplacementMm, 288.83],
       ];
       for (const [text, top] of values) {
-        addWhiteout(plan, xPositions[index] - 5, top - 1, 31, 13);
-        addText(plan, text, xPositions[index], top);
+        addValue(plan, text, xPositions[index], top, {
+          eraseWidth: 28,
+        });
       }
     });
 
@@ -268,31 +258,22 @@
         series: shear.series,
       },
     ];
-    addWhiteout(plan, 385, 489, 55, 16);
-    addText(plan, report.organicMatter.percent, 393.19, 492.25, { bold: true });
+    addValue(plan, report.organicMatter.percent, 393.19, 492.25, {
+      eraseWidth: 32,
+      bold: true,
+    });
     return plan;
   }
 
   function pageFourPlan(report) {
     const plan = pagePlan();
     addHeaderJob(plan, report);
-    const columns = [38.28, 203.0, 369.0, 528.84];
-    const rows = Array.from({ length: 13 }, (_, index) => 140.8 + index * 14.52);
+    const valueTops = Array.from({ length: 12 }, (_, index) => 143.72 + index * 14.52);
     report.metals.rows.forEach((row, index) => {
-      [row.element, row.resultPpm, row.upperLimitPpm].forEach((value, column) => {
-        addCell(
-          plan,
-          value,
-          columns[column],
-          columns[column + 1],
-          rows[index],
-          rows[index + 1],
-        );
+      addValue(plan, row.resultPpm, 276.29, valueTops[index], {
+        eraseX: 265,
+        eraseWidth: 42,
       });
-    });
-    addWhiteout(plan, 90, 330, 400, 45);
-    report.metals.remarks.forEach((remark, index) => {
-      addText(plan, `•  ${remark}`, 71.28, 332.99 + index * 14.52);
     });
     plan.images.push(
       {
