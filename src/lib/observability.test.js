@@ -160,4 +160,47 @@ describe("initObservability", () => {
     });
     expect(snapshot.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  it("exposes a frozen structured-logger bridge to classic workspace scripts", async () => {
+    const bridge = globalThis.docuAlignLogger;
+
+    expect(Object.isFrozen(bridge)).toBe(true);
+    expect(bridge).toMatchObject({
+      logError: expect.any(Function),
+      logInfo: expect.any(Function),
+      logWarn: expect.any(Function),
+      trackOperation: expect.any(Function),
+    });
+
+    bridge.logInfo("Classic bridge event", {
+      feature: "WorkbookPipeline",
+      function: "test",
+      operation: "bridge.logInfo",
+      category: "TestTelemetry",
+    });
+    await bridge.trackOperation(
+      "Classic bridge operation",
+      {
+        feature: "WorkbookPipeline",
+        function: "test",
+        operation: "bridge.trackOperation",
+      },
+      async () => "complete",
+    );
+
+    expect(getRecentEvents()).toEqual([
+      expect.objectContaining({
+        message: "Classic bridge event",
+        category: "TestTelemetry",
+      }),
+      expect.objectContaining({
+        message: "Classic bridge operation started",
+        outcome: "started",
+      }),
+      expect.objectContaining({
+        message: "Classic bridge operation succeeded",
+        outcome: "success",
+      }),
+    ]);
+  });
 });
