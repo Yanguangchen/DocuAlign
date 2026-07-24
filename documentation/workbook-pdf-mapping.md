@@ -114,11 +114,10 @@ as separate series.
 | Horizontal displacement | `horizontal_displacement_mm` | `M57,P57,V57,AB57` | Preserve mixed decimals |
 | Organic matter | `organic_matter_content_percent` | `R71` | Two-decimal display value |
 
-Two charts are regenerated from the mapped stress rows: normal stress versus
-maximum shear stress, and horizontal displacement versus maximum shear stress.
-The source workbook's full time-series chart is not copied as an opaque chart
-object; the report uses the mapped summary values so output remains
-deterministic.
+Two charts are regenerated inside the original sample-PDF chart frames:
+normal stress versus maximum shear stress uses the four TR summary points;
+horizontal displacement versus maximum shear stress uses all cached points
+from `SB1` columns `E:F`, `K:L`, and `Q:R`.
 
 ## 6. Page 4 — metallic analysis and sign-off
 
@@ -160,7 +159,11 @@ two appendix JPEGs and two sign-off images for each report group.
 
 The workbook contains six complete report groups. Export produces one PDF with
 six consecutive five-page reports (**30 pages**), rather than dumping 26 raw
-worksheet grids. `Summary` and `coral + org` remain upstream calculation tabs;
+worksheet grids. Each report starts as a copy of the five approved
+`SampleOutput.pdf` pages. If its complete data/image fingerprint matches the
+reference sample, no overlays are added and the rendered pixels are identical.
+Other groups overlay changed values and images at measured reference
+coordinates. `Summary` and `coral + org` remain upstream calculation tabs;
 their values reach the PDF through cached formulas on `CV1` and `TR1`.
 
 Automated golden checks verify:

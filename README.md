@@ -559,10 +559,11 @@ six groups, so its download contains six consecutive five-page reports (30
 pages). Shared calculation tabs remain upstream and are not dumped as raw
 worksheet grids.
 
-The generated Blob contains mapped workbook values, regenerated charts, and
-embedded signatures/photos. `SampleOutput.pdf` remains the immutable visual
-reference and is not used as the export payload. The field-level source and
-transform contract is documented in
+The generated Blob copies the exact pages of `SampleOutput.pdf`, then overlays
+only values, charts, signatures, and photos that differ for each report group.
+The matching reference report is therefore pixel-identical to the sample;
+other groups retain the same page geometry, branding, tables, and spacing. The
+field-level source and transform contract is documented in
 [`documentation/workbook-pdf-mapping.md`](./documentation/workbook-pdf-mapping.md).
 
 The same PDF must exist at both locations below:

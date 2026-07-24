@@ -47,7 +47,7 @@ The HTML pages contain an import map for direct browser module loading from the 
 | `src/view-report.js` | Resolves public tokens, renders safe text, guards PDF URLs |
 | `src/workbook-pdf.js` | Reads workbook display cells and associates embedded media with sheet anchors |
 | `src/report-mapping.js` | Discovers repeated report groups and builds semantic five-page models |
-| `src/rak-report-pdf.js` | Renders mapped models to the fixed portrait RAK layout |
+| `src/rak-report-pdf.js` | Copies sample PDF pages and overlays changed mapped values at measured coordinates |
 | `src/lib/firebase.js` | Firebase singleton initialization |
 | `src/lib/reports.js` | Firestore report CRUD, timestamp normalization, inclusive date filtering |
 | `src/lib/share.js` | Token generation, public payload allowlisting, share and bundle persistence |
@@ -59,7 +59,7 @@ The HTML pages contain an import map for direct browser module loading from the 
 | `src/firestore.rules.test.js` | Emulator-gated authorization contract tests |
 | `SampleDocuments/` | Direct-filesystem sample input and PDF references |
 | `public/SampleDocuments/` | Copies emitted by Vite into the production build |
-| `vendor/`, `public/vendor/` | Direct-file and Vite copies of SheetJS, jsPDF, and AutoTable |
+| `vendor/`, `public/vendor/` | Direct-file and Vite copies of SheetJS, jsPDF, AutoTable, and pdf-lib |
 | `vite.config.js` | MPA entries and coverage configuration |
 
 ## 4. UML component diagram
@@ -100,7 +100,7 @@ flowchart LR
     end
 
     pdf[(SampleOutput.pdf\nreference copies)]
-    browserLibs[(SheetJS + jsPDF + AutoTable)]
+    browserLibs[(SheetJS + jsPDF + AutoTable + pdf-lib)]
     mapJson[(mapping JSON)]
 
     actor --> index
@@ -135,7 +135,9 @@ flowchart LR
 The three classic runtime modules form an explicit pipeline:
 `workbook-pdf.js` reads display cells and embedded media,
 `report-mapping.js` applies the repeated-group coordinate contract, and
-`rak-report-pdf.js` renders the five reference pages with regenerated charts.
+`rak-report-pdf.js` copies all five approved reference pages. Reports that
+differ from the reference receive measured value/chart/image overlays; an
+exact reference match is copied without redraw.
 
 ## 5. Runtime workflows
 
@@ -409,7 +411,7 @@ same coordinates to every discovered group:
 
 - `src/workbook-pdf.js` reads cell display values and XLSX drawing/media relationships;
 - `src/report-mapping.js` expands ranges, paired columns, and scattered cells into semantic arrays;
-- `src/rak-report-pdf.js` renders the five portrait pages, regenerates charts, and places signatures/photos.
+- `src/rak-report-pdf.js` copies the five reference pages and overlays changed values, regenerated charts, and workbook images at measured coordinates.
 
 The complete field and transform inventory is
 [`workbook-pdf-mapping.md`](./workbook-pdf-mapping.md). Integration coverage
@@ -442,13 +444,14 @@ Capability URLs should be treated as secrets. Anyone holding one can read its pu
 
 `SampleDocuments/SampleOutput.pdf` supports relative URLs when the root HTML file is opened directly. `public/SampleDocuments/SampleOutput.pdf` is copied into Vite output for HTTP/HTTPS deployments. Both copies must remain byte-identical. The same dual-location convention currently exists for `SampleOutput-cover.pdf`.
 
-The active workspace export does not download or modify this reference PDF. It
-creates a new Blob from parsed cells/media, semantic report models, and the
-fixed renderer.
+The active workspace loads this reference PDF as an immutable template, copies
+its pages into a new document, and overlays mapped differences. It never writes
+back to either reference asset. A report matching the reference data renders
+pixel-for-pixel identically.
 `src/pdf-export.test.js` checks both the dynamic export contract and the
 reference PDF's signature, five-page marker, and SHA-256 equality.
 
-SheetJS, jsPDF, and AutoTable are also kept in mirrored `vendor/` and
+SheetJS, jsPDF, AutoTable, and pdf-lib are also kept in mirrored `vendor/` and
 `public/vendor/` paths so both direct-file and Vite execution can load the same
 browser runtimes.
 
@@ -496,7 +499,7 @@ Before deployment:
 ## 11. Known limitations and next implementation boundaries
 
 1. SheetJS reads cached formula results; the browser does not recalculate Excel formulas. Source workbooks must be saved after calculation.
-2. Charts are regenerated from mapped report values and are not pixel-level copies of Excel chart objects. The displacement chart uses the mapped summary rows rather than the full SB1 time series.
+2. Changed reports regenerate charts inside the original chart frames. The displacement chart uses all cached SB1 time-series points, but line/marker antialiasing can differ slightly from Excel's chart renderer.
 3. The base report group's source shear sheet has incomplete first/second stress-series cells; blank cached values remain blank instead of being invented.
 4. There is no review/edit form between parsing and export.
 5. Saved reports need a versioned structured schema before CRUD can cover laboratory values; cloud save remains metadata-only.
