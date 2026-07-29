@@ -33,10 +33,13 @@ function consoleMethodFor(level) {
 export const sessionId = Math.random().toString(36).slice(2, 10);
 
 const RECENT_EVENT_LIMIT = 50;
+const DEFAULT_SLOW_OPERATION_THRESHOLD_MS = 3000;
 const recentEvents = [];
 const subscribers = new Set();
+const activeOperations = new Map();
 
 let minimumLevel = LOG_LEVELS.info;
+let eventSequence = 0;
 let operationSequence = 0;
 
 /**
@@ -74,6 +77,21 @@ export function clearRecentEvents() {
   recentEvents.length = 0;
 }
 
+/**
+ * Return unfinished tracked operations with their current elapsed time. Internal
+ * monotonic timestamps are omitted so the snapshot remains serializable.
+ * @returns {object[]} Copies of active operation descriptors.
+ */
+export function getActiveOperations() {
+  const now = performance.now();
+  return [...activeOperations.values()].map(
+    ({ startedAtMonotonic, ...operation }) => ({
+      ...operation,
+      activeForMs: Math.max(0, Math.round(now - startedAtMonotonic)),
+    }),
+  );
+}
+
 // Normalise a thrown value into loggable fields without assuming Error shape.
 function describeError(error) {
   if (!error) return {};
@@ -85,6 +103,7 @@ function describeError(error) {
 
 function emit(level, message, context, error) {
   if (LEVEL_RANKS.get(level) < minimumLevel) return;
+  eventSequence += 1;
 
   // Caller context is intentionally applied first. The logger owns the core
   // identity fields so an accidental `message`, `level`, or `sessionId` key at
@@ -97,6 +116,7 @@ function emit(level, message, context, error) {
     operation: context.operation ?? "unknown",
     category: context.category ?? "General",
     timestamp: new Date().toISOString(),
+    sequence: eventSequence,
     level,
     sessionId,
     page: globalThis.location?.pathname ?? "unknown",
@@ -130,8 +150,12 @@ export function logInfo(message, context = {}) {
   emit("info", message, context);
 }
 
-export function logWarn(message, context = {}) {
-  emit("warn", message, context);
+export function logWarn(message, errorOrContext = {}, context) {
+  if (context) {
+    emit("warn", message, context, errorOrContext);
+    return;
+  }
+  emit("warn", message, errorOrContext);
 }
 
 /**
@@ -151,14 +175,27 @@ export function logError(message, error, context = {}) {
  * @param {string} message - Summary used for both the success and failure event.
  * @param {object} context - feature/function/operation/category fields.
  * @param {() => Promise<T>} operation
- * @param {{expectedErrorCodes?: string[]}} [options] - Error codes that are
- * expected rejections rather than application failures.
+ * @param {{expectedErrorCodes?: string[], slowThresholdMs?: number}} [options]
+ * Error codes that are expected rejections rather than application failures,
+ * plus the duration after which a successful operation emits a warning.
  * @returns {Promise<T>} The operation's result.
  */
 export async function trackOperation(message, context, operation, options = {}) {
   operationSequence += 1;
   const operationId = `${sessionId}-${operationSequence}`;
   const startedAt = performance.now();
+  const activeOperation = Object.freeze({
+    ...context,
+    feature: context.feature ?? "Application",
+    function: context.function ?? "unknown",
+    operation: context.operation ?? "unknown",
+    category: context.category ?? "OperationLifecycle",
+    message,
+    operationId,
+    startedAt: new Date().toISOString(),
+    startedAtMonotonic: startedAt,
+  });
+  activeOperations.set(operationId, activeOperation);
   logInfo(`${message} started`, {
     ...context,
     operationId,
@@ -168,15 +205,30 @@ export async function trackOperation(message, context, operation, options = {}) 
 
   try {
     const result = await operation();
+    const durationMs = Math.round(performance.now() - startedAt);
+    activeOperations.delete(operationId);
     logInfo(`${message} succeeded`, {
       ...context,
       operationId,
-      durationMs: Math.round(performance.now() - startedAt),
+      durationMs,
       outcome: "success",
       category: context.category ?? "OperationLifecycle",
     });
+    const slowThresholdMs =
+      options.slowThresholdMs ?? DEFAULT_SLOW_OPERATION_THRESHOLD_MS;
+    if (durationMs >= slowThresholdMs) {
+      logWarn(`${message} was slow`, {
+        ...context,
+        operationId,
+        durationMs,
+        outcome: "success",
+        slowThresholdMs,
+        category: "SlowOperation",
+      });
+    }
     return result;
   } catch (error) {
+    activeOperations.delete(operationId);
     const expected = (options.expectedErrorCodes ?? []).includes(error?.code);
     const failureContext = {
       ...context,

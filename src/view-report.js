@@ -75,6 +75,39 @@ export function getBundleTokenFromUrl(search) {
  * @param {unknown} url - The pdfUrl field from the share document.
  * @returns {string} A relative path or https URL that is safe to link.
  */
+/**
+ * Resolve the PDF URL for one shared document.
+ *
+ * The fixed-format test report is served from its static asset. Every other
+ * document publishes its worksheet grid instead, and is rebuilt here into a
+ * blob URL using the same writer the workspace export uses, so the recipient
+ * gets a real PDF without the file ever being hosted.
+ * @param {Object} share - A public share document.
+ * @returns {string} A URL safe to hand to the viewer and download link.
+ */
+export function resolveDocumentUrl(share) {
+  if (typeof share?.documentData !== "string" || share.documentData === "") {
+    return safePdfUrl(share?.pdfUrl);
+  }
+
+  try {
+    const document = JSON.parse(share.documentData);
+    const bytes = globalThis.docuAlignPdf.createDocument({
+      title: share.reportName || FALLBACK_REPORT_TITLE,
+      subtitle: share.clientName ?? "",
+      sections: Array.isArray(document) ? document : [],
+    });
+    return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  } catch (error) {
+    logWarn("Could not rebuild the shared document", error, {
+      feature: "PublicShare",
+      function: "resolveDocumentUrl",
+      category: "Rendering",
+    });
+    return safePdfUrl(share?.pdfUrl);
+  }
+}
+
 export function safePdfUrl(url) {
   if (typeof url === "string") {
     if (/^[\w][\w./-]*$/.test(url)) return url;
@@ -210,7 +243,7 @@ function renderSharedReport(share) {
   reportPublished.textContent = share.publishedAt
     ? dateFormatter.format(share.publishedAt)
     : "Date unavailable";
-  const pdfUrl = safePdfUrl(share.pdfUrl);
+  const pdfUrl = resolveDocumentUrl(share);
   pdfLink.setAttribute("href", pdfUrl);
   downloadLink.setAttribute("href", pdfUrl);
   previewOverlay.setAttribute("href", pdfUrl);
@@ -246,10 +279,10 @@ function bundleReportItem(report) {
 
   const anchor = document.createElement("a");
   anchor.className = "google-button share-pdf-button";
-  anchor.href = safePdfUrl(report.pdfUrl);
+  anchor.href = resolveDocumentUrl(report);
   anchor.target = "_blank";
   anchor.rel = "noopener";
-  anchor.textContent = "View report";
+  anchor.textContent = "View document";
   item.append(anchor);
 
   return item;
@@ -258,7 +291,7 @@ function bundleReportItem(report) {
 function renderSharedBundle(sharedBundle) {
   bundleName.textContent = sharedBundle.bundleName || "Shared reports";
   bundleCount.textContent = `${sharedBundle.reports.length} ${
-    sharedBundle.reports.length === 1 ? "report" : "reports"
+    sharedBundle.reports.length === 1 ? "document" : "documents"
   }`;
   bundlePublished.textContent = sharedBundle.publishedAt
     ? dateFormatter.format(sharedBundle.publishedAt)

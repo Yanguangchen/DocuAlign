@@ -46,7 +46,33 @@ To support both environments without 404 file errors:
    * Maintain rich, premium aesthetics (glassmorphism cards, micro-animations, clear step indicators, accessible color contrast).
    * **Do NOT introduce Tailwind CSS** or third-party UI component libraries unless explicitly instructed by the user.
 
-3. **Logical Field Keys vs PDF AcroForms:**
+3. **REQUIREMENT — One `CV1` + `TR1` Sheet Group = One Test Report:**
+
+   > [!IMPORTANT]
+   > **A workbook holds MANY test reports, never one.** A single uploaded workbook must produce **N separate PDFs**, where N is derived from that file. Collapsing a workbook into one combined PDF is a defect.
+
+   > [!CAUTION]
+   > **NEVER ALTER THE TEST REPORT FORMAT.** The `CV1` + `TR1` test report document is the client's established deliverable and its layout is FIXED. It must be exported exactly as-is from `SampleDocuments/SampleOutput.pdf` (`REPORT_ASSET_PATH` in `src/workspace.js`) — **never** re-rendered, re-laid-out, restyled, or regenerated from worksheet data. Do not "improve", reformat, or apply the generic table renderer to it. This applies no matter what other export work is being done: changes to the summary, datasheets, or any other document must leave the test report untouched. `src/pdf-export.test.js` and `src/workspace.test.js` both lock this in.
+
+   * **Every worksheet group is its own document.** The export emits, as separate PDFs: one per test report (`CV1` + `TR1` together), one per `DS1` datasheet, one per `SB1` datasheet, and one for each standalone worksheet (`Summary`, `coral + org`, …). `SampleInput.xlsx` therefore exports **20** documents: 6 reports + 6 DS1 + 6 SB1 + Summary + coral + org.
+   * **Only the supporting worksheets are generated.** `src/pdf-writer.js` renders the summary, `coral + org`, `DS1`, and `SB1` documents from parsed sheet data. The test report is excluded from this path by design — see the caution above.
+   * **Excel serials must be converted.** Date-formatted cells are resolved through `xl/styles.xml` and rendered `DD/MM/YYYY` — a raw `46120` in output is a bug. Cached floats are normalised to 12 significant digits so `63.099999999999994` reads as `63.1`.
+
+   * **The defining unit is a `CV1` + `TR1` pair.** `CV1` is the report's cover sheet and `TR1` its test results; the `DS1` (sieve datasheet) and `SB1` (direct shear datasheet) sheets are supporting data for the same report. Groups are distinguished by Excel's duplicate-sheet suffix: `CV1`/`TR1`, `CV1 (2)`/`TR1 (2)`, `CV1 (3)`/`TR1 (3)`, and so on.
+   * **N is always read from the uploaded file. Never hardcode it.** Three `CV1`/`TR1` pairs means three reports; six pairs means six. `SampleDocuments/SampleInput.xlsx` contains **six** groups (26 worksheets, `CV1` through `CV1 (6)`), carrying job refs `X-2026-522-1` through `X-2026-522-6` — verify against the sheet list before assuming a different count.
+   * Each report is identified by its **own** job ref, read per group (`CV1!K28`), so exported file names stay distinct. Do not identify a report using another group's sheets.
+   * Excel's duplicate naming leaves inconsistent whitespace (`DS1  (2)` has two spaces), so sheet prefixes must be compared with whitespace collapsed.
+   * **Multiple downloads must be spaced apart.** Browsers throttle programmatic downloads fired in one synchronous loop — Chrome keeps only the first — so exporting N reports must stagger the anchor clicks (`DOWNLOAD_INTERVAL_MS` in `src/workspace.js`) and cancel any still-queued downloads on reset. A single-PDF result from a multi-report workbook is usually this, not a parsing bug.
+   * Parsing (`src/xlsx-reader.js`) and PDF generation (`src/pdf-writer.js`) are both **classic scripts** (like `src/early-observability.js`): they must never use `import`/`export`, must stay listed in `classicScripts` in `vite.config.js`, and must be loaded by `<script vite-ignore>` tags *before* `src/workspace.js`, so the workspace keeps working over `file://`. Both are dependency-free by design — the repo ships no xlsx or PDF library, and none should be added without cause.
+
+4. **Packages (Grouped Share Links):**
+   * A **package** is one `docuAlignPublicBundles` capability token exposing multiple documents. Any document can be packaged — test reports, `DS1`/`SB1` datasheets, the summary, and `coral + org` — and documents are selected individually on the dashboard, so one package can mix documents from different reports.
+   * Each packaged document is published as its **own** share token so it stays individually revocable. Bundles store TOKENS only (1..25); never embed report snapshots (see §1.3 — measured to exceed the 1000-expression rules limit).
+   * A generated document publishes its worksheet grid as a **single JSON string** (`documentData`, ≤ 100,000 chars) and the public viewer rebuilds the PDF with `src/pdf-writer.js`. Keep it one bounded string: validating it costs the rules exactly one expression no matter how many rows the sheet holds. Never expand it into per-row or per-field rule validation.
+   * The fixed-format test report is never serialised this way — it keeps `pdfUrl` and publishes `documentData: null` (see the caution in §3).
+   * Exported documents persist to a `documents` subcollection under each saved report. Firestore cannot store nested arrays, so grids are held as JSON strings, not `rows: [[...]]`.
+
+5. **Logical Field Keys vs PDF AcroForms:**
    * Uploaded Excel-generated PDFs do not contain AcroForm dictionaries.
    * Always map report fields using semantic logical keys (`client_name`, `job_ref`, `particle_size_distribution`, etc.) as documented in `rak_pdf_excel_field_mapping.json` and `design.md`.
 

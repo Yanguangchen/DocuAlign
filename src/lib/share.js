@@ -16,9 +16,16 @@ export const PUBLIC_SHARES_COLLECTION = "docuAlignPublicShares";
 // PDF export grouped for them. Same security model as single shares.
 export const PUBLIC_BUNDLES_COLLECTION = "docuAlignPublicBundles";
 
-// Upper bound on reports per bundle; mirrored by the Firestore rules so an
+// Upper bound on documents per package; mirrored by the Firestore rules so an
 // oversized group is rejected on both sides of the trust boundary.
 export const MAX_BUNDLE_REPORTS = 25;
+
+// Upper bound on a published document's serialised worksheet data. Generated
+// documents (summary, coral + org, DS1, SB1) travel inside the share document
+// as one JSON string so the public viewer can rebuild the PDF locally; capping
+// the length keeps the share well inside Firestore's 1 MiB document limit and
+// costs the rules a single expression to validate.
+export const MAX_DOCUMENT_DATA_LENGTH = 100000;
 
 // The PDF output asset the public viewer serves for a shared report. Relative so
 // it resolves against the deployed origin (see the dual asset directory contract).
@@ -118,12 +125,51 @@ export function toPublicReportPayload(report) {
  * @returns {Promise<string>} The share token backing the public URL.
  */
 export async function publishReport(database, report) {
+  return publishDocument(database, report, null);
+}
+
+/**
+ * Reduce one of a report's documents to a publicly shareable snapshot.
+ *
+ * The fixed-format test report is served from its static asset via `pdfUrl`
+ * and carries no data. Every other document (summary, coral + org, DS1, SB1)
+ * travels as serialised worksheet data the viewer rebuilds into a PDF.
+ * @param {Object} report - The saved report the document belongs to.
+ * @param {Object|null} documentRecord - The document, or null for the report itself.
+ * @returns {Object} Sanitised snapshot for the public share document.
+ */
+export function toPublicDocumentPayload(report, documentRecord) {
+  const payload = toPublicReportPayload(report);
+  if (!documentRecord) return payload;
+
+  const data = documentRecord.data ?? null;
+  if (data !== null && data.length > MAX_DOCUMENT_DATA_LENGTH) {
+    throw new TypeError("This document is too large to publish as a public link.");
+  }
+
+  return {
+    ...payload,
+    reportName: documentRecord.title || payload.reportName,
+    documentSlug: documentRecord.slug ?? null,
+    // Asset-backed documents keep pdfUrl and publish no data.
+    documentData: documentRecord.assetPath ? null : data,
+  };
+}
+
+/**
+ * Publish one document of a saved report as a public share document.
+ * @param {Object} database - Firestore database instance.
+ * @param {Object} report - A saved report (must carry its Firestore document id).
+ * @param {Object|null} [documentRecord] - The document to publish, or null for the report.
+ * @returns {Promise<string>} The share token backing the public URL.
+ */
+export async function publishDocument(database, report, documentRecord = null) {
   if (!report?.id) {
     throw new TypeError("Only reports saved to the cloud can be shared publicly.");
   }
   const token = generateShareToken();
   await setDoc(doc(database, PUBLIC_SHARES_COLLECTION, token), {
-    ...toPublicReportPayload(report),
+    ...toPublicDocumentPayload(report, documentRecord),
     publishedAt: serverTimestamp(),
   });
   return token;
@@ -141,19 +187,24 @@ export async function publishReport(database, report) {
  * @param {{ name?: string }} [options] - Optional customer-facing bundle title.
  * @returns {Promise<string>} The share token backing the public bundle URL.
  */
-export async function publishBundle(database, reports, { name } = {}) {
-  if (!Array.isArray(reports) || reports.length === 0) {
-    throw new TypeError("Select at least one saved report to group into a link.");
+export async function publishBundle(database, entries, { name } = {}) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new TypeError("Select at least one document to group into a package.");
   }
-  if (reports.length > MAX_BUNDLE_REPORTS) {
-    throw new TypeError(`A group link can hold at most ${MAX_BUNDLE_REPORTS} reports.`);
+  if (entries.length > MAX_BUNDLE_REPORTS) {
+    throw new TypeError(`A package can hold at most ${MAX_BUNDLE_REPORTS} documents.`);
   }
-  if (reports.some((report) => !report?.id)) {
-    throw new TypeError("Only reports saved to the cloud can be grouped into a link.");
+  // Entries are either a saved report or a { report, document } pair, so a
+  // package can mix test reports with their datasheets and summary sheets.
+  const normalised = entries.map((entry) =>
+    entry?.report ? entry : { report: entry, document: null },
+  );
+  if (normalised.some(({ report }) => !report?.id)) {
+    throw new TypeError("Only documents saved to the cloud can be grouped into a package.");
   }
 
   const shareTokens = await Promise.all(
-    reports.map((report) => publishReport(database, report)),
+    normalised.map(({ report, document }) => publishDocument(database, report, document)),
   );
 
   const token = generateShareToken();

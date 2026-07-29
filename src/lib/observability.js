@@ -4,9 +4,11 @@
  * uncaught exceptions and unhandled promise rejections are logged through the
  * structured logger instead of dying silently in the console, and exposes a
  * small diagnostics handle (`globalThis.docuAlignDiagnostics`) so support can
- * read a support snapshot with session, page, connectivity, and recent events.
+ * read a snapshot with session, page, connectivity, active operations, level
+ * counts, and recent events.
  */
 import {
+  getActiveOperations,
   getRecentEvents,
   logError,
   logInfo,
@@ -32,13 +34,24 @@ function sourceWithoutQuery(source) {
  * @returns {object} Serializable diagnostics suitable for a support ticket.
  */
 export function getDiagnosticSnapshot() {
+  const events = getRecentEvents();
+  const eventCounts = {
+    debug: events.filter((event) => event.level === "debug").length,
+    info: events.filter((event) => event.level === "info").length,
+    warn: events.filter((event) => event.level === "warn").length,
+    error: events.filter((event) => event.level === "error").length,
+  };
+
   return {
     generatedAt: new Date().toISOString(),
     sessionId,
     page: globalThis.location.pathname,
     online: globalThis.navigator.onLine,
     visibilityState: globalThis.document.visibilityState,
-    events: getRecentEvents(),
+    pageUptimeMs: Math.max(0, Math.round(performance.now())),
+    activeOperations: getActiveOperations(),
+    eventCounts,
+    events,
   };
 }
 
@@ -137,6 +150,7 @@ export function initObservability() {
 
   globalThis.docuAlignDiagnostics = {
     sessionId,
+    getActiveOperations,
     getRecentEvents,
     getSnapshot: getDiagnosticSnapshot,
   };

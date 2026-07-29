@@ -817,6 +817,31 @@ a:focus-visible {
   border-top: 1px solid rgba(21, 45, 50, 0.1);
 }
 
+/* Per-document package picker on each saved report card. */
+.report-documents summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--ink-soft, #4a5f63);
+}
+
+.document-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 2px solid rgba(21, 45, 50, 0.1);
+}
+
+.report-documents-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--ink-soft, #4a5f63);
+}
+
 .share-button {
   align-self: flex-start;
   padding: 8px 14px;

@@ -4,6 +4,15 @@
 
 This app converts the client current Excel based reporting workflow into a structured web app workflow.
 
+### Support diagnostics
+
+Every page captures structured lifecycle, network, authentication, and global
+error events without including capability-token query strings. In the browser
+console, `docuAlignDiagnostics.getSnapshot()` returns a serializable support
+snapshot containing the session ID, page uptime, connectivity, recent event
+counts, the latest 50 events, and any tracked operations that are still active.
+Operations taking at least three seconds also emit a `SlowOperation` warning.
+
 The client currently maintains test report data inside an Excel file. That Excel data is then manually copied or positioned into a PDF editor such as Adobe Acrobat. This causes alignment issues because the final PDF layout may shift depending on the computer, PDF editor settings, fonts, scaling, printer settings, or the time the file is opened and edited.
 
 The goal of this app is to make the Excel file the import source, store the report data in the web app, and allow users to export or print a clean PDF report anytime.
@@ -77,6 +86,20 @@ Moisture Content maps to the moisture content test result section.
 
 The parser reads the uploaded Excel file and extracts report information.
 
+#### Requirement: one workbook contains multiple test reports
+
+A single uploaded workbook holds **many** test reports, not one. Each test report is one `CV1` + `TR1` worksheet pair:
+
+* `CV1` is that report's cover sheet.
+* `TR1` is that report's test results.
+* `DS1` and `SB1` hold the supporting sieve and direct shear datasheets for the same report.
+
+Excel names the repeats with a duplicate suffix, so the sheets run `CV1`, `TR1`, `CV1 (2)`, `TR1 (2)`, `CV1 (3)`, `TR1 (3)`, and so on. **Three `CV1`/`TR1` pairs means three separate test reports; six pairs means six.**
+
+The report count must always be read from the uploaded file and never hardcoded. Each report carries its own job reference (for example `X-2026-522-1`, `X-2026-522-2`, …), which distinguishes it from the others.
+
+`SampleDocuments/SampleInput.xlsx` contains **six** report groups across 26 worksheets (`CV1` through `CV1 (6)`), with job refs `X-2026-522-1` through `X-2026-522-6`.
+
 Expected data includes:
 
 1. Client details
@@ -114,6 +137,28 @@ Users should be able to:
 
 The app generates a PDF report from stored data.
 
+#### Requirement: every worksheet group exports as its own PDF
+
+Exporting a workbook produces **separate PDFs**, never a single combined document:
+
+| Document | Count for `SampleInput.xlsx` | Named | Source |
+| --- | --- | --- | --- |
+| Test report (`CV1` + `TR1`) | 6 | `<workbook>-<job ref>.pdf` | **Fixed format — exported as-is** |
+| `DS1` sieve datasheet | 6 | `<workbook>-<job ref>-DS1.pdf` | Generated |
+| `SB1` direct shear datasheet | 6 | `<workbook>-<job ref>-SB1.pdf` | Generated |
+| `Summary` | 1 | `<workbook>-Summary.pdf` | Generated |
+| `coral + org` | 1 | `<workbook>-coral-org.pdf` | Generated |
+| **Total** | **20** | | |
+
+A workbook with three `CV1`/`TR1` pairs exports proportionally fewer. The counts are always derived from the uploaded file.
+
+> **IMPORTANT — the test report format must never be altered.**
+> The `CV1` + `TR1` test report is the client's established deliverable. Its layout is fixed and it is exported exactly as-is. It must never be re-rendered, restyled, or regenerated from worksheet data, regardless of what other export work is happening.
+
+The **supporting** documents (summary, `coral + org`, `DS1`, `SB1`) are generated in the browser from the parsed worksheet data by `src/pdf-writer.js` — no PDF library and no server involved. In those documents, Excel date serials are converted to `DD/MM/YYYY` and cached floating-point values are normalised, so they read like the source workbook rather than its raw storage.
+
+Because browsers throttle downloads triggered together, the export spaces the downloads apart. Chrome may still ask permission to download multiple files — that prompt must be allowed, or only the first PDF is saved.
+
 The generated PDF should match the intended RAK report layout, including:
 
 1. Cover page
@@ -126,6 +171,21 @@ The generated PDF should match the intended RAK report layout, including:
 8. Metallic Analysis section
 9. Prepared By and Authorised By section
 10. Appendix photo section
+
+### Packages (grouped share links)
+
+Any document can be shared publicly, and documents are grouped into **packages** — one capability URL that shows several documents to the recipient.
+
+* Every document is **individually selectable** on the dashboard. Each saved report expands into its stored documents (test report, DS1, SB1, summary, coral + org), and each has its own tick-box, so a package can mix documents from different reports.
+* A package holds up to **25 documents** (`MAX_BUNDLE_REPORTS`), enforced on both the client and in the Firestore rules.
+* Each document in a package is published as its **own** share token, so any single document stays individually revocable by deleting its share. The package document stores only the tokens — never embedded snapshots — which keeps rules evaluation far below Firestore's 1000-expression cap.
+
+How a recipient gets the file depends on the document:
+
+* The fixed-format **test report** is served from its static asset via `pdfUrl`.
+* **Generated** documents publish their worksheet grid as one JSON string (`documentData`, capped at 100,000 characters). The public viewer rebuilds the PDF locally with the same `src/pdf-writer.js` used by the export, so nothing has to be hosted.
+
+Saving a workbook persists its exported documents to a `documents` subcollection under the saved report, which is what the dashboard lists. Reports saved before this existed simply show no document list and remain shareable as a whole.
 
 ### Print Support
 

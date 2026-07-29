@@ -140,6 +140,72 @@ describe("view-report module", () => {
     });
   });
 
+  describe("resolveDocumentUrl", () => {
+    const sections = [{ heading: "DS1  (2)", columns: ["A", "B"], rows: [["Sieve", "19.7"]] }];
+
+    beforeEach(async () => {
+      await import("./pdf-writer.js");
+      vi.stubGlobal(
+        "URL",
+        Object.assign(globalThis.URL, { createObjectURL: vi.fn(() => "blob:rebuilt") }),
+      );
+    });
+
+    it("rebuilds a generated document into a real PDF blob", async () => {
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = resolveDocumentUrl(
+        share({ reportName: "DS1 Datasheet", documentData: JSON.stringify(sections) }),
+      );
+
+      expect(url).toBe("blob:rebuilt");
+      const [blob] = URL.createObjectURL.mock.calls[0];
+      expect(blob.type).toBe("application/pdf");
+      // The blob really is a PDF built from the published worksheet data.
+      const text = await blob.text();
+      expect(text.startsWith("%PDF-")).toBe(true);
+      expect(text).toContain("(Sieve)");
+    });
+
+    it("serves the fixed-format report from its asset when no data travels", async () => {
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      expect(resolveDocumentUrl(share())).toBe("SampleDocuments/SampleOutput.pdf");
+      expect(resolveDocumentUrl(share({ documentData: "" }))).toBe(
+        "SampleDocuments/SampleOutput.pdf",
+      );
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the asset when the published data is unusable", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      expect(resolveDocumentUrl(share({ documentData: "{not json" }))).toBe(
+        "SampleDocuments/SampleOutput.pdf",
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Could not rebuild the shared document",
+        expect.any(Error),
+        expect.objectContaining({ feature: "PublicShare" }),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("tolerates published data that is not a list of sections", async () => {
+      const { resolveDocumentUrl } = await import("./view-report.js");
+      expect(resolveDocumentUrl(share({ documentData: '{"rows":[]}' }))).toBe("blob:rebuilt");
+    });
+
+    it("titles a rebuilt document generically when the share has no name", async () => {
+      const { resolveDocumentUrl } = await import("./view-report.js");
+      resolveDocumentUrl(share({ reportName: "", documentData: JSON.stringify(sections) }));
+
+      const [blob] = URL.createObjectURL.mock.calls[0];
+      expect(await blob.text()).toContain("(RAK Concrete Test Report)");
+    });
+  });
+
   describe("formatShareStatus", () => {
     it("maps known statuses to recipient-facing labels", async () => {
       const { formatShareStatus } = await import("./view-report.js");
@@ -170,6 +236,70 @@ describe("view-report module", () => {
   });
 
   describe("initViewer", () => {
+    it("renders the explanatory hint for a status that carries one", async () => {
+      mockFetchSharedReport.mockResolvedValueOnce(share({ status: "processing" }));
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+
+      const status = document.querySelector("#share-report-status");
+      expect(status.textContent).toContain("Processing");
+      // Hinted statuses show guidance and omit the completion check mark.
+      expect(status.querySelector(".share-status-hint").textContent).toBe(
+        "The PDF is still being generated. Check back shortly.",
+      );
+      expect(status.querySelector(".share-status-check")).toBeNull();
+    });
+
+    it("hides the size and page details when the PDF fetch fails", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+      mockFetchSharedReport.mockResolvedValueOnce(share());
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+
+      expect(document.querySelector("#share-size-row").hidden).toBe(true);
+      expect(document.querySelector("#share-pages-row").hidden).toBe(true);
+    });
+
+    it("hides both details for an empty PDF body", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        }),
+      );
+      mockFetchSharedReport.mockResolvedValueOnce(share());
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+
+      expect(document.querySelector("#share-size-row").hidden).toBe(true);
+      expect(document.querySelector("#share-pages-row").hidden).toBe(true);
+    });
+
+    it("uses the singular page wording for a one-page PDF", async () => {
+      const onePage = new TextEncoder().encode("%PDF-1.4 /Type /Page ");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(onePage.buffer),
+        }),
+      );
+      mockFetchSharedReport.mockResolvedValueOnce(share());
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?share=${VALID_TOKEN}`);
+      await new Promise((resolve) => setTimeout(resolve));
+
+      expect(document.querySelector("#share-pages").textContent).toBe("1 page");
+      expect(document.querySelector("#share-preview-caption").textContent).toBe("Page 1 of 1");
+    });
+
     it("renders the shared report and links its PDF output", async () => {
       mockFetchSharedReport.mockResolvedValueOnce(share());
       const { initViewer } = await import("./view-report.js");
@@ -329,7 +459,7 @@ describe("view-report module", () => {
       expect(document.querySelector("#share-report").hidden).toBe(true);
       expect(document.querySelector("#share-status").hidden).toBe(true);
       expect(document.querySelector("#share-bundle-name").textContent).toBe("Customer pack");
-      expect(document.querySelector("#share-bundle-count").textContent).toBe("2 reports");
+      expect(document.querySelector("#share-bundle-count").textContent).toBe("2 documents");
 
       const items = document.querySelectorAll("#share-bundle-list li");
       expect(items).toHaveLength(2);
@@ -355,7 +485,7 @@ describe("view-report module", () => {
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
       expect(document.querySelector("#share-bundle-name").textContent).toBe("Shared reports");
-      expect(document.querySelector("#share-bundle-count").textContent).toBe("1 report");
+      expect(document.querySelector("#share-bundle-count").textContent).toBe("1 document");
       expect(document.querySelector("#share-bundle-published").textContent).toBe(
         "Date unavailable",
       );

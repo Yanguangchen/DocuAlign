@@ -9,8 +9,11 @@ import {
   isValidShareToken,
   buildPublicUrl,
   buildBundleUrl,
+  MAX_DOCUMENT_DATA_LENGTH,
   toPublicReportPayload,
+  toPublicDocumentPayload,
   publishReport,
+  publishDocument,
   publishBundle,
   fetchSharedReport,
   fetchSharedBundle,
@@ -203,6 +206,83 @@ describe("buildBundleUrl", () => {
   });
 });
 
+describe("toPublicDocumentPayload", () => {
+  const report = { id: "doc-1", reportName: "rak-report", status: "complete" };
+
+  it("returns the plain report snapshot when no document is given", () => {
+    expect(toPublicDocumentPayload(report, null)).toEqual(toPublicReportPayload(report));
+  });
+
+  it("publishes a generated document's data under its own title", () => {
+    const data = JSON.stringify([{ heading: "DS1", columns: ["A"], rows: [["1"]] }]);
+    const payload = toPublicDocumentPayload(report, {
+      slug: "X-1-DS1",
+      title: "DS1 Datasheet X-1",
+      data,
+    });
+
+    expect(payload.reportName).toBe("DS1 Datasheet X-1");
+    expect(payload.documentSlug).toBe("X-1-DS1");
+    expect(payload.documentData).toBe(data);
+    // The report id still ties the document back to its saved report.
+    expect(payload.reportId).toBe("doc-1");
+  });
+
+  it("keeps an asset-backed document pointing at its fixed PDF", () => {
+    const payload = toPublicDocumentPayload(report, {
+      slug: "X-1",
+      title: "Test Report X-1",
+      assetPath: "./SampleDocuments/SampleOutput.pdf",
+      data: null,
+    });
+
+    // The fixed-format test report is served as-is and publishes no data.
+    expect(payload.documentData).toBeNull();
+    expect(payload.pdfUrl).toBe(PUBLIC_PDF_PATH);
+  });
+
+  it("refuses to publish a document larger than the share ceiling", () => {
+    expect(() =>
+      toPublicDocumentPayload(report, {
+        slug: "big",
+        title: "Big",
+        data: "x".repeat(MAX_DOCUMENT_DATA_LENGTH + 1),
+      }),
+    ).toThrow(TypeError);
+  });
+
+  it("defaults a document with no data to null", () => {
+    const payload = toPublicDocumentPayload(report, { slug: "s", title: "T" });
+    expect(payload.documentData).toBeNull();
+  });
+
+  it("falls back to the report's own name and a null slug", () => {
+    const payload = toPublicDocumentPayload(report, { data: "[]" });
+    expect(payload.reportName).toBe("rak-report");
+    expect(payload.documentSlug).toBeNull();
+  });
+});
+
+describe("publishDocument", () => {
+  it("writes the document snapshot under a fresh token", async () => {
+    firestore.setDoc.mockResolvedValue(undefined);
+    const token = await publishDocument({}, { id: "doc-1", reportName: "r" }, {
+      slug: "X-1-SB1",
+      title: "SB1 Datasheet X-1",
+      data: "[]",
+    });
+
+    expect(isValidShareToken(token)).toBe(true);
+    const [, payload] = firestore.setDoc.mock.calls[0];
+    expect(payload).toMatchObject({ documentSlug: "X-1-SB1", documentData: "[]" });
+  });
+
+  it("rejects a report that was never saved to the cloud", async () => {
+    await expect(publishDocument({}, {}, null)).rejects.toThrow(TypeError);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  });
+});
+
 describe("publishBundle", () => {
   const savedReports = [
     {
@@ -243,6 +323,29 @@ describe("publishBundle", () => {
     expect(bundlePayload.shareTokens).toEqual(shareWrites.map(([ref]) => ref.id));
     expect(bundlePayload.shareTokens.every(isValidShareToken)).toBe(true);
     expect(new Set(bundlePayload.shareTokens).size).toBe(2);
+  });
+
+  it("packages a mix of reports and their individual documents", async () => {
+    firestore.setDoc.mockResolvedValue(undefined);
+    const report = savedReports[0];
+
+    const token = await publishBundle({}, [
+      { report, document: null },
+      { report, document: { slug: "X-1-DS1", title: "DS1 Datasheet", data: "[]" } },
+      { report, document: { slug: "Summary", title: "Summary", data: "[]" } },
+    ]);
+
+    expect(isValidShareToken(token)).toBe(true);
+    const shareWrites = firestore.setDoc.mock.calls.filter(
+      ([ref]) => ref.name === PUBLIC_SHARES_COLLECTION,
+    );
+    expect(shareWrites.map(([, payload]) => payload.reportName)).toEqual([
+      "report-a",
+      "DS1 Datasheet",
+      "Summary",
+    ]);
+    // Every document in the package is individually revocable.
+    expect(new Set(shareWrites.map(([ref]) => ref.id)).size).toBe(3);
   });
 
   it("defaults the bundle name to null when omitted", async () => {

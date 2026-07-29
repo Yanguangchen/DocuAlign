@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearRecentEvents,
+  getActiveOperations,
   getRecentEvents,
   logDebug,
   logError,
@@ -29,6 +30,7 @@ describe("logger", () => {
 
   afterEach(() => {
     setMinimumLogLevel("info");
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -46,6 +48,7 @@ describe("logger", () => {
       operation: "unit",
     });
     expect(event.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(event.sequence).toBeTypeOf("number");
   });
 
   it("prevents caller context from overwriting core event identity", () => {
@@ -89,6 +92,13 @@ describe("logger", () => {
     });
   });
 
+  it("uses an unknown page when location is unavailable", () => {
+    vi.stubGlobal("location", undefined);
+    logInfo("Location-independent event");
+
+    expect(console.info.mock.calls[0][1].page).toBe("unknown");
+  });
+
   it("attaches error details and passes the raw error to the console", () => {
     const failure = Object.assign(new Error("boom"), { code: "permission-denied" });
     logError("Write failed", failure, { feature: "Test" });
@@ -100,6 +110,29 @@ describe("logger", () => {
       errorMessage: "boom",
       feature: "Test",
     });
+  });
+
+  it("supports warning errors without dropping their structured context", () => {
+    const warning = Object.assign(new Error("fallback used"), {
+      code: "render-fallback",
+    });
+
+    logWarn("Rendering degraded", warning, {
+      feature: "Viewer",
+      operation: "renderDocument",
+    });
+
+    expect(console.warn.mock.calls[0]).toEqual([
+      "[DocuAlign] Rendering degraded",
+      warning,
+      expect.objectContaining({
+        level: "warn",
+        feature: "Viewer",
+        operation: "renderDocument",
+        errorCode: "render-fallback",
+        errorMessage: "fallback used",
+      }),
+    ]);
   });
 
   it("describes non-Error thrown values without assuming Error shape", () => {
@@ -167,6 +200,69 @@ describe("logger", () => {
   describe("trackOperation", () => {
     const context = { feature: "Test", operation: "firestore.getDocs" };
 
+    it("exposes unfinished operations and removes them after completion", async () => {
+      let finish;
+      const pending = trackOperation(
+        "Load pending data",
+        context,
+        () => new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+
+      expect(getActiveOperations()).toEqual([
+        expect.objectContaining({
+          message: "Load pending data",
+          ...context,
+          activeForMs: expect.any(Number),
+          operationId: expect.stringContaining(sessionId),
+          startedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        }),
+      ]);
+
+      finish(42);
+      await expect(pending).resolves.toBe(42);
+      expect(getActiveOperations()).toEqual([]);
+    });
+
+    it("returns copies of active operations", async () => {
+      let finish;
+      const pending = trackOperation(
+        "Protected pending data",
+        context,
+        () => new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+
+      getActiveOperations()[0].message = "tampered";
+      expect(getActiveOperations()[0].message).toBe("Protected pending data");
+
+      finish();
+      await pending;
+    });
+
+    it("classifies active operations when callers omit optional context", async () => {
+      let finish;
+      const pending = trackOperation(
+        "Unclassified pending data",
+        {},
+        () => new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+
+      expect(getActiveOperations()[0]).toMatchObject({
+        feature: "Application",
+        function: "unknown",
+        operation: "unknown",
+        category: "OperationLifecycle",
+      });
+
+      finish();
+      await pending;
+    });
+
     it("returns the result and logs a success event with duration", async () => {
       const result = await trackOperation("Load data", context, async () => 42);
 
@@ -222,6 +318,19 @@ describe("logger", () => {
       expect(event.category).toBe("DatabaseReadFailure");
     });
 
+    it("classifies failures without a category or error code", async () => {
+      await expect(
+        trackOperation(
+          "Load unclassified data",
+          context,
+          () => Promise.reject(new Error("nope")),
+        ),
+      ).rejects.toThrow("nope");
+
+      const [, , event] = console.error.mock.calls[0];
+      expect(event.category).toBe("OperationFailure");
+    });
+
     it("records configured expected failures as warnings and still rethrows", async () => {
       const denial = Object.assign(new Error("denied"), {
         code: "permission-denied",
@@ -247,6 +356,30 @@ describe("logger", () => {
       });
       expect(event.durationMs).toBeTypeOf("number");
       expect(console.info.mock.calls[0][1].operationId).toBe(event.operationId);
+    });
+
+    it("warns when a successful operation exceeds its slow threshold", async () => {
+      const now = vi.spyOn(performance, "now");
+      now.mockReturnValueOnce(100).mockReturnValue(351);
+
+      await trackOperation(
+        "Load slow data",
+        context,
+        async () => 42,
+        { slowThresholdMs: 250 },
+      );
+
+      expect(console.warn).toHaveBeenCalledOnce();
+      expect(console.warn.mock.calls[0]).toEqual([
+        "[DocuAlign] Load slow data was slow",
+        expect.objectContaining({
+          ...context,
+          category: "SlowOperation",
+          durationMs: 251,
+          outcome: "success",
+          slowThresholdMs: 250,
+        }),
+      ]);
     });
   });
 });

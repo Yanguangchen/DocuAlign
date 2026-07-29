@@ -6,7 +6,7 @@
  */
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
-import { saveReport } from "./lib/reports.js";
+import { saveReport, saveReportDocuments } from "./lib/reports.js";
 import { trackOperation } from "./lib/logger.js";
 import { initObservability } from "./lib/observability.js";
 
@@ -53,7 +53,7 @@ cloudSave?.addEventListener("click", async () => {
   setFeedback("Saving report to the cloud…");
 
   try {
-    await trackOperation(
+    const reference = await trackOperation(
       "Save report to cloud",
       {
         feature: "CloudPersistence",
@@ -70,7 +70,29 @@ cloudSave?.addEventListener("click", async () => {
           createdBy: currentUser.email ?? null,
         }),
     );
-    setFeedback("Report saved. View it anytime on the dashboard.");
+
+    // Persist every exported document so each can be shared individually and
+    // grouped into packages from the dashboard.
+    const documents = globalThis.docuAlignWorkspace?.getExportDocuments() ?? [];
+    if (documents.length > 0) {
+      await trackOperation(
+        "Save report documents",
+        {
+          feature: "CloudPersistence",
+          function: "cloudSave.onClick",
+          operation: "firestore.setDoc",
+          collection: "docuAlignReports/documents",
+          safeIdentifier: reportNameFromSource(source),
+        },
+        () => saveReportDocuments(db, reference.id, documents),
+      );
+    }
+
+    setFeedback(
+      documents.length > 0
+        ? `Report saved with ${documents.length} documents. View it anytime on the dashboard.`
+        : "Report saved. View it anytime on the dashboard.",
+    );
   } catch {
     // Failure already logged by trackOperation; recover the UI.
     cloudSave.disabled = false;

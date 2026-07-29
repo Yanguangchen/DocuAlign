@@ -13,9 +13,16 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 
 export const SAVED_REPORTS_COLLECTION = "docuAlignReports";
+
+// Each saved report keeps its exported documents in a subcollection: the test
+// report plus every generated worksheet document. A subcollection avoids the
+// 1 MiB single-document ceiling, and the existing docuAlignReports/{document=**}
+// rule already scopes it to DocuAlign staff.
+export const REPORT_DOCUMENTS_COLLECTION = "documents";
 
 // Coerce the various shapes a createdAt value can arrive in (Firestore
 // Timestamp, Date, epoch millis, or ISO string) into a plain Date, or null.
@@ -66,6 +73,45 @@ export function saveReport(database, report) {
     ...report,
     createdAt: serverTimestamp(),
   });
+}
+
+// Persist the exported documents belonging to one saved report. Worksheet
+// grids are stored as a JSON string because Firestore cannot hold nested
+// arrays, and that same string is what a published share carries.
+export async function saveReportDocuments(database, reportId, documents) {
+  if (!reportId) {
+    throw new TypeError("A report id is required to save its documents.");
+  }
+
+  await Promise.all(
+    documents.map((entry, index) =>
+      setDoc(
+        doc(database, SAVED_REPORTS_COLLECTION, reportId, REPORT_DOCUMENTS_COLLECTION, entry.slug),
+        {
+          slug: entry.slug,
+          title: entry.title,
+          subtitle: entry.subtitle ?? "",
+          assetPath: entry.assetPath ?? null,
+          data: entry.data ?? null,
+          order: index,
+        },
+      ),
+    ),
+  );
+}
+
+// Load one report's exported documents in their original export order.
+export async function fetchReportDocuments(database, reportId) {
+  if (!reportId) {
+    throw new TypeError("A report id is required to load its documents.");
+  }
+  const snapshot = await getDocs(
+    query(
+      collection(database, SAVED_REPORTS_COLLECTION, reportId, REPORT_DOCUMENTS_COLLECTION),
+      orderBy("order", "asc"),
+    ),
+  );
+  return snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
 }
 
 // Permanently delete one saved form by its Firestore document id. The id is

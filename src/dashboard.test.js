@@ -14,6 +14,7 @@ vi.mock("./lib/firebase.js", () => ({
 }));
 
 const mockFetchReports = vi.fn();
+const mockFetchReportDocuments = vi.fn(() => Promise.resolve([]));
 const mockFilterReportsByDate = vi.fn((reports, range) => {
   if (!range.from && !range.to) return reports;
   return reports.filter((r) => r.matchFilter);
@@ -23,6 +24,7 @@ const mockDeleteReport = vi.fn();
 
 vi.mock("./lib/reports.js", () => ({
   fetchReports: (...args) => mockFetchReports(...args),
+  fetchReportDocuments: (...args) => mockFetchReportDocuments(...args),
   filterReportsByDate: (...args) => mockFilterReportsByDate(...args),
   deleteReport: (...args) => mockDeleteReport(...args),
 }));
@@ -146,6 +148,35 @@ describe("dashboard module", () => {
     await new Promise((r) => setTimeout(r, 15));
 
     expect(document.querySelector("#result-count").textContent).toBe("1 report");
+  });
+
+  it("retains failure details when one report's documents cannot be loaded", async () => {
+    const failure = Object.assign(new Error("documents unavailable"), {
+      code: "unavailable",
+    });
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockFetchReports.mockResolvedValueOnce([
+      { id: "report-with-failure", reportName: "Report", matchFilter: true },
+    ]);
+    mockFetchReportDocuments.mockRejectedValueOnce(failure);
+
+    const { loadReports } = await import("./dashboard.js");
+    await loadReports({ uid: "user-document-failure" });
+
+    expect(warningSpy).toHaveBeenCalledWith(
+      "[DocuAlign] Could not load report documents",
+      failure,
+      expect.objectContaining({
+        feature: "Dashboard",
+        function: "loadReports",
+        operation: "firestore.getDocs",
+        category: "ReportDocumentLoadFailure",
+        safeIdentifier: "report:report-with-failure",
+        errorCode: "unavailable",
+        errorMessage: "documents unavailable",
+      }),
+    );
+    warningSpy.mockRestore();
   });
 
   it("renders filtered out empty state when filter is active", async () => {
@@ -413,8 +444,11 @@ describe("dashboard module", () => {
       return dashboard;
     }
 
-    function toggle(reportId, checked = true) {
-      const box = document.querySelector(`.bundle-checkbox[data-report-id="${reportId}"]`);
+    function toggle(reportId, checked = true, slug) {
+      const selector = slug
+        ? `.bundle-checkbox[data-report-id="${reportId}"][data-document-slug="${slug}"]`
+        : `.bundle-checkbox[data-report-id="${reportId}"]:not([data-document-slug])`;
+      const box = document.querySelector(selector);
       box.checked = checked;
       box.dispatchEvent(new Event("change", { bubbles: true }));
       return box;
@@ -424,6 +458,64 @@ describe("dashboard module", () => {
       { id: "doc-1", reportName: "Report 1", matchFilter: true },
       { id: "doc-2", reportName: "Report 2", matchFilter: true },
     ];
+
+    it("packages individually selected documents alongside whole reports", async () => {
+      mockFetchReportDocuments.mockImplementation((db, reportId) =>
+        Promise.resolve(
+          reportId === "doc-1"
+            ? [
+                { slug: "X-1", title: "Test Report X-1", assetPath: "./a.pdf", data: null },
+                { slug: "X-1-DS1", title: "DS1 Datasheet X-1", data: "[]" },
+                { slug: "Summary", title: "Summary", data: "[]" },
+              ]
+            : [],
+        ),
+      );
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+
+      // Every stored document is separately selectable.
+      expect(document.querySelectorAll('[data-document-slug]')).toHaveLength(3);
+
+      toggle("doc-1", true, "X-1-DS1");
+      toggle("doc-1", true, "Summary");
+      toggle("doc-2");
+      expect(document.querySelector("#bundle-count").textContent).toBe("3 documents selected");
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      // Documents come first for their report, then the whole-report entry.
+      expect(mockPublishBundle).toHaveBeenCalledWith(expect.anything(), [
+        {
+          report: expect.objectContaining({ id: "doc-1" }),
+          document: expect.objectContaining({ slug: "X-1-DS1" }),
+        },
+        {
+          report: expect.objectContaining({ id: "doc-1" }),
+          document: expect.objectContaining({ slug: "Summary" }),
+        },
+        { report: expect.objectContaining({ id: "doc-2" }), document: null },
+      ]);
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
+    it("keeps working for reports saved before documents were persisted", async () => {
+      mockFetchReportDocuments.mockRejectedValueOnce(new Error("no subcollection"));
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await renderReports([twoReports[0]]);
+
+      // The report still renders and remains shareable as a whole, and says
+      // why no individual documents are offered.
+      expect(document.querySelectorAll(".report-card")).toHaveLength(1);
+      expect(document.querySelector(".report-documents")).toBeNull();
+      expect(document.querySelector(".report-documents-empty").textContent).toContain(
+        "Re-upload this workbook",
+      );
+      toggle("doc-1");
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 document selected");
+      consoleSpy.mockRestore();
+    });
 
     it("renders a group checkbox only on saved report cards", async () => {
       const { reportCard } = await import("./dashboard.js");
@@ -438,10 +530,10 @@ describe("dashboard module", () => {
 
       toggle("doc-1");
       expect(bar.hidden).toBe(false);
-      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 document selected");
 
       toggle("doc-2");
-      expect(document.querySelector("#bundle-count").textContent).toBe("2 reports selected");
+      expect(document.querySelector("#bundle-count").textContent).toBe("2 documents selected");
 
       toggle("doc-1", false);
       toggle("doc-2", false);
@@ -458,9 +550,11 @@ describe("dashboard module", () => {
       button.click();
       await new Promise((r) => setTimeout(r, 15));
 
+      // A package entry pairs the saved report with the specific document to
+      // publish; a null document means the report itself.
       expect(mockPublishBundle).toHaveBeenCalledWith(expect.anything(), [
-        expect.objectContaining({ id: "doc-1" }),
-        expect.objectContaining({ id: "doc-2" }),
+        { report: expect.objectContaining({ id: "doc-1" }), document: null },
+        { report: expect.objectContaining({ id: "doc-2" }), document: null },
       ]);
       expect(mockBuildBundleUrl).toHaveBeenCalledWith(BUNDLE_TOKEN);
 
@@ -543,7 +637,7 @@ describe("dashboard module", () => {
 
       toggle("doc-2");
       expect(button.disabled).toBe(false);
-      expect(button.textContent).toBe("Create group link");
+      expect(button.textContent).toBe("Create package link");
       expect(document.querySelector("#bundle-link").hidden).toBe(true);
     });
 
@@ -576,7 +670,7 @@ describe("dashboard module", () => {
       ]);
       toggle("doc-1");
       toggle("doc-2");
-      expect(document.querySelector("#bundle-count").textContent).toBe("2 reports selected");
+      expect(document.querySelector("#bundle-count").textContent).toBe("2 documents selected");
 
       document.querySelector("#filter-from").value = "2026-06-01";
       render();
@@ -585,7 +679,7 @@ describe("dashboard module", () => {
       expect(
         document.querySelector('.bundle-checkbox[data-report-id="doc-1"]').checked,
       ).toBe(true);
-      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 document selected");
     });
 
     it("ignores group clicks when nothing is selected", async () => {
@@ -685,7 +779,7 @@ describe("dashboard module", () => {
       const box = document.querySelector('.bundle-checkbox[data-report-id="doc-1"]');
       box.checked = true;
       box.dispatchEvent(new Event("change", { bubbles: true }));
-      expect(document.querySelector("#bundle-count").textContent).toBe("1 report selected");
+      expect(document.querySelector("#bundle-count").textContent).toBe("1 document selected");
 
       const button = document.querySelector('.delete-button[data-report-id="doc-1"]');
       await handleDeleteClick(button); // arm

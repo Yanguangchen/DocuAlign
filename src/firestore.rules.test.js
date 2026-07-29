@@ -210,6 +210,43 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       );
     });
 
+    it("allows publishing a generated document's serialised worksheet data", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertSucceeds(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({
+            documentSlug: "X-2026-522-2-DS1",
+            documentData: JSON.stringify([
+              { heading: "DS1  (2)", columns: ["A", "B"], rows: [["Sieve", "19.7"]] },
+            ]),
+          }),
+        ),
+      );
+    });
+
+    it("denies document data beyond the published size ceiling", async () => {
+      const context = testEnvironment.authenticatedContext("staff", {
+        email: "ken@rakmat.com.sg",
+        email_verified: true,
+      });
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({ documentData: "x".repeat(100001) }),
+        ),
+      );
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), SHARES, TOKEN),
+          sharePayload({ documentData: { rows: [] } }),
+        ),
+      );
+    });
+
     it("denies publishing extra fields such as staff emails", async () => {
       const context = testEnvironment.authenticatedContext("staff", {
         email: "ken@rakmat.com.sg",

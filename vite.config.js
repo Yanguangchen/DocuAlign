@@ -10,9 +10,14 @@ import react from "@vitejs/plugin-react";
 
 const classicScripts = [
   "early-observability.js",
+<<<<<<< HEAD
   "workbook-pdf.js",
   "report-mapping.js",
   "rak-report-pdf.js",
+=======
+  "xlsx-reader.js",
+  "pdf-writer.js",
+>>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
   "workspace.js",
 ];
 

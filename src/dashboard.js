@@ -6,7 +6,12 @@
  */
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
-import { deleteReport, fetchReports, filterReportsByDate } from "./lib/reports.js";
+import {
+  deleteReport,
+  fetchReportDocuments,
+  fetchReports,
+  filterReportsByDate,
+} from "./lib/reports.js";
 import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
 import { logWarn, trackOperation } from "./lib/logger.js";
 import { initObservability } from "./lib/observability.js";
@@ -26,8 +31,48 @@ const bundleLink = document.querySelector("#bundle-link");
 
 let allReports = [];
 let loadedForUser = null;
-// Report ids ticked for grouping into one link; survives re-renders.
+// Documents ticked for grouping into one package, keyed `reportId::slug`; a
+// bare reportId means the report itself. Survives re-renders.
 const bundleSelection = new Set();
+// Exported documents per report id, loaded alongside the reports.
+const reportDocuments = new Map();
+
+/**
+ * Build the stable selection key for one selectable document.
+ * @param {string} reportId - Saved report id.
+ * @param {string} [slug] - Document slug; omitted for the report itself.
+ * @returns {string} Selection key.
+ */
+export function selectionKey(reportId, slug) {
+  return slug ? `${reportId}::${slug}` : reportId;
+}
+
+/**
+ * Resolve the current selection into publishable `{ report, document }` pairs.
+ * @returns {Array<{report: Object, document: Object|null}>} Selected entries.
+ */
+/**
+ * Look up a report's stored documents, tolerating reports rendered before the
+ * document load has completed.
+ * @param {string} reportId - Saved report id.
+ * @returns {Array<Object>} Stored documents, possibly empty.
+ */
+function documentsFor(reportId) {
+  return reportDocuments.get(reportId) ?? [];
+}
+
+export function selectedEntries() {
+  const entries = [];
+  allReports.forEach((report) => {
+    documentsFor(report.id).forEach((entry) => {
+      if (bundleSelection.has(selectionKey(report.id, entry.slug))) {
+        entries.push({ report, document: entry });
+      }
+    });
+    if (bundleSelection.has(report.id)) entries.push({ report, document: null });
+  });
+  return entries;
+}
 
 async function copyToClipboard(url, caller) {
   if (!navigator.clipboard?.writeText) return;
@@ -73,6 +118,52 @@ export function setStatus(message) {
   }
 }
 
+/**
+ * Render the per-document picker for a saved report, so any individual
+ * document can be ticked into a package independently of the others.
+ * @param {Object} report - A saved report.
+ * @returns {string} Picker markup, or an empty string when nothing is stored.
+ */
+export function documentPicker(report) {
+  const documents = documentsFor(report.id);
+  // Reports saved before documents were persisted have nothing to list. Say so
+  // rather than silently offering only the whole-report tick-box, which would
+  // quietly produce a package containing just the test report.
+  if (documents.length === 0) {
+    return `
+      <p class="report-documents-empty">
+        No individual documents stored. Re-upload this workbook, export it, and
+        save again to package its summary, DS1 and SB1 documents.
+      </p>
+    `;
+  }
+
+  const items = documents
+    .map(
+      (entry) => `
+        <li>
+          <label class="bundle-select">
+            <input
+              type="checkbox"
+              class="bundle-checkbox"
+              data-report-id="${escapeHtml(report.id)}"
+              data-document-slug="${escapeHtml(entry.slug)}"
+            />
+            ${escapeHtml(entry.title)}
+          </label>
+        </li>
+      `,
+    )
+    .join("");
+
+  return `
+    <details class="report-documents">
+      <summary>${documents.length} documents</summary>
+      <ul class="document-list">${items}</ul>
+    </details>
+  `;
+}
+
 export function reportCard(report) {
   const title = report.reportName || report.sourceFileName || "Untitled report";
   const created = report.createdAt
@@ -99,8 +190,9 @@ export function reportCard(report) {
             class="bundle-checkbox"
             data-report-id="${escapeHtml(report.id)}"
           />
-          Add to group link
+          Add to package
         </label>
+        ${documentPicker(report)}
         <p class="share-link" aria-live="polite" hidden></p>
         <button
           class="delete-button"
@@ -136,9 +228,9 @@ export function reportCard(report) {
 export function updateBundleBar() {
   const count = bundleSelection.size;
   bundleBar.hidden = count === 0;
-  bundleCount.textContent = `${count} ${count === 1 ? "report" : "reports"} selected`;
+  bundleCount.textContent = `${count} ${count === 1 ? "document" : "documents"} selected`;
   bundleCreate.disabled = false;
-  bundleCreate.textContent = "Create group link";
+  bundleCreate.textContent = "Create package link";
   bundleLink.hidden = true;
 }
 
@@ -147,12 +239,14 @@ export function updateBundleBar() {
 // filtered out by the date range).
 function syncBundleSelection() {
   const boxes = [...grid.querySelectorAll(".bundle-checkbox")];
-  const visible = new Set(boxes.map((box) => box.dataset.reportId));
-  for (const id of bundleSelection) {
-    if (!visible.has(id)) bundleSelection.delete(id);
+  const visible = new Set(
+    boxes.map((box) => selectionKey(box.dataset.reportId, box.dataset.documentSlug)),
+  );
+  for (const key of bundleSelection) {
+    if (!visible.has(key)) bundleSelection.delete(key);
   }
   for (const box of boxes) {
-    box.checked = bundleSelection.has(box.dataset.reportId);
+    box.checked = bundleSelection.has(selectionKey(box.dataset.reportId, box.dataset.documentSlug));
   }
   updateBundleBar();
 }
@@ -161,8 +255,8 @@ function syncBundleSelection() {
 // ordinary public share, and the bundle document ties their tokens together
 // so the customer sees all grouped PDF exports on a single page.
 export async function handleBundleClick() {
-  const reports = allReports.filter((report) => bundleSelection.has(report.id));
-  if (reports.length === 0) return;
+  const entries = selectedEntries();
+  if (entries.length === 0) return;
 
   bundleCreate.disabled = true;
 
@@ -174,9 +268,9 @@ export async function handleBundleClick() {
         function: "handleBundleClick",
         operation: "firestore.setDoc",
         collection: "docuAlignPublicBundles",
-        safeIdentifier: `selection:${reports.length}`,
+        safeIdentifier: `selection:${entries.length}`,
       },
-      () => publishBundle(db, reports),
+      () => publishBundle(db, entries),
     );
     const url = buildBundleUrl(token);
 
@@ -334,6 +428,37 @@ export async function loadReports(user) {
       },
       () => fetchReports(db),
     );
+
+    // Load each report's exported documents so any single one can be ticked
+    // into a package. A report saved before documents were persisted simply
+    // has none, and still shares as a whole.
+    const loaded = await trackOperation(
+      "Load report documents",
+      {
+        feature: "Dashboard",
+        function: "loadReports",
+        operation: "firestore.getDocs",
+        collection: "docuAlignReports/documents",
+        safeIdentifier: `report-count:${allReports.length}`,
+      },
+      () =>
+        Promise.all(
+          allReports.map((report) =>
+            fetchReportDocuments(db, report.id).catch((error) => {
+              logWarn("Could not load report documents", error, {
+                feature: "Dashboard",
+                function: "loadReports",
+                operation: "firestore.getDocs",
+                category: "ReportDocumentLoadFailure",
+                safeIdentifier: `report:${report.id}`,
+              });
+              return [];
+            }),
+          ),
+        ),
+    );
+    allReports.forEach((report, index) => reportDocuments.set(report.id, loaded[index]));
+
     render();
   } catch {
     // Failure already logged by trackOperation; recover the UI.
@@ -355,10 +480,11 @@ grid.addEventListener("click", (event) => {
 grid.addEventListener("change", (event) => {
   const box = event.target.closest(".bundle-checkbox");
   if (!box) return;
+  const key = selectionKey(box.dataset.reportId, box.dataset.documentSlug);
   if (box.checked) {
-    bundleSelection.add(box.dataset.reportId);
+    bundleSelection.add(key);
   } else {
-    bundleSelection.delete(box.dataset.reportId);
+    bundleSelection.delete(key);
   }
   updateBundleBar();
 });

@@ -15,8 +15,10 @@ vi.mock("./lib/firebase.js", () => ({
 }));
 
 const mockSaveReport = vi.fn();
+const mockSaveReportDocuments = vi.fn();
 vi.mock("./lib/reports.js", () => ({
   saveReport: (...args) => mockSaveReport(...args),
+  saveReportDocuments: (...args) => mockSaveReportDocuments(...args),
 }));
 
 describe("save-report module", () => {
@@ -155,5 +157,31 @@ describe("save-report module", () => {
     document.body.innerHTML = `<div>No elements</div>`;
     const { setFeedback } = await import("./save-report.js");
     expect(() => setFeedback("test")).not.toThrow();
+  });
+
+  it("persists every exported document alongside the saved report", async () => {
+    document.body.innerHTML = `
+      <button id="cloud-save"></button>
+      <span id="file-name">lab_data.xlsx</span>
+      <div id="feedback"></div>
+    `;
+    mockSaveReport.mockResolvedValueOnce({ id: "report-9" });
+    mockSaveReportDocuments.mockResolvedValueOnce(undefined);
+    const documents = [
+      { slug: "X-1", title: "Test Report X-1", assetPath: "./a.pdf", data: null },
+      { slug: "X-1-DS1", title: "DS1 Datasheet X-1", assetPath: null, data: "[]" },
+    ];
+    globalThis.docuAlignWorkspace = { getExportDocuments: () => documents };
+
+    await import("./save-report.js");
+    if (authStateCallback) authStateCallback({ email: "docu@example.com" });
+    document.querySelector("#cloud-save").click();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mockSaveReportDocuments).toHaveBeenCalledWith({}, "report-9", documents);
+    expect(document.querySelector("#feedback").textContent).toBe(
+      "Report saved with 2 documents. View it anytime on the dashboard."
+    );
+    delete globalThis.docuAlignWorkspace;
   });
 });

@@ -1,16 +1,27 @@
 import { describe, it, expect, vi } from "vitest";
-import { filterReportsByDate, toDate, saveReport, fetchReports, deleteReport, SAVED_REPORTS_COLLECTION } from "./reports.js";
+import {
+  filterReportsByDate,
+  toDate,
+  saveReport,
+  saveReportDocuments,
+  fetchReports,
+  fetchReportDocuments,
+  deleteReport,
+  SAVED_REPORTS_COLLECTION,
+  REPORT_DOCUMENTS_COLLECTION,
+} from "./reports.js";
 import * as firestore from "firebase/firestore";
 
 vi.mock("firebase/firestore", () => ({
   addDoc: vi.fn(),
-  collection: vi.fn((db, name) => ({ db, name })),
+  collection: vi.fn((db, ...path) => ({ db, name: path.join("/") })),
   deleteDoc: vi.fn(),
-  doc: vi.fn((db, name, id) => ({ db, name, id })),
+  doc: vi.fn((db, ...path) => ({ db, name: path.slice(0, -1).join("/"), id: path.at(-1) })),
   getDocs: vi.fn(),
   orderBy: vi.fn((field, dir) => ({ field, dir })),
   query: vi.fn((coll, order) => ({ coll, order })),
   serverTimestamp: vi.fn(() => "MOCK_TIMESTAMP"),
+  setDoc: vi.fn(),
 }));
 
 function report(id, createdAt) {
@@ -149,5 +160,61 @@ describe("fetchReports", () => {
     expect(reports).toHaveLength(2);
     expect(reports[0]).toEqual({ id: "1", title: "Rep 1", createdAt: new Date("2026-06-15T10:00:00") });
     expect(reports[1]).toEqual({ id: "2", title: "Rep 2", createdAt: null });
+  });
+});
+
+describe("saveReportDocuments", () => {
+  it("writes each exported document under its slug, preserving export order", async () => {
+    const dummyDb = {};
+    firestore.setDoc.mockResolvedValue(undefined);
+
+    await saveReportDocuments(dummyDb, "report-1", [
+      { slug: "X-1", title: "Test Report X-1", assetPath: "./a.pdf" },
+      { slug: "X-1-DS1", title: "DS1 Datasheet", subtitle: "DS1 (2)", data: "[]" },
+    ]);
+
+    expect(firestore.setDoc).toHaveBeenCalledTimes(2);
+    const [firstRef, firstPayload] = firestore.setDoc.mock.calls[0];
+    expect(firstRef).toEqual({
+      db: dummyDb,
+      name: `${SAVED_REPORTS_COLLECTION}/report-1/${REPORT_DOCUMENTS_COLLECTION}`,
+      id: "X-1",
+    });
+    expect(firstPayload).toEqual({
+      slug: "X-1",
+      title: "Test Report X-1",
+      subtitle: "",
+      assetPath: "./a.pdf",
+      data: null,
+      order: 0,
+    });
+
+    const [, secondPayload] = firestore.setDoc.mock.calls[1];
+    expect(secondPayload).toMatchObject({ slug: "X-1-DS1", data: "[]", assetPath: null, order: 1 });
+  });
+
+  it("requires a report id", async () => {
+    firestore.setDoc.mockClear();
+    await expect(saveReportDocuments({}, "", [])).rejects.toThrow(TypeError);
+    expect(firestore.setDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchReportDocuments", () => {
+  it("loads a report's documents in export order", async () => {
+    firestore.getDocs.mockResolvedValueOnce({
+      docs: [
+        { id: "X-1", data: () => ({ slug: "X-1", title: "Test Report", order: 0 }) },
+        { id: "Summary", data: () => ({ slug: "Summary", title: "Summary", order: 1 }) },
+      ],
+    });
+
+    const documents = await fetchReportDocuments({}, "report-1");
+    expect(firestore.orderBy).toHaveBeenCalledWith("order", "asc");
+    expect(documents.map((entry) => entry.slug)).toEqual(["X-1", "Summary"]);
+  });
+
+  it("requires a report id", async () => {
+    await expect(fetchReportDocuments({}, "")).rejects.toThrow(TypeError);
   });
 });

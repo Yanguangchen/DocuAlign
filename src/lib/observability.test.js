@@ -4,7 +4,12 @@
  * handlers, idempotent installation, and the support diagnostics handle.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearRecentEvents, getRecentEvents, sessionId } from "./logger.js";
+import {
+  clearRecentEvents,
+  getRecentEvents,
+  sessionId,
+  trackOperation,
+} from "./logger.js";
 import { initObservability, replayEarlyEvents } from "./observability.js";
 
 describe("initObservability", () => {
@@ -147,6 +152,7 @@ describe("initObservability", () => {
 
   it("exposes the diagnostics handle for support", () => {
     expect(globalThis.docuAlignDiagnostics.sessionId).toBe(sessionId);
+    expect(globalThis.docuAlignDiagnostics.getActiveOperations).toBeTypeOf("function");
     expect(globalThis.docuAlignDiagnostics.getRecentEvents).toBeTypeOf("function");
     expect(globalThis.docuAlignDiagnostics.getSnapshot).toBeTypeOf("function");
 
@@ -156,11 +162,20 @@ describe("initObservability", () => {
       page: globalThis.location.pathname,
       online: navigator.onLine,
       visibilityState: document.visibilityState,
+      pageUptimeMs: expect.any(Number),
+      activeOperations: [],
+      eventCounts: {
+        debug: 0,
+        info: 0,
+        warn: 0,
+        error: 0,
+      },
       events: [],
     });
     expect(snapshot.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+<<<<<<< HEAD
   it("exposes a frozen structured-logger bridge to classic workspace scripts", async () => {
     const bridge = globalThis.docuAlignLogger;
 
@@ -202,5 +217,39 @@ describe("initObservability", () => {
         outcome: "success",
       }),
     ]);
+=======
+  it("summarises event levels and unfinished work in support snapshots", async () => {
+    let finish;
+    const pending = trackOperation(
+      "Pending snapshot operation",
+      {
+        feature: "ObservabilityTest",
+        function: "snapshot",
+        operation: "test.pending",
+      },
+      () => new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    globalThis.dispatchEvent(new Event("offline"));
+
+    const snapshot = globalThis.docuAlignDiagnostics.getSnapshot();
+    expect(snapshot.eventCounts).toEqual({
+      debug: 0,
+      info: 1,
+      warn: 1,
+      error: 0,
+    });
+    expect(snapshot.activeOperations).toEqual([
+      expect.objectContaining({
+        message: "Pending snapshot operation",
+        feature: "ObservabilityTest",
+        activeForMs: expect.any(Number),
+      }),
+    ]);
+
+    finish();
+    await pending;
+>>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
   });
 });
