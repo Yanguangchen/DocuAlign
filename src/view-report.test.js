@@ -34,6 +34,7 @@ describe("view-report module", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    delete globalThis.docuAlignSummaryPdf;
     // The viewer fetches the PDF to derive file size and page count; answer
     // with a fake 3-page document so tests stay deterministic and offline.
     const fakePdf = new TextEncoder().encode(
@@ -165,6 +166,73 @@ describe("view-report module", () => {
       const text = await blob.text();
       expect(text.startsWith("%PDF-")).toBe(true);
       expect(text).toContain("(Sieve)");
+    });
+
+    it("rebuilds a Summary share with the fixed-format renderer", async () => {
+      const createDocument = vi.fn(async (cells) => {
+        expect(cells).toEqual(new Map([["U10", "X-2026-522"]]));
+        return new Uint8Array([37, 80, 68, 70]);
+      });
+      globalThis.docuAlignSummaryPdf = { createDocument };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = await resolveDocumentUrl(
+        share({
+          reportName: "Summary",
+          documentData: JSON.stringify({
+            renderer: "summary",
+            cells: [["U10", "X-2026-522"]],
+          }),
+        }),
+      );
+
+      expect(url).toBe("blob:rebuilt");
+      expect(createDocument).toHaveBeenCalledOnce();
+      const [blob] = URL.createObjectURL.mock.calls[0];
+      expect(blob.type).toBe("application/pdf");
+    });
+
+    it("upgrades a legacy Summary document when it is opened from a package", async () => {
+      const recoveredCells = new Map([["U10", "X-2026-522"]]);
+      const cellsFromDocumentData = vi.fn(() => recoveredCells);
+      const createDocument = vi.fn(async () => new Uint8Array([37, 80, 68, 70]));
+      globalThis.docuAlignSummaryPdf = { cellsFromDocumentData, createDocument };
+      const legacyData = [{ heading: "Summary", columns: ["A"], rows: [["Summary"]] }];
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = await resolveDocumentUrl(
+        share({
+          reportName: "Summary",
+          documentSlug: "Summary",
+          documentData: JSON.stringify(legacyData),
+        }),
+      );
+
+      expect(url).toBe("blob:rebuilt");
+      expect(cellsFromDocumentData).toHaveBeenCalledWith(legacyData);
+      expect(createDocument).toHaveBeenCalledWith(recoveredCells);
+    });
+
+    it("falls back when fixed-format Summary rendering fails asynchronously", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      globalThis.docuAlignSummaryPdf = {
+        createDocument: vi.fn().mockRejectedValue(new Error("Template unavailable")),
+      };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = await resolveDocumentUrl(
+        share({
+          documentData: JSON.stringify({ renderer: "summary", cells: [] }),
+        }),
+      );
+
+      expect(url).toBe("SampleDocuments/SampleOutput.pdf");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Could not rebuild the shared document",
+        expect.any(Error),
+        expect.objectContaining({ category: "Rendering" }),
+      );
+      warnSpy.mockRestore();
     });
 
     it("serves the fixed-format report from its asset when no data travels", async () => {
@@ -470,6 +538,34 @@ describe("view-report module", () => {
       // The unsafe javascript: URL must fall back to the bundled PDF.
       expect(links[1].getAttribute("href")).toBe("SampleDocuments/SampleOutput.pdf");
       expect(links[1].getAttribute("rel")).toBe("noopener");
+    });
+
+    it("renders a packaged legacy Summary with the fixed-format PDF renderer", async () => {
+      globalThis.docuAlignSummaryPdf = {
+        cellsFromDocumentData: vi.fn(() => new Map([["U10", "X-2026-522"]])),
+        createDocument: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
+      };
+      mockFetchSharedBundle.mockResolvedValueOnce(
+        bundle({
+          reports: [{
+            reportId: "doc-1",
+            reportName: "Summary",
+            documentSlug: "Summary",
+            status: "saved",
+            pdfUrl: null,
+            documentData: JSON.stringify([
+              { heading: "Summary", columns: ["A"], rows: [["Summary"]] },
+            ]),
+          }],
+        }),
+      );
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      const link = document.querySelector("#share-bundle-list a");
+      expect(link.getAttribute("href")).toBe("blob:rebuilt");
+      expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
     });
 
     it("renders bundle fallbacks for missing name, date, and single report", async () => {

@@ -10,16 +10,13 @@ import react from "@vitejs/plugin-react";
 
 const classicScripts = [
   "early-observability.js",
-<<<<<<< HEAD
-  "workbook-pdf.js",
-  "report-mapping.js",
-  "rak-report-pdf.js",
-=======
   "xlsx-reader.js",
   "pdf-writer.js",
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
+  "summary-pdf.js",
   "workspace.js",
 ];
+
+const classicVendorAssets = ["pdf-lib.min.js", "sample-summary-template.js"];
 
 function emitClassicScripts() {
   return {
@@ -31,6 +28,13 @@ function emitClassicScripts() {
           type: "asset",
           fileName: `src/${fileName}`,
           source: await readFile(resolve(import.meta.dirname, "src", fileName)),
+        });
+      }
+      for (const fileName of classicVendorAssets) {
+        this.emitFile({
+          type: "asset",
+          fileName: `vendor/${fileName}`,
+          source: await readFile(resolve(import.meta.dirname, "vendor", fileName)),
         });
       }
     },
@@ -51,6 +55,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "happy-dom",
+    // PDF template copies are intentionally byte-for-byte and can exceed the
+    // default timeout when V8 coverage instrumentation is enabled.
+    testTimeout: 10000,
     coverage: {
       provider: "v8",
       all: true,

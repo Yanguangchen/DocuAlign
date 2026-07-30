@@ -175,7 +175,6 @@ describe("initObservability", () => {
     expect(snapshot.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-<<<<<<< HEAD
   it("exposes a frozen structured-logger bridge to classic workspace scripts", async () => {
     const bridge = globalThis.docuAlignLogger;
 
@@ -217,7 +216,8 @@ describe("initObservability", () => {
         outcome: "success",
       }),
     ]);
-=======
+  });
+
   it("summarises event levels and unfinished work in support snapshots", async () => {
     let finish;
     const pending = trackOperation(
@@ -250,6 +250,5 @@ describe("initObservability", () => {
 
     finish();
     await pending;
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
   });
 });

@@ -26,34 +26,31 @@ describe("classic runtime assets", () => {
     }
   });
 
-  it("loads workbook processing before the workspace controller and Firebase modules", () => {
-    const html = readProjectFile("index.html");
-    const pdfLib = html.indexOf('<script vite-ignore src="./vendor/pdf-lib.min.js"></script>');
-    const workbookPdf = html.indexOf('<script vite-ignore src="./src/workbook-pdf.js"></script>');
-    const reportMapping = html.indexOf(
-      '<script vite-ignore src="./src/report-mapping.js"></script>',
-    );
-    const reportPdf = html.indexOf(
-      '<script vite-ignore src="./src/rak-report-pdf.js"></script>',
-    );
-    const workspace = html.indexOf('<script vite-ignore src="./src/workspace.js"></script>');
-    const firstModule = html.indexOf('<script type="module"');
+  it("loads fixed-format PDF dependencies before each consuming controller", () => {
+    for (const page of ["index.html", "view.html"]) {
+      const html = readProjectFile(page);
+      const pdfLib = html.indexOf('<script vite-ignore src="./vendor/pdf-lib.min.js"></script>');
+      const template = html.indexOf(
+        '<script vite-ignore src="./vendor/sample-summary-template.js"></script>',
+      );
+      const summaryPdf = html.indexOf('<script vite-ignore src="./src/summary-pdf.js"></script>');
+      const consumer = page === "index.html"
+        ? html.indexOf('<script vite-ignore src="./src/workspace.js"></script>')
+        : html.indexOf('<script type="module" src="./src/view-report.js"></script>');
 
-    expect(pdfLib).toBeGreaterThan(-1);
-    expect(workbookPdf).toBeGreaterThan(pdfLib);
-    expect(reportMapping).toBeGreaterThan(workbookPdf);
-    expect(reportPdf).toBeGreaterThan(reportMapping);
-    expect(workspace).toBeGreaterThan(-1);
-    expect(reportPdf).toBeLessThan(workspace);
-    expect(workspace).toBeLessThan(firstModule);
+      expect(pdfLib, `${page} must load pdf-lib`).toBeGreaterThan(-1);
+      expect(template, `${page} must load the Summary template`).toBeGreaterThan(pdfLib);
+      expect(summaryPdf, `${page} must load the Summary renderer`).toBeGreaterThan(template);
+      expect(consumer, `${page} must load its consumer`).toBeGreaterThan(summaryPdf);
+    }
   });
 
-  it("keeps direct-file controllers free of module-only syntax", () => {
+  it("keeps direct-file scripts free of module-only syntax", () => {
     for (const file of [
       "src/early-observability.js",
-      "src/workbook-pdf.js",
-      "src/report-mapping.js",
-      "src/rak-report-pdf.js",
+      "src/xlsx-reader.js",
+      "src/pdf-writer.js",
+      "src/summary-pdf.js",
       "src/workspace.js",
     ]) {
       const source = readProjectFile(file);

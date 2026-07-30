@@ -48,57 +48,13 @@ function workbook(name = "lab-data.xlsx", size) {
   return file;
 }
 
-function parsedWorkbook(sourceName = "lab-data.xlsx") {
-  return {
-    sourceName,
-    sheets: [
-      { name: "Cover", hidden: false, rows: [["Client", "Acme"]] },
-      { name: "Results", hidden: false, rows: [["Moisture", "12.4"]] },
-    ],
-  };
-}
-
-function workbookApi(overrides = {}) {
-  return {
-    parseWorkbook: vi.fn(async (file) => parsedWorkbook(file.name)),
-    ...overrides,
-  };
-}
-
-function mappedReports(sourceName = "lab-data.xlsx") {
-  return [
-    { groupIndex: 1, jobRef: "JOB-1", sourceName, pageCount: 5 },
-    { groupIndex: 2, jobRef: "JOB-2", sourceName, pageCount: 5 },
-  ];
-}
-
-function mappingApi(overrides = {}) {
-  return {
-    buildMappedReports: vi.fn((parsed) => mappedReports(parsed.sourceName)),
-    ...overrides,
-  };
-}
-
-function rendererApi(overrides = {}) {
-  return {
-    createRakReportPdf: vi.fn(async () =>
-      new Blob(["%PDF-generated"], { type: "application/pdf" })),
-    ...overrides,
-  };
-}
-
-function loggerApi() {
-  return {
-    logError: vi.fn(),
-    logInfo: vi.fn(),
-    logWarn: vi.fn(),
-    trackOperation: vi.fn((_message, _context, operation) => operation()),
-  };
-}
-
 async function loadWorkspace() {
   await import("./xlsx-reader.js");
   await import("./pdf-writer.js");
+  await import("./summary-pdf.js");
+  globalThis.docuAlignSummaryPdf = {
+    createDocument: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
+  };
   await import("./workspace.js");
   return globalThis.docuAlignWorkspace;
 }
@@ -116,21 +72,14 @@ describe("workspace controller", () => {
   beforeEach(() => {
     vi.resetModules();
     delete globalThis.docuAlignWorkspace;
-<<<<<<< HEAD
-    globalThis.docuAlignWorkbookPdf = workbookApi();
-    globalThis.docuAlignReportMapping = mappingApi();
-    globalThis.docuAlignRakReportPdf = rendererApi();
-    globalThis.docuAlignLogger = loggerApi();
-    globalThis.URL.createObjectURL = vi.fn(() => "blob:https://docualign.test/generated");
-    globalThis.URL.revokeObjectURL = vi.fn();
-=======
     delete globalThis.docuAlignXlsx;
     delete globalThis.docuAlignPdf;
+    delete globalThis.docuAlignSummaryPdf;
+    delete globalThis.docuAlignLogger;
     vi.stubGlobal("URL", Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => "blob:generated"),
       revokeObjectURL: vi.fn(),
     }));
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     renderWorkspace();
@@ -138,16 +87,11 @@ describe("workspace controller", () => {
 
   afterEach(() => {
     delete globalThis.docuAlignWorkspace;
-<<<<<<< HEAD
-    delete globalThis.docuAlignWorkbookPdf;
-    delete globalThis.docuAlignReportMapping;
-    delete globalThis.docuAlignRakReportPdf;
-    delete globalThis.docuAlignLogger;
-=======
     delete globalThis.docuAlignXlsx;
     delete globalThis.docuAlignPdf;
+    delete globalThis.docuAlignSummaryPdf;
+    delete globalThis.docuAlignLogger;
     vi.unstubAllGlobals();
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     vi.restoreAllMocks();
   });
 
@@ -174,83 +118,22 @@ describe("workspace controller", () => {
     expect(document.querySelector("#pdf-export").disabled).toBe(true);
   });
 
-<<<<<<< HEAD
-  it("maps every report group and runs the visible ETL pipeline through completion", async () => {
-=======
   it("parses the real workbook and reports every detected test report", async () => {
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     const { selectFile } = await loadWorkspace();
-    const file = workbook();
 
-<<<<<<< HEAD
-    const processing = selectFile(file);
-=======
     const pipeline = selectFile(workbook("lab-data.xlsx", 2048));
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     expect(document.querySelector("#file-name").textContent).toBe("lab-data.xlsx");
     expect(document.querySelector("#file-meta").textContent).toBe("2.0 KB / Processing started");
     expect(document.querySelector("#pipeline-state").textContent).toBe("Processing");
     await pipeline;
 
-<<<<<<< HEAD
-    await processing;
-
-    expect(globalThis.docuAlignWorkbookPdf.parseWorkbook).toHaveBeenCalledWith(file);
-    expect(globalThis.docuAlignReportMapping.buildMappedReports).toHaveBeenCalledWith(
-      parsedWorkbook(),
-=======
     // SampleInput.xlsx holds six CV1/TR1/DS1/SB1 groups across 26 worksheets.
     expect(document.querySelector("#pipeline-copy").textContent).toBe(
       "Parsed 6 test reports from 26 worksheets.",
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     );
     expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
-    expect(document.querySelector("#pipeline-copy").textContent).toContain("2 five-page reports");
-    expect(document.querySelector("#file-meta").textContent).toContain("2 reports mapped");
     expect(document.querySelector("#pipeline-step").classList).toContain("is-complete");
     expect(document.querySelector("#pdf-export").disabled).toBe(false);
-<<<<<<< HEAD
-    expect(globalThis.docuAlignLogger.trackOperation).toHaveBeenCalledWith(
-      "Process workbook locally",
-      expect.objectContaining({
-        feature: "WorkbookPipeline",
-        function: "startPipeline",
-        operation: "workbook.parseAndMap",
-        category: "LocalProcessing",
-        sourceExtension: "xlsx",
-        sourceSizeBytes: 2048,
-      }),
-      expect.any(Function),
-    );
-    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
-      "Workbook processing completed",
-      expect.objectContaining({
-        sheetCount: 2,
-        reportCount: 2,
-        outputPageCount: 10,
-      }),
-    );
-    const [, operationContext] = globalThis.docuAlignLogger.trackOperation.mock.calls[0];
-    expect(operationContext).not.toHaveProperty("sourceFileName");
-    expect(operationContext).not.toHaveProperty("clientName");
-  });
-
-  it("invalidates in-flight parsing and resets the workspace", async () => {
-    let finishParsing;
-    globalThis.docuAlignWorkbookPdf.parseWorkbook = vi.fn(
-      () => new Promise((resolve) => {
-        finishParsing = resolve;
-      }),
-    );
-    const { clearFile, selectFile } = await loadWorkspace();
-    const input = document.querySelector("#excel-file");
-
-    const processing = selectFile(workbook());
-    Object.defineProperty(input, "value", { value: "selected", writable: true });
-    clearFile();
-    finishParsing(parsedWorkbook());
-    await processing;
-=======
     expect(document.querySelector("#feedback").textContent).toBe(
       "ETL complete. Export produces 20 separate PDFs.",
     );
@@ -338,26 +221,12 @@ describe("workspace controller", () => {
     await selectFile(workbook());
     Object.defineProperty(input, "value", { value: "selected", writable: true });
     clearFile();
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
 
     expect(input.value).toBe("");
     expect(document.querySelector("#dropzone-prompt").hidden).toBe(false);
     expect(document.querySelector("#pipeline-state").textContent).toBe("Waiting");
     expect(document.querySelector("#cloud-save").disabled).toBe(true);
 
-<<<<<<< HEAD
-    let rejectParsing;
-    globalThis.docuAlignWorkbookPdf.parseWorkbook = vi.fn(
-      () => new Promise((_, reject) => {
-        rejectParsing = reject;
-      }),
-    );
-    const rejectedProcessing = selectFile(workbook("replaced.xlsx"));
-    clearFile();
-    rejectParsing(new Error("stale parse failure"));
-    await rejectedProcessing;
-    expect(document.querySelector("#pipeline-state").textContent).toBe("Waiting");
-=======
     // The export must re-lock once the parsed workbook is discarded; force the
     // button back on to prove the handler guards on state, not just the attribute.
     const exportButton = document.querySelector("#pdf-export");
@@ -365,7 +234,6 @@ describe("workspace controller", () => {
     exportButton.disabled = false;
     exportButton.click();
     expect(document.querySelector("#feedback").textContent).toContain("before exporting");
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
   });
 
   it("wires replace and remove controls", async () => {
@@ -388,9 +256,7 @@ describe("workspace controller", () => {
     const file = workbook("drop.xls");
     Object.defineProperty(input, "files", { value: [file] });
     input.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => {
-      expect(globalThis.docuAlignWorkbookPdf.parseWorkbook).toHaveBeenCalledWith(file);
-    });
+    await vi.waitFor(() => expect(document.querySelector("#pipeline-state").textContent).toBe("Complete"));
     expect(document.querySelector("#file-name").textContent).toBe("drop.xls");
 
     const dragEnter = new Event("dragenter", { cancelable: true });
@@ -417,19 +283,13 @@ describe("workspace controller", () => {
     const drop = new Event("drop", { cancelable: true });
     Object.defineProperty(drop, "dataTransfer", { value: { files: [workbook("dropped.xlsx")] } });
     dropzone.dispatchEvent(drop);
-    await vi.waitFor(() => {
-      expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
-    });
+    await vi.waitFor(() => expect(document.querySelector("#pipeline-state").textContent).toBe("Complete"));
     expect(drop.defaultPrevented).toBe(true);
     expect(document.querySelector("#file-name").textContent).toBe("dropped.xlsx");
     clearFile();
   });
 
-<<<<<<< HEAD
-  it("blocks premature PDF export and downloads the generated workbook PDF", async () => {
-=======
   it("blocks premature export, then downloads a separate PDF for every document", async () => {
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     const { clearFile, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const exportButton = document.querySelector("#pdf-export");
@@ -439,38 +299,6 @@ describe("workspace controller", () => {
     expect(clickSpy).not.toHaveBeenCalled();
 
     await selectFile(workbook("Client Sample 01.xlsx"));
-<<<<<<< HEAD
-    exportButton.click();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
-    const download = clickSpy.mock.contexts[0];
-    expect(download.download).toBe("Client-Sample-01-final-report.pdf");
-    expect(download.href).toBe("blob:https://docualign.test/generated");
-    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).toHaveBeenCalledWith(
-      mappedReports("Client Sample 01.xlsx"),
-    );
-    expect(globalThis.docuAlignLogger.trackOperation).toHaveBeenCalledWith(
-      "Generate PDF from approved template",
-      expect.objectContaining({
-        feature: "PdfExport",
-        function: "exportPdf",
-        operation: "pdf.templateRender",
-        reportCount: 2,
-        outputPageCount: 10,
-      }),
-      expect.any(Function),
-    );
-    expect(globalThis.docuAlignLogger.logInfo).toHaveBeenCalledWith(
-      "PDF export download prepared",
-      expect.objectContaining({
-        blobSizeBytes: expect.any(Number),
-        mimeType: "application/pdf",
-      }),
-    );
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
-    await new Promise((resolve) => setTimeout(resolve));
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith(
-      "blob:https://docualign.test/generated",
-=======
     vi.useFakeTimers();
     exportButton.click();
 
@@ -478,19 +306,22 @@ describe("workspace controller", () => {
     expect(clickSpy).toHaveBeenCalledTimes(0);
     vi.advanceTimersByTime(20 * 350);
     vi.useRealTimers();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(20));
 
     // Six reports + six DS1 + six SB1 datasheets + Summary + coral + org.
-    expect(clickSpy).toHaveBeenCalledTimes(20);
+    expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
     const names = clickSpy.mock.contexts.map((anchor) => anchor.download);
     expect(names.slice(0, 3)).toEqual([
       "Client-Sample-01-X-2026-522-1.pdf",
       "Client-Sample-01-X-2026-522-1-DS1.pdf",
       "Client-Sample-01-X-2026-522-1-SB1.pdf",
     ]);
-    expect(names.slice(-2)).toEqual([
+    // Summary rendering is asynchronous because it overlays the approved
+    // template, so its click may settle just after the following generic sheet.
+    expect(names.slice(-2)).toEqual(expect.arrayContaining([
       "Client-Sample-01-Summary.pdf",
       "Client-Sample-01-coral-org.pdf",
-    ]);
+    ]));
     // The six test reports keep their established layout and are served from
     // the reference asset; only the 14 supporting worksheets are generated.
     const hrefs = clickSpy.mock.contexts.map((anchor) => anchor.href);
@@ -502,7 +333,6 @@ describe("workspace controller", () => {
     expect(document.querySelector("#feedback").textContent).toBe(
       "Started 20 separate PDFs -- allow multiple downloads if your browser asks. " +
         "Cloud save is now available.",
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
     );
     expect(document.querySelector("#cloud-save").disabled).toBe(false);
     clearFile();
@@ -546,6 +376,7 @@ describe("workspace controller", () => {
     expect(plan.some((entry) => entry.sheets.includes("TR1"))).toBe(false);
     expect(plan[1].sheets).toEqual(["DS1 "]);
     expect(plan[3].title).toBe("Summary");
+    expect(plan[3].renderer).toBe("summary");
 
     // A report without a job reference falls back to its group number.
     expect(reportIdentifier({ group: 3 })).toBe("report-3");
@@ -574,6 +405,12 @@ describe("workspace controller", () => {
     const sections = JSON.parse(datasheet.data);
     expect(sections[0].heading).toBe("DS1");
     expect(sections[0].rows.length).toBeGreaterThan(0);
+
+    const summary = documents.find((entry) => entry.slug === "Summary");
+    const summaryData = JSON.parse(summary.data);
+    expect(summary.data.length).toBeLessThanOrEqual(100000);
+    expect(summaryData.renderer).toBe("summary");
+    expect(new Map(summaryData.cells).get("U10")).toBe("X-2026-522");
   });
 
   it("plans around reports whose datasheets are missing", async () => {
@@ -623,6 +460,48 @@ describe("workspace controller", () => {
     ]);
   });
 
+  it("reports a fixed-format Summary generation failure without blocking other exports", async () => {
+    const { getExportDocuments, selectFile } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    globalThis.docuAlignSummaryPdf.createDocument.mockRejectedValueOnce(
+      new Error("Template unavailable"),
+    );
+    globalThis.docuAlignLogger = { logError: vi.fn() };
+    stubReader({
+      readWorkbook: () => ({
+        sheetNames: ["CV1", "TR1", "Summary"],
+        cells: new Map(),
+        sheets: new Map([["CV1", new Map()], ["TR1", new Map()]]),
+        reportGroups: [{ group: 1, sheets: { CV1: "CV1", TR1: "TR1" } }],
+      }),
+      extractReportIdentity: () => ({ job_ref: "X-1" }),
+    });
+
+    await selectFile(workbook("summary-error.xlsx"));
+    const summary = getExportDocuments().find((document) => document.slug === "Summary");
+    expect(JSON.parse(summary.data)).toEqual({ renderer: "summary", cells: [] });
+
+    vi.useFakeTimers();
+    document.querySelector("#pdf-export").click();
+    vi.advanceTimersByTime(2 * 350);
+    vi.useRealTimers();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Could not generate Summary. Try exporting again.",
+      ),
+    );
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
+      "Summary PDF generation failed",
+      expect.any(Error),
+      expect.objectContaining({
+        feature: "SummaryPdf",
+        documentSlug: "Summary",
+      }),
+    );
+  });
+
   it("still names a worksheet document when its title has no usable characters", async () => {
     const { planExportDocuments } = await loadWorkspace();
     const plan = planExportDocuments({ sheetNames: ["***"] }, []);
@@ -634,12 +513,6 @@ describe("workspace controller", () => {
     const { clearFile, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
-<<<<<<< HEAD
-    await selectFile(workbook("---.xlsx"));
-    document.querySelector("#pdf-export").click();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
-    expect(clickSpy.mock.contexts[0].download).toBe("report-final-report.pdf");
-=======
     await selectFile(workbook("lab-data.xlsx"));
     vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
@@ -670,7 +543,7 @@ describe("workspace controller", () => {
     vi.advanceTimersByTime(25 * 350);
     vi.useRealTimers();
 
-    expect(clickSpy).toHaveBeenCalledTimes(22);
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(22));
   });
 
   it("uses a fallback PDF name and applies the file runtime warning", async () => {
@@ -684,7 +557,6 @@ describe("workspace controller", () => {
     vi.advanceTimersByTime(350);
     vi.useRealTimers();
     expect(clickSpy.mock.contexts[0].download).toBe("report-X-2026-522-1.pdf");
->>>>>>> 5d5b9f2 (Add behavioral tests for XLSX reader functionality)
 
     applyRuntimeNotice("https:");
     applyRuntimeNotice("file:");
@@ -694,55 +566,4 @@ describe("workspace controller", () => {
     clearFile();
   });
 
-  it("keeps export disabled when workbook parsing or semantic mapping fails", async () => {
-    globalThis.docuAlignWorkbookPdf.parseWorkbook = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("corrupt workbook"));
-    const { selectFile } = await loadWorkspace();
-
-    await selectFile(workbook("corrupt.xlsx"));
-
-    expect(document.querySelector("#pipeline-state").textContent).toBe("Failed");
-    expect(document.querySelector("#feedback").textContent).toContain("could not be processed");
-    expect(document.querySelector("#pdf-export").disabled).toBe(true);
-
-    globalThis.docuAlignWorkbookPdf.parseWorkbook.mockResolvedValueOnce({ sheets: [] });
-    globalThis.docuAlignReportMapping.buildMappedReports.mockReturnValueOnce([]);
-    await selectFile(workbook("empty.xlsx"));
-    expect(document.querySelector("#feedback").textContent).toContain("no complete report groups");
-    expect(document.querySelector("#pdf-export").disabled).toBe(true);
-
-    delete globalThis.docuAlignWorkbookPdf;
-    await selectFile(workbook("runtime-missing.xlsx"));
-    expect(document.querySelector("#feedback").textContent).toContain("could not be processed");
-  });
-
-  it("recovers when PDF generation fails", async () => {
-    const { selectFile } = await loadWorkspace();
-    await selectFile(workbook());
-    globalThis.docuAlignRakReportPdf.createRakReportPdf.mockRejectedValueOnce(
-      new Error("PDF rendering failed"),
-    );
-
-    document.querySelector("#pdf-export").click();
-
-    await vi.waitFor(() => {
-      expect(document.querySelector("#feedback").textContent).toContain(
-        "could not be generated",
-      );
-    });
-    expect(document.querySelector("#cloud-save").disabled).toBe(true);
-  });
-
-  it("continues local processing when the structured logger bridge is unavailable", async () => {
-    delete globalThis.docuAlignLogger;
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const { exportPdf, selectFile } = await loadWorkspace();
-
-    await selectFile(workbook());
-    await exportPdf();
-
-    expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
-    expect(globalThis.URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
-  });
 });

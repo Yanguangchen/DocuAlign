@@ -83,7 +83,7 @@ export function getBundleTokenFromUrl(search) {
  * blob URL using the same writer the workspace export uses, so the recipient
  * gets a real PDF without the file ever being hosted.
  * @param {Object} share - A public share document.
- * @returns {string} A URL safe to hand to the viewer and download link.
+ * @returns {string|Promise<string>} A URL safe to hand to the viewer and download link.
  */
 export function resolveDocumentUrl(share) {
   if (typeof share?.documentData !== "string" || share.documentData === "") {
@@ -92,6 +92,21 @@ export function resolveDocumentUrl(share) {
 
   try {
     const document = JSON.parse(share.documentData);
+    const isCurrentSummary = document?.renderer === "summary" && Array.isArray(document.cells);
+    const isLegacySummary = share?.documentSlug === "Summary" && Array.isArray(document);
+    if (isCurrentSummary || isLegacySummary) {
+      const cells = isCurrentSummary
+        ? new Map(document.cells)
+        : globalThis.docuAlignSummaryPdf.cellsFromDocumentData(document);
+      const render = globalThis.docuAlignSummaryPdf.createDocument(cells);
+      return Promise.resolve(render)
+        .then((bytes) => URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })))
+        .catch((error) => {
+          logDocumentRebuildFailure(error);
+          return safePdfUrl(share?.pdfUrl);
+        });
+    }
+
     const bytes = globalThis.docuAlignPdf.createDocument({
       title: share.reportName || FALLBACK_REPORT_TITLE,
       subtitle: share.clientName ?? "",
@@ -99,13 +114,22 @@ export function resolveDocumentUrl(share) {
     });
     return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
   } catch (error) {
-    logWarn("Could not rebuild the shared document", error, {
-      feature: "PublicShare",
-      function: "resolveDocumentUrl",
-      category: "Rendering",
-    });
+    logDocumentRebuildFailure(error);
     return safePdfUrl(share?.pdfUrl);
   }
+}
+
+/**
+ * Record a generated-document rendering failure without exposing share data.
+ * @param {unknown} error - Rendering or payload error.
+ * @returns {void}
+ */
+function logDocumentRebuildFailure(error) {
+  logWarn("Could not rebuild the shared document", error, {
+    feature: "PublicShare",
+    function: "resolveDocumentUrl",
+    category: "Rendering",
+  });
 }
 
 export function safePdfUrl(url) {
@@ -227,7 +251,7 @@ function setStatus(message, title) {
   bundlePanel.hidden = true;
 }
 
-function renderSharedReport(share) {
+async function renderSharedReport(share) {
   reportTitle.textContent = share.reportTitle || FALLBACK_REPORT_TITLE;
   const subtitle = [share.clientName, share.jobRef ? `Job reference ${share.jobRef}` : null]
     .filter(Boolean)
@@ -243,7 +267,7 @@ function renderSharedReport(share) {
   reportPublished.textContent = share.publishedAt
     ? dateFormatter.format(share.publishedAt)
     : "Date unavailable";
-  const pdfUrl = resolveDocumentUrl(share);
+  const pdfUrl = await Promise.resolve(resolveDocumentUrl(share));
   pdfLink.setAttribute("href", pdfUrl);
   downloadLink.setAttribute("href", pdfUrl);
   previewOverlay.setAttribute("href", pdfUrl);
@@ -256,7 +280,7 @@ function renderSharedReport(share) {
 
 // Build each grouped report entry with DOM APIs (not innerHTML) so report
 // names and file names from the share document can never inject markup.
-function bundleReportItem(report) {
+async function bundleReportItem(report) {
   const item = document.createElement("li");
   item.className = "bundle-report";
 
@@ -279,7 +303,7 @@ function bundleReportItem(report) {
 
   const anchor = document.createElement("a");
   anchor.className = "google-button share-pdf-button";
-  anchor.href = resolveDocumentUrl(report);
+  anchor.href = await Promise.resolve(resolveDocumentUrl(report));
   anchor.target = "_blank";
   anchor.rel = "noopener";
   anchor.textContent = "View document";
@@ -288,7 +312,7 @@ function bundleReportItem(report) {
   return item;
 }
 
-function renderSharedBundle(sharedBundle) {
+async function renderSharedBundle(sharedBundle) {
   bundleName.textContent = sharedBundle.bundleName || "Shared reports";
   bundleCount.textContent = `${sharedBundle.reports.length} ${
     sharedBundle.reports.length === 1 ? "document" : "documents"
@@ -296,7 +320,8 @@ function renderSharedBundle(sharedBundle) {
   bundlePublished.textContent = sharedBundle.publishedAt
     ? dateFormatter.format(sharedBundle.publishedAt)
     : "Date unavailable";
-  bundleList.replaceChildren(...sharedBundle.reports.map(bundleReportItem));
+  const reportItems = await Promise.all(sharedBundle.reports.map(bundleReportItem));
+  bundleList.replaceChildren(...reportItems);
   setStatus("");
   bundlePanel.hidden = false;
 }
@@ -342,7 +367,7 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
         );
         return;
       }
-      renderSharedBundle(sharedBundle);
+      await renderSharedBundle(sharedBundle);
     } catch {
       // Failure already logged by trackOperation; show the recovery message.
       setStatus(
@@ -371,7 +396,7 @@ export async function initViewer(search = globalThis.location?.search ?? "") {
       );
       return;
     }
-    renderSharedReport(share);
+    await renderSharedReport(share);
   } catch {
     // Failure already logged by trackOperation; show the recovery message.
     setStatus("Could not load this shared report. Check your connection and try again.");
