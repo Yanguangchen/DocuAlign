@@ -33,6 +33,56 @@ const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
 const REPORT_ASSET_PATH = "./SampleDocuments/SampleOutput.pdf";
 
 /**
+ * The kind of document a planned export represents. Every planned document
+ * carries one so export coverage can be narrowed without removing any of the
+ * planning or rendering code behind it.
+ */
+const DOCUMENT_KINDS = Object.freeze({
+  REPORT: "report",
+  DATASHEET: "datasheet",
+  SUMMARY: "summary",
+  WORKSHEET: "worksheet",
+});
+
+/**
+ * TEMPORARY EXPORT RESTRICTION.
+ *
+ * Exporting is currently limited to the fixed-format `CV1` + `TR1` test report
+ * and the `Summary` document. The `DS1`/`SB1` datasheets and the remaining
+ * standalone worksheets (`coral + org`, …) are still planned, rendered, and
+ * serialised by the code below -- they are only withheld from the export plan
+ * by this list. Nothing supporting them has been deleted: call
+ * `setDisabledDocumentKinds([])` (or empty this list) to restore the full
+ * document export.
+ */
+const TEMPORARILY_DISABLED_DOCUMENT_KINDS = Object.freeze([
+  DOCUMENT_KINDS.DATASHEET,
+  DOCUMENT_KINDS.WORKSHEET,
+]);
+
+let disabledDocumentKinds = TEMPORARILY_DISABLED_DOCUMENT_KINDS;
+
+/**
+ * Choose which document kinds are withheld from the export.
+ * @param {string[]} [kinds] - Kinds to withhold. Defaults back to the
+ * temporary restriction; pass `[]` to export every planned document again.
+ * @returns {string[]} The kinds now withheld.
+ */
+function setDisabledDocumentKinds(kinds = TEMPORARILY_DISABLED_DOCUMENT_KINDS) {
+  disabledDocumentKinds = Object.freeze([...kinds]);
+  return disabledDocumentKinds;
+}
+
+/**
+ * Decide whether a planned document is currently exportable.
+ * @param {{kind: string}} plan - Planned document.
+ * @returns {boolean} True when the document's kind is not withheld.
+ */
+function isDocumentEnabled(plan) {
+  return !disabledDocumentKinds.includes(plan.kind);
+}
+
+/**
  * Gap between document downloads. Browsers throttle multiple programmatic
  * downloads triggered in one synchronous burst -- Chrome in particular keeps
  * only the first -- so the anchors are spaced out instead of fired in a loop.
@@ -240,9 +290,13 @@ function reportIdentifier(report) {
  * cover plus `TR1` results) is one document, and the standalone worksheets --
  * the summary, the coral/organic reference, and every `DS1` and `SB1`
  * datasheet -- are each their own separate document.
+ *
+ * Documents whose kind is currently withheld (see
+ * `TEMPORARILY_DISABLED_DOCUMENT_KINDS`) are still planned here and then
+ * filtered out, so restoring them needs no change to this function.
  * @param {{sheetNames: string[], sheets: Map<string, Map<string, string>>}} workbook - Parsed workbook.
  * @param {Array<Object>} reports - Detected reports.
- * @returns {Array<{slug: string, title: string, subtitle: string, sheets: string[], renderer?: string}>} Planned documents.
+ * @returns {Array<{slug: string, title: string, subtitle: string, kind: string, sheets: string[], renderer?: string}>} Planned documents.
  */
 function planExportDocuments(workbook, reports) {
   const documents = [];
@@ -257,6 +311,7 @@ function planExportDocuments(workbook, reports) {
       slug: identifier,
       title: `Test Report ${report.job_ref || report.group}`,
       subtitle: "",
+      kind: DOCUMENT_KINDS.REPORT,
       assetPath: REPORT_ASSET_PATH,
       sheets: [],
     });
@@ -270,6 +325,7 @@ function planExportDocuments(workbook, reports) {
         slug: `${identifier}-${prefix}`,
         title: `${prefix} Datasheet ${report.job_ref || report.group}`,
         subtitle: sheetName,
+        kind: DOCUMENT_KINDS.DATASHEET,
         sheets: [sheetName],
       });
     });
@@ -278,17 +334,21 @@ function planExportDocuments(workbook, reports) {
   // Anything outside a report group (Summary, coral + org, …) stands alone.
   workbook.sheetNames.forEach((sheetName) => {
     if (claimed.has(sheetName)) return;
+    const isSummary = sheetName.trim() === "Summary";
     const document = {
       slug: slugify(sheetName) || "sheet",
       title: sheetName.trim(),
       subtitle: "",
+      kind: isSummary ? DOCUMENT_KINDS.SUMMARY : DOCUMENT_KINDS.WORKSHEET,
       sheets: [sheetName],
     };
-    if (sheetName.trim() === "Summary") document.renderer = "summary";
+    if (isSummary) document.renderer = "summary";
     documents.push(document);
   });
 
-  return documents;
+  // Withhold the document kinds that are temporarily disabled. The planning
+  // above is deliberately left intact so the full export can be restored.
+  return documents.filter(isDocumentEnabled);
 }
 
 /**
@@ -465,6 +525,7 @@ applyRuntimeNotice();
 // Exposed read-only for focused tests and support-console inspection. Runtime
 // UI code continues to use the locally scoped functions above.
 globalThis.docuAlignWorkspace = Object.freeze({
+  DOCUMENT_KINDS,
   advancePipeline,
   applyRuntimeNotice,
   clearFile,
@@ -476,6 +537,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   reportIdentifier,
   resetPipeline,
   selectFile,
+  setDisabledDocumentKinds,
   setFeedback,
   startPipeline,
 });

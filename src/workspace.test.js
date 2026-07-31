@@ -134,8 +134,10 @@ describe("workspace controller", () => {
     expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
     expect(document.querySelector("#pipeline-step").classList).toContain("is-complete");
     expect(document.querySelector("#pdf-export").disabled).toBe(false);
+    // Datasheet and standalone-worksheet exports are temporarily withheld, so
+    // the six test reports and the Summary are all that export today.
     expect(document.querySelector("#feedback").textContent).toBe(
-      "ETL complete. Export produces 20 separate PDFs.",
+      "ETL complete. Export produces 7 separate PDFs.",
     );
   });
 
@@ -304,34 +306,32 @@ describe("workspace controller", () => {
 
     // Downloads are spaced out so the browser does not drop all but the first.
     expect(clickSpy).toHaveBeenCalledTimes(0);
-    vi.advanceTimersByTime(20 * 350);
+    vi.advanceTimersByTime(7 * 350);
     vi.useRealTimers();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(20));
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(7));
 
-    // Six reports + six DS1 + six SB1 datasheets + Summary + coral + org.
+    // Six reports + the Summary. The DS1/SB1 datasheets and the coral + org
+    // worksheet are temporarily withheld from the export.
     expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
     const names = clickSpy.mock.contexts.map((anchor) => anchor.download);
     expect(names.slice(0, 3)).toEqual([
       "Client-Sample-01-X-2026-522-1.pdf",
-      "Client-Sample-01-X-2026-522-1-DS1.pdf",
-      "Client-Sample-01-X-2026-522-1-SB1.pdf",
+      "Client-Sample-01-X-2026-522-2.pdf",
+      "Client-Sample-01-X-2026-522-3.pdf",
     ]);
-    // Summary rendering is asynchronous because it overlays the approved
-    // template, so its click may settle just after the following generic sheet.
-    expect(names.slice(-2)).toEqual(expect.arrayContaining([
-      "Client-Sample-01-Summary.pdf",
-      "Client-Sample-01-coral-org.pdf",
-    ]));
+    expect(names).toContain("Client-Sample-01-Summary.pdf");
+    expect(names.some((name) => /-DS1\.pdf$|-SB1\.pdf$/.test(name))).toBe(false);
+    expect(names).not.toContain("Client-Sample-01-coral-org.pdf");
     // The six test reports keep their established layout and are served from
-    // the reference asset; only the 14 supporting worksheets are generated.
+    // the reference asset; only the Summary is generated right now.
     const hrefs = clickSpy.mock.contexts.map((anchor) => anchor.href);
     const reportHrefs = hrefs.filter((href) => href.includes("SampleOutput.pdf"));
     expect(reportHrefs).toHaveLength(6);
-    expect(hrefs.filter((href) => href === "blob:generated")).toHaveLength(14);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(14);
+    expect(hrefs.filter((href) => href === "blob:generated")).toHaveLength(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
 
     expect(document.querySelector("#feedback").textContent).toBe(
-      "Started 20 separate PDFs -- allow multiple downloads if your browser asks. " +
+      "Started 7 separate PDFs -- allow multiple downloads if your browser asks. " +
         "Cloud save is now available.",
     );
     expect(document.querySelector("#cloud-save").disabled).toBe(false);
@@ -345,15 +345,16 @@ describe("workspace controller", () => {
     await selectFile(workbook("lab-data.xlsx"));
     vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(350);
+    // The generated Summary is queued last, after the six asset-backed reports.
+    await vi.advanceTimersByTimeAsync(7 * 350);
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(60000);
+    await vi.advanceTimersByTimeAsync(60000);
     vi.useRealTimers();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:generated");
   });
 
-  it("plans one document per report plus one per standalone worksheet", async () => {
+  it("plans the test report and the Summary while datasheets stay disabled", async () => {
     const { planExportDocuments, reportIdentifier } = await loadWorkspace();
     const reports = [
       {
@@ -366,7 +367,7 @@ describe("workspace controller", () => {
     ];
 
     const plan = planExportDocuments({ sheetNames: ["Summary", "CV1", "TR1", "DS1 ", "SB1 "] }, reports);
-    expect(plan.map((entry) => entry.slug)).toEqual(["X-1", "X-1-DS1", "X-1-SB1", "Summary"]);
+    expect(plan.map((entry) => entry.slug)).toEqual(["X-1", "Summary"]);
     // The report keeps its established layout: served from the reference asset,
     // never re-rendered from the CV1/TR1 worksheet grids.
     expect(plan[0].assetPath).toBe("./SampleDocuments/SampleOutput.pdf");
@@ -374,13 +375,49 @@ describe("workspace controller", () => {
     // Its CV1 and TR1 sheets are claimed, so they never export on their own.
     expect(plan.some((entry) => entry.sheets.includes("CV1"))).toBe(false);
     expect(plan.some((entry) => entry.sheets.includes("TR1"))).toBe(false);
-    expect(plan[1].sheets).toEqual(["DS1 "]);
-    expect(plan[3].title).toBe("Summary");
-    expect(plan[3].renderer).toBe("summary");
+    expect(plan[1].title).toBe("Summary");
+    expect(plan[1].renderer).toBe("summary");
 
     // A report without a job reference falls back to its group number.
     expect(reportIdentifier({ group: 3 })).toBe("report-3");
     expect(reportIdentifier({ group: 1, job_ref: "X/2026 522" })).toBe("X-2026-522");
+  });
+
+  it("plans the disabled documents again once the restriction is lifted", async () => {
+    const { DOCUMENT_KINDS, planExportDocuments, setDisabledDocumentKinds } = await loadWorkspace();
+    const reports = [
+      { group: 1, job_ref: "X-1", sheets: { CV1: "CV1", TR1: "TR1", DS1: "DS1 ", SB1: "SB1 " } },
+    ];
+    const workbookSheets = { sheetNames: ["Summary", "CV1", "TR1", "DS1 ", "SB1 ", "coral + org"] };
+
+    // Default: only the fixed-format report and the Summary are exportable.
+    expect(planExportDocuments(workbookSheets, reports).map((entry) => entry.kind)).toEqual([
+      DOCUMENT_KINDS.REPORT,
+      DOCUMENT_KINDS.SUMMARY,
+    ]);
+
+    // The planning code for the withheld documents is intact, so clearing the
+    // restriction restores the full export with no other change.
+    expect(setDisabledDocumentKinds([])).toEqual([]);
+    const full = planExportDocuments(workbookSheets, reports);
+    expect(full.map((entry) => entry.slug)).toEqual([
+      "X-1",
+      "X-1-DS1",
+      "X-1-SB1",
+      "Summary",
+      "coral-org",
+    ]);
+    expect(full[1].title).toBe("DS1 Datasheet X-1");
+    expect(full[1].sheets).toEqual(["DS1 "]);
+    expect(full[2].kind).toBe(DOCUMENT_KINDS.DATASHEET);
+    expect(full[4].kind).toBe(DOCUMENT_KINDS.WORKSHEET);
+
+    // Restoring the default restriction withholds them again.
+    expect(setDisabledDocumentKinds()).toEqual([
+      DOCUMENT_KINDS.DATASHEET,
+      DOCUMENT_KINDS.WORKSHEET,
+    ]);
+    expect(planExportDocuments(workbookSheets, reports)).toHaveLength(2);
   });
 
   it("describes every planned document for persistence and sharing", async () => {
@@ -390,13 +427,33 @@ describe("workspace controller", () => {
     await selectFile(workbook("lab-data.xlsx"));
     const documents = getExportDocuments();
 
-    expect(documents).toHaveLength(20);
+    // Six test reports plus the Summary; the datasheets and the coral + org
+    // worksheet are temporarily withheld, so they are never persisted either.
+    expect(documents).toHaveLength(7);
     // The fixed-format test report is asset-backed and publishes no data.
     expect(documents[0]).toMatchObject({
       slug: "X-2026-522-1",
       assetPath: "./SampleDocuments/SampleOutput.pdf",
       data: null,
     });
+    expect(documents.some((entry) => entry.slug === "X-2026-522-1-DS1")).toBe(false);
+    expect(documents.some((entry) => entry.slug === "coral-org")).toBe(false);
+
+    const summary = documents.find((entry) => entry.slug === "Summary");
+    const summaryData = JSON.parse(summary.data);
+    expect(summary.data.length).toBeLessThanOrEqual(100000);
+    expect(summaryData.renderer).toBe("summary");
+    expect(new Map(summaryData.cells).get("U10")).toBe("X-2026-522");
+  });
+
+  it("serialises and renders the withheld documents once they are re-enabled", async () => {
+    const { getExportDocuments, selectFile, setDisabledDocumentKinds } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    setDisabledDocumentKinds([]);
+
+    await selectFile(workbook("lab-data.xlsx"));
+    const documents = getExportDocuments();
+    expect(documents).toHaveLength(20);
 
     // Generated documents carry their worksheet grid as JSON, because
     // Firestore cannot store nested arrays.
@@ -406,11 +463,14 @@ describe("workspace controller", () => {
     expect(sections[0].heading).toBe("DS1");
     expect(sections[0].rows.length).toBeGreaterThan(0);
 
-    const summary = documents.find((entry) => entry.slug === "Summary");
-    const summaryData = JSON.parse(summary.data);
-    expect(summary.data.length).toBeLessThanOrEqual(100000);
-    expect(summaryData.renderer).toBe("summary");
-    expect(new Map(summaryData.cells).get("U10")).toBe("X-2026-522");
+    vi.useFakeTimers();
+    document.querySelector("#pdf-export").click();
+    vi.advanceTimersByTime(20 * 350);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(20));
+    const names = clickSpy.mock.contexts.map((anchor) => anchor.download);
+    expect(names).toContain("lab-data-X-2026-522-1-DS1.pdf");
+    expect(names).toContain("lab-data-coral-org.pdf");
   });
 
   it("plans around reports whose datasheets are missing", async () => {
@@ -425,18 +485,27 @@ describe("workspace controller", () => {
   });
 
   it("titles datasheets by group number when the report has no job reference", async () => {
-    const { planExportDocuments } = await loadWorkspace();
-    const plan = planExportDocuments({ sheetNames: ["CV1", "TR1", "DS1 "] }, [
-      { group: 4, sheets: { CV1: "CV1", TR1: "TR1", DS1: "DS1 " } },
+    const { planExportDocuments, setDisabledDocumentKinds } = await loadWorkspace();
+    const workbookSheets = { sheetNames: ["CV1", "TR1", "DS1 "] };
+    const reports = [{ group: 4, sheets: { CV1: "CV1", TR1: "TR1", DS1: "DS1 " } }];
+
+    // The datasheet is planned but withheld while the restriction is on.
+    expect(planExportDocuments(workbookSheets, reports).map((entry) => entry.slug)).toEqual([
+      "report-4",
     ]);
 
+    setDisabledDocumentKinds([]);
+    const plan = planExportDocuments(workbookSheets, reports);
     expect(plan.map((entry) => entry.slug)).toEqual(["report-4", "report-4-DS1"]);
     expect(plan[1].title).toBe("DS1 Datasheet 4");
   });
 
   it("renders an empty document for a worksheet with no parsed cells", async () => {
-    const { selectFile } = await loadWorkspace();
+    const { selectFile, setDisabledDocumentKinds } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    // Standalone worksheets are temporarily withheld; re-enable them so the
+    // generic renderer's missing-sheet handling stays covered.
+    setDisabledDocumentKinds([]);
     stubReader({
       readWorkbook: () => ({
         // The sheet is listed but absent from the per-sheet lookup.
@@ -503,10 +572,21 @@ describe("workspace controller", () => {
   });
 
   it("still names a worksheet document when its title has no usable characters", async () => {
-    const { planExportDocuments } = await loadWorkspace();
-    const plan = planExportDocuments({ sheetNames: ["***"] }, []);
+    const { DOCUMENT_KINDS, planExportDocuments, setDisabledDocumentKinds } = await loadWorkspace();
 
-    expect(plan).toEqual([{ slug: "sheet", title: "***", subtitle: "", sheets: ["***"] }]);
+    // Withheld by default because it is a standalone worksheet.
+    expect(planExportDocuments({ sheetNames: ["***"] }, [])).toEqual([]);
+
+    setDisabledDocumentKinds([]);
+    expect(planExportDocuments({ sheetNames: ["***"] }, [])).toEqual([
+      {
+        slug: "sheet",
+        title: "***",
+        subtitle: "",
+        kind: DOCUMENT_KINDS.WORKSHEET,
+        sheets: ["***"],
+      },
+    ]);
   });
 
   it("cancels pending downloads when the workspace is reset mid-export", async () => {
@@ -523,7 +603,7 @@ describe("workspace controller", () => {
     vi.advanceTimersByTime(10 * 350);
     vi.useRealTimers();
 
-    // The four still-queued downloads must not fire after the reset.
+    // The five still-queued downloads must not fire after the reset.
     expect(clickSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -538,12 +618,12 @@ describe("workspace controller", () => {
     vi.advanceTimersByTime(350);
     expect(clickSpy).toHaveBeenCalledTimes(2);
 
-    // A second click discards the queued downloads and re-queues all 20.
+    // A second click discards the queued downloads and re-queues all 7.
     exportButton.click();
-    vi.advanceTimersByTime(25 * 350);
+    vi.advanceTimersByTime(10 * 350);
     vi.useRealTimers();
 
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(22));
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(9));
   });
 
   it("uses a fallback PDF name and applies the file runtime warning", async () => {
