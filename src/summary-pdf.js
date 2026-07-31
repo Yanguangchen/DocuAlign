@@ -112,6 +112,25 @@
     return values;
   }
 
+  /** First worksheet row of the Summary result table. */
+  const FIRST_RESULT_ROW = 18;
+
+  /**
+   * Find the last worksheet row holding a result, so the rendered table follows
+   * the uploaded file instead of stopping at the reference workbook's length.
+   * @param {Map<string, string>} cells - Summary worksheet cell lookup.
+   * @returns {number} Last populated row, or one below the first when empty.
+   */
+  function lastResultRow(cells) {
+    let last = FIRST_RESULT_ROW - 1;
+    for (const [ref, value] of cells) {
+      if (String(value ?? "").trim() === "") continue;
+      const row = Number(ref.match(/^[A-Z]{1,2}(\d+)$/)?.[1] ?? 0);
+      if (row > last) last = row;
+    }
+    return last;
+  }
+
   /**
    * Build the semantic overlay model for the fixed Summary template.
    * @param {Map<string, string>} cells - Summary worksheet cell lookup.
@@ -138,7 +157,8 @@
     }
 
     const rows = [];
-    for (let row = 18; row <= 27; row += 1) {
+    const finalRow = lastResultRow(cells);
+    for (let row = FIRST_RESULT_ROW; row <= finalRow; row += 1) {
       const values = resultRow(cells, row);
       if (values.some((value) => value !== "")) rows.push(values);
     }

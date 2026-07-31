@@ -78,10 +78,12 @@ export function getBundleTokenFromUrl(search) {
 /**
  * Resolve the PDF URL for one shared document.
  *
- * The fixed-format test report is served from its static asset. Every other
- * document publishes its worksheet grid instead, and is rebuilt here into a
- * blob URL using the same writer the workspace export uses, so the recipient
- * gets a real PDF without the file ever being hosted.
+ * Every published document is rebuilt here into a blob URL using the same
+ * renderers the workspace export uses, so the recipient gets a real PDF
+ * without the file ever being hosted. Test reports rebuild by overlaying the
+ * report's own mapped values onto the approved reference pages; other
+ * documents rebuild from their published worksheet grid. Shares published
+ * before a renderer existed carry no data and fall back to the static asset.
  * @param {Object} share - A public share document.
  * @returns {string|Promise<string>} A URL safe to hand to the viewer and download link.
  */
@@ -92,6 +94,15 @@ export function resolveDocumentUrl(share) {
 
   try {
     const document = JSON.parse(share.documentData);
+    if (document?.renderer === "report" && document.report) {
+      return Promise.resolve(globalThis.docuAlignRakReportPdf.createRakReportPdf([document.report]))
+        .then((blob) => URL.createObjectURL(blob))
+        .catch((error) => {
+          logDocumentRebuildFailure(error);
+          return safePdfUrl(share?.pdfUrl);
+        });
+    }
+
     const isCurrentSummary = document?.renderer === "summary" && Array.isArray(document.cells);
     const isLegacySummary = share?.documentSlug === "Summary" && Array.isArray(document);
     if (isCurrentSummary || isLegacySummary) {

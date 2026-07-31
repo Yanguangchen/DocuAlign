@@ -12,6 +12,11 @@ import { describe, expect, it } from "vitest";
 
 const projectRoot = resolve(".");
 const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "utf8");
+const rakReportSource = readFileSync(resolve(projectRoot, "src/rak-report-pdf.js"), "utf8");
+const mappingSource = readFileSync(resolve(projectRoot, "src/report-mapping.js"), "utf8");
+const indexSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
+const viewSource = readFileSync(resolve(projectRoot, "view.html"), "utf8");
+const viteConfigSource = readFileSync(resolve(projectRoot, "vite.config.js"), "utf8");
 const embeddedSummarySource = readFileSync(
   resolve(projectRoot, "vendor/sample-summary-template.js"),
   "utf8",
@@ -32,14 +37,31 @@ function sha256(buffer) {
 }
 
 describe("PDF export", () => {
-  it("serves the test report from the reference asset and generates the rest", () => {
+  it("builds the test report from the reference asset and generates the rest", () => {
     // The CV1 + TR1 test report must keep its established layout, so it is
-    // downloaded as-is rather than re-rendered from worksheet data.
+    // built by overlaying the uploaded values onto the reference pages rather
+    // than being re-laid-out by the generic writer.
     expect(workspaceSource).toContain('REPORT_ASSET_PATH = "./SampleDocuments/SampleOutput.pdf"');
-    expect(workspaceSource).toContain("assetPath: REPORT_ASSET_PATH");
+    expect(workspaceSource).toContain("docuAlignRakReportPdf.createRakReportPdf");
+    expect(rakReportSource).toContain('TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf"');
+    // A workbook that cannot be mapped still falls back to the reference asset.
+    expect(workspaceSource).toContain("document.assetPath = REPORT_ASSET_PATH");
     // Supporting worksheets are still generated.
     expect(workspaceSource).toContain("docuAlignPdf.createDocument");
     expect(workspaceSource).toContain("docuAlignSummaryPdf.createDocument");
+  });
+
+  it("loads the report mapping and overlay renderers on every runtime", () => {
+    // Both are classic scripts so the workspace keeps working over file://,
+    // and both must ship in the Vite build as well.
+    expect(indexSource).toContain('src="./src/report-mapping.js"');
+    expect(indexSource).toContain('src="./src/rak-report-pdf.js"');
+    expect(viewSource).toContain('src="./src/rak-report-pdf.js"');
+    expect(viteConfigSource).toContain('"report-mapping.js"');
+    expect(viteConfigSource).toContain('"rak-report-pdf.js"');
+    [rakReportSource, mappingSource].forEach((source) => {
+      expect(source).not.toMatch(/^\s*(import|export)\s/m);
+    });
   });
 
   it.each([...REFERENCE_ASSETS.keys()])(

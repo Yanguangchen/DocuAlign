@@ -596,7 +596,6 @@
   }
 
   async function drawImage(outputDocument, page, operation) {
-    if (!operation.asset?.bytes) return;
     const image = operation.asset.mimeType === "image/png"
       ? await outputDocument.embedPng(operation.asset.bytes)
       : await outputDocument.embedJpg(operation.asset.bytes);
@@ -625,6 +624,9 @@
         }
       }
       for (const image of pageOverlay.images) {
+        // Without replacement artwork the reference page keeps its own, so the
+        // approved signatures survive workbooks parsed without images.
+        if (!image.asset?.bytes) continue;
         drawWhiteout(page, image, pdfLib);
         await drawImage(outputDocument, page, image);
       }

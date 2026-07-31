@@ -13,6 +13,8 @@ const classicScripts = [
   "xlsx-reader.js",
   "pdf-writer.js",
   "summary-pdf.js",
+  "report-mapping.js",
+  "rak-report-pdf.js",
   "workspace.js",
 ];
 

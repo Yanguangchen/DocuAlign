@@ -334,6 +334,24 @@
   /** Number-format ids that ECMA-376 reserves for dates and times. */
   const BUILT_IN_DATE_FORMATS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
 
+  /**
+   * Decimal places of the ECMA-376 built-in numeric formats. These ids never
+   * appear as `<numFmt>` tags in `xl/styles.xml`, so their codes are known
+   * only from the specification. Percent, scientific, and fraction formats are
+   * deliberately absent: they rescale or restructure the value rather than
+   * just rounding it, so those cells keep their cached number.
+   */
+  const BUILT_IN_DECIMAL_FORMATS = new Map([
+    [1, 0],
+    [2, 2],
+    [3, 0],
+    [4, 2],
+    [37, 0],
+    [38, 0],
+    [39, 2],
+    [40, 2],
+  ]);
+
   /** Days between the Excel serial epoch (1899-12-30) and the Unix epoch. */
   const EXCEL_EPOCH_OFFSET = 25569;
   const MS_PER_DAY = 86400000;
@@ -443,39 +461,76 @@
   }
 
   /**
-   * Identify which cell style indices carry a date or time number format, so
-   * date cells can be rendered as dates instead of raw Excel serial numbers.
+   * Count the decimal places a custom number-format code displays.
+   *
+   * Only plain fixed-decimal codes qualify. A code that rescales or
+   * restructures its value -- percent, scientific, or fraction -- is rejected,
+   * because rounding alone would not reproduce what Excel shows.
+   * @param {string} code - Raw `formatCode` attribute.
+   * @returns {number|null} Decimal places, or null when the code is not a plain number.
+   */
+  function decimalPlaces(code) {
+    // Only the positive section applies to the values these reports carry, and
+    // literal text and locale qualifiers never affect the displayed precision.
+    const positive = code.split(";").at(0)
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/"[^"]*"/g, "");
+    if (!/[0#]/.test(positive)) return null;
+    if (/[%eE/]/.test(positive) || /[dmyhs]/i.test(positive)) return null;
+    const fraction = positive.match(/\.([0#]+)/);
+    return fraction ? fraction[1].length : 0;
+  }
+
+  /**
+   * Identify how each cell style displays its value, so cells render the way
+   * Excel shows them instead of exposing raw serials and cached floats.
+   *
+   * Dates become `DD/MM/YYYY`, and fixed-decimal formats keep their displayed
+   * precision -- a cached `34.9041486172` shown as `34.9` in a `0.0` cell must
+   * reach the PDF as `34.9`, because the renderers draw these values verbatim.
    * @param {ArrayBuffer} buffer - Raw archive bytes.
    * @param {Map<string, Object>} entries - Central directory entries.
-   * @returns {Set<number>} Style indices that format their value as a date.
+   * @returns {{dateStyles: Set<number>, decimalStyles: Map<number, number>}} Style lookups.
    */
-  function readDateStyles(buffer, entries) {
+  function readCellStyles(buffer, entries) {
     const dateStyles = new Set();
+    const decimalStyles = new Map();
     const entry = entries.get("xl/styles.xml");
-    if (!entry) return dateStyles;
+    if (!entry) return { dateStyles, decimalStyles };
 
     const xml = readEntryText(buffer, entry);
 
     // Custom formats declare a date by using day/month/year tokens in their
     // code; literal text and locale qualifiers are stripped before testing.
     const customDateFormats = new Set();
+    const customDecimalFormats = new Map();
     for (const tag of xml.matchAll(NUMFMT_TAG)) {
-      const code = (readAttribute(tag[0], FORMATCODE_ATTR) ?? "")
-        .replace(/\[[^\]]*\]/g, "")
-        .replace(/"[^"]*"/g, "");
-      if (/[dmy]/i.test(code)) customDateFormats.add(Number(readAttribute(tag[0], NUMFMTID_ATTR)));
+      const rawCode = readAttribute(tag[0], FORMATCODE_ATTR) ?? "";
+      const numFmtId = Number(readAttribute(tag[0], NUMFMTID_ATTR));
+      const code = rawCode.replace(/\[[^\]]*\]/g, "").replace(/"[^"]*"/g, "");
+      if (/[dmy]/i.test(code)) {
+        customDateFormats.add(numFmtId);
+        continue;
+      }
+      const decimals = decimalPlaces(rawCode);
+      if (decimals !== null) customDecimalFormats.set(numFmtId, decimals);
     }
 
     const cellXfs = xml.match(CELLXFS_BLOCK);
-    if (!cellXfs) return dateStyles;
+    if (!cellXfs) return { dateStyles, decimalStyles };
 
     [...cellXfs[1].matchAll(XF_TAG)].forEach((tag, styleIndex) => {
       const numFmtId = Number(readAttribute(tag[0], NUMFMTID_ATTR));
       if (BUILT_IN_DATE_FORMATS.has(numFmtId) || customDateFormats.has(numFmtId)) {
         dateStyles.add(styleIndex);
+        return;
       }
+      const decimals = customDecimalFormats.has(numFmtId)
+        ? customDecimalFormats.get(numFmtId)
+        : BUILT_IN_DECIMAL_FORMATS.get(numFmtId);
+      if (decimals !== undefined) decimalStyles.set(styleIndex, decimals);
     });
-    return dateStyles;
+    return { dateStyles, decimalStyles };
   }
 
   /**
@@ -503,6 +558,30 @@
   }
 
   /**
+   * Render a cached number with the decimal places its cell format displays.
+   *
+   * Excel rounds the decimal value half away from zero, while `toFixed` rounds
+   * the underlying binary double: `20.15` displays as `20.2` in a `0.0` cell
+   * but `toFixed(1)` yields `20.1`. Shifting the decimal exponent through the
+   * number's own string form reproduces Excel's result.
+   * @param {string} text - Raw cached cell value.
+   * @param {number} decimals - Decimal places from the cell's number format.
+   * @returns {string} Excel's displayed value.
+   */
+  function formatDecimal(text, decimals) {
+    const value = Number(text);
+    if (!Number.isFinite(value)) return text;
+
+    const magnitude = Math.abs(value);
+    // Exponential string forms cannot carry a shifted exponent, and at that
+    // scale the binary rounding difference is not representable anyway.
+    if (String(magnitude).includes("e")) return value.toFixed(decimals);
+
+    const rounded = Math.round(Number(`${magnitude}e${decimals}`));
+    return ((value < 0 ? -1 : 1) * Number(`${rounded}e-${decimals}`)).toFixed(decimals);
+  }
+
+  /**
    * Read every non-empty cell of one worksheet into the shared lookup.
    * @param {string} xml - Worksheet XML.
    * @param {string} sheetName - Worksheet name.
@@ -510,7 +589,7 @@
    * @param {Map<string, string>} lookup - Destination cell lookup, mutated in place.
    * @returns {void}
    */
-  function collectCells(xml, sheetName, sharedStrings, lookup, sheetLookup, dateStyles) {
+  function collectCells(xml, sheetName, sharedStrings, lookup, sheetLookup, styles) {
     for (const match of xml.matchAll(CELL)) {
       // Self-closing `<c r="A1"/>` cells carry styling only and hold no value.
       const body = match[3];
@@ -532,13 +611,19 @@
       let trimmed = text.trim();
       if (trimmed === "") continue;
 
-      // Untyped cells hold numbers; a date-formatted style makes them dates.
+      // Untyped cells hold numbers, displayed the way their style formats
+      // them: dates as dates, fixed-decimal cells at their shown precision.
       if (value && (!type || type === "n")) {
         const numeric = Number(trimmed);
         if (Number.isFinite(numeric)) {
-          trimmed = dateStyles.has(Number(readAttribute(tag, STYLE_ATTR)))
-            ? formatExcelDate(numeric)
-            : normalizeNumber(trimmed);
+          const styleIndex = Number(readAttribute(tag, STYLE_ATTR));
+          if (styles.dateStyles.has(styleIndex)) {
+            trimmed = formatExcelDate(numeric);
+          } else if (styles.decimalStyles.has(styleIndex)) {
+            trimmed = formatDecimal(trimmed, styles.decimalStyles.get(styleIndex));
+          } else {
+            trimmed = normalizeNumber(trimmed);
+          }
         }
       }
 
@@ -679,7 +764,7 @@
     }
 
     const sharedStrings = readSharedStrings(buffer, entries);
-    const dateStyles = readDateStyles(buffer, entries);
+    const styles = readCellStyles(buffer, entries);
     const sheetIndex = readSheetIndex(buffer, entries);
     const cells = new Map();
     const sheets = new Map();
@@ -694,7 +779,7 @@
         sharedStrings,
         cells,
         sheetLookup,
-        dateStyles,
+        styles,
       );
       sheets.set(sheetName, sheetLookup);
     }
@@ -707,8 +792,10 @@
     GROUP_SHEET_PREFIXES,
     IDENTITY_FIELDS,
     columnLabel,
+    decimalPlaces,
     detectReportGroups,
     extractReportIdentity,
+    formatDecimal,
     formatExcelDate,
     formatSource,
     inflateRaw,

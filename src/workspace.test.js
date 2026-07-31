@@ -60,6 +60,22 @@ async function loadWorkspace() {
 }
 
 /**
+ * Load the workspace with the report mapping and overlay renderers present,
+ * as the browser does. The overlay itself is stubbed: `rak-report-pdf.test.js`
+ * covers the real rendering, and this only needs the wiring exercised.
+ * @returns {Promise<Object>} The workspace API.
+ */
+async function loadMappedWorkspace() {
+  await import("./report-mapping.js");
+  globalThis.docuAlignRakReportPdf = {
+    createRakReportPdf: vi.fn(async () => new Blob([new Uint8Array([37, 80, 68, 70])], {
+      type: "application/pdf",
+    })),
+  };
+  return loadWorkspace();
+}
+
+/**
  * Replace the reader global so pipeline edge cases can be driven directly.
  * @param {Object} stub - Partial reader implementation.
  * @returns {void}
@@ -75,6 +91,8 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignXlsx;
     delete globalThis.docuAlignPdf;
     delete globalThis.docuAlignSummaryPdf;
+    delete globalThis.docuAlignReportMapping;
+    delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
     vi.stubGlobal("URL", Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => "blob:generated"),
@@ -90,6 +108,8 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignXlsx;
     delete globalThis.docuAlignPdf;
     delete globalThis.docuAlignSummaryPdf;
+    delete globalThis.docuAlignReportMapping;
+    delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -381,6 +401,116 @@ describe("workspace controller", () => {
     // A report without a job reference falls back to its group number.
     expect(reportIdentifier({ group: 3 })).toBe("report-3");
     expect(reportIdentifier({ group: 1, job_ref: "X/2026 522" })).toBe("X-2026-522");
+  });
+
+  it("builds every test report from its own worksheet group", async () => {
+    const { getExportDocuments, selectFile } = await loadMappedWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    await selectFile(workbook("lab-data.xlsx"));
+    const documents = getExportDocuments();
+
+    // Each report now publishes its own mapped model instead of pointing at
+    // the shared reference asset.
+    const first = documents.find((entry) => entry.slug === "X-2026-522-1");
+    const sixth = documents.find((entry) => entry.slug === "X-2026-522-6");
+    expect(first.assetPath).toBeNull();
+    const firstModel = JSON.parse(first.data);
+    const sixthModel = JSON.parse(sixth.data);
+    expect(firstModel.renderer).toBe("report");
+    expect(firstModel.report.jobRef).toBe("X-2026-522-1");
+    expect(firstModel.report.cover.sampleId).toBe("2-C");
+    expect(sixthModel.report.jobRef).toBe("X-2026-522-6");
+    expect(sixthModel.report.cover.sampleId).toBe("5-B");
+    expect(firstModel.report.cover.clientName).toBe("Xinsha Holding Pte Ltd");
+    // The published payload must stay within the public share bound.
+    expect(first.data.length).toBeLessThanOrEqual(100000);
+
+    vi.useFakeTimers();
+    document.querySelector("#pdf-export").click();
+    vi.advanceTimersByTime(7 * 350);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(7));
+
+    // Every report is generated now, so no download points at the static asset.
+    const hrefs = clickSpy.mock.contexts.map((anchor) => anchor.href);
+    expect(hrefs.filter((href) => href.includes("SampleOutput.pdf"))).toHaveLength(0);
+    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).toHaveBeenCalledTimes(6);
+    const renderedJobRefs = globalThis.docuAlignRakReportPdf.createRakReportPdf.mock.calls.map(
+      ([reports]) => reports[0].jobRef,
+    );
+    expect(renderedJobRefs).toEqual([
+      "X-2026-522-1",
+      "X-2026-522-2",
+      "X-2026-522-3",
+      "X-2026-522-4",
+      "X-2026-522-5",
+      "X-2026-522-6",
+    ]);
+  });
+
+  it("falls back to the reference report when the workbook cannot be mapped", async () => {
+    const { getExportDocuments, selectFile } = await loadMappedWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+    // A group the mapper rejects: the reader found CV1/TR1 sheets under names
+    // the semantic mapper does not recognise.
+    stubReader({
+      readWorkbook: () => ({
+        sheetNames: ["Cover", "Results"],
+        cells: new Map(),
+        sheets: new Map([["Cover", new Map()], ["Results", new Map()]]),
+        reportGroups: [{ group: 1, sheets: { CV1: "Cover", TR1: "Results" } }],
+      }),
+      extractReportIdentity: () => ({ job_ref: "X-9" }),
+    });
+
+    await selectFile(workbook("unmappable.xlsx"));
+    const [report] = getExportDocuments();
+    expect(report.assetPath).toBe("./SampleDocuments/SampleOutput.pdf");
+    expect(report.data).toBeNull();
+    expect(globalThis.docuAlignLogger.logWarn).toHaveBeenCalledWith(
+      "Workbook could not be mapped to report models",
+      expect.any(Error),
+      expect.objectContaining({ feature: "ReportMapping" }),
+    );
+
+    vi.useFakeTimers();
+    document.querySelector("#pdf-export").click();
+    vi.advanceTimersByTime(350);
+    vi.useRealTimers();
+    expect(clickSpy.mock.contexts[0].href).toContain("SampleOutput.pdf");
+    expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).not.toHaveBeenCalled();
+  });
+
+  it("reports a test report generation failure without blocking other exports", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    globalThis.docuAlignRakReportPdf.createRakReportPdf.mockRejectedValueOnce(
+      new Error("Template unavailable"),
+    );
+    globalThis.docuAlignLogger = { logError: vi.fn() };
+
+    await selectFile(workbook("lab-data.xlsx"));
+    vi.useFakeTimers();
+    document.querySelector("#pdf-export").click();
+    vi.advanceTimersByTime(7 * 350);
+    vi.useRealTimers();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Could not generate Test Report X-2026-522-1. Try exporting again.",
+      ),
+    );
+    expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
+      "Test report PDF generation failed",
+      expect.any(Error),
+      expect.objectContaining({
+        feature: "PdfTemplate",
+        operation: "pdf.copyAndOverlay",
+        documentSlug: "X-2026-522-1",
+      }),
+    );
   });
 
   it("plans the disabled documents again once the restriction is lifted", async () => {
