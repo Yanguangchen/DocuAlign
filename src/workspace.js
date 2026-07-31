@@ -26,11 +26,66 @@ const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
 
 /**
  * The test report document (`CV1` cover + `TR1` results) keeps the established
- * RAK report layout and is served from the static reference asset. It is
- * deliberately NOT generated from worksheet data -- the report format must not
- * change. Only the supporting worksheets are rendered by `src/pdf-writer.js`.
+ * RAK report layout: `src/rak-report-pdf.js` copies the five pages of this
+ * reference asset and overlays only the uploaded workbook's own values, so the
+ * approved layout, branding, and typography are preserved while the report
+ * carries the data of the file that was actually uploaded.
+ *
+ * The asset is also served unchanged as a fallback when a workbook cannot be
+ * mapped, so an unexpected layout degrades to the reference rather than
+ * failing the export.
  */
 const REPORT_ASSET_PATH = "./SampleDocuments/SampleOutput.pdf";
+
+/**
+ * The kind of document a planned export represents. Every planned document
+ * carries one so export coverage can be narrowed without removing any of the
+ * planning or rendering code behind it.
+ */
+const DOCUMENT_KINDS = Object.freeze({
+  REPORT: "report",
+  DATASHEET: "datasheet",
+  SUMMARY: "summary",
+  WORKSHEET: "worksheet",
+});
+
+/**
+ * TEMPORARY EXPORT RESTRICTION.
+ *
+ * Exporting is currently limited to the fixed-format `CV1` + `TR1` test report
+ * and the `Summary` document. The `DS1`/`SB1` datasheets and the remaining
+ * standalone worksheets (`coral + org`, …) are still planned, rendered, and
+ * serialised by the code below -- they are only withheld from the export plan
+ * by this list. Nothing supporting them has been deleted: call
+ * `setDisabledDocumentKinds([])` (or empty this list) to restore the full
+ * document export.
+ */
+const TEMPORARILY_DISABLED_DOCUMENT_KINDS = Object.freeze([
+  DOCUMENT_KINDS.DATASHEET,
+  DOCUMENT_KINDS.WORKSHEET,
+]);
+
+let disabledDocumentKinds = TEMPORARILY_DISABLED_DOCUMENT_KINDS;
+
+/**
+ * Choose which document kinds are withheld from the export.
+ * @param {string[]} [kinds] - Kinds to withhold. Defaults back to the
+ * temporary restriction; pass `[]` to export every planned document again.
+ * @returns {string[]} The kinds now withheld.
+ */
+function setDisabledDocumentKinds(kinds = TEMPORARILY_DISABLED_DOCUMENT_KINDS) {
+  disabledDocumentKinds = Object.freeze([...kinds]);
+  return disabledDocumentKinds;
+}
+
+/**
+ * Decide whether a planned document is currently exportable.
+ * @param {{kind: string}} plan - Planned document.
+ * @returns {boolean} True when the document's kind is not withheld.
+ */
+function isDocumentEnabled(plan) {
+  return !disabledDocumentKinds.includes(plan.kind);
+}
 
 /**
  * Gap between document downloads. Browsers throttle multiple programmatic
@@ -45,6 +100,7 @@ const REVOKE_DELAY_MS = 60000;
 let selectedSourceName = "";
 let parsedDocuments = null;
 let parsedSheets = new Map();
+let mappedReports = new Map();
 let downloadTimers = [];
 
 function formatFileSize(bytes) {
@@ -66,6 +122,7 @@ function setFeedback(message, emphasized) {
 function resetPipeline() {
   parsedDocuments = null;
   parsedSheets = new Map();
+  mappedReports = new Map();
   downloadTimers.forEach((timer) => clearTimeout(timer));
   downloadTimers = [];
   pipelineStep.classList.remove("is-active", "is-complete");
@@ -101,6 +158,60 @@ function failPipeline(error) {
 }
 
 /**
+ * Present the parsed workbook in the shape `src/report-mapping.js` expects.
+ *
+ * The dependency-free reader keys cells by A1 reference per sheet; the mapper
+ * reads plain objects and an image list. Images stay empty because the reader
+ * extracts cell values only -- the reference pages already carry the approved
+ * signatures, so the overlay leaves them in place.
+ * @param {{sheets: Map<string, Map<string, string>>}} workbook - Parsed workbook.
+ * @param {string} sourceName - Uploaded file name.
+ * @returns {{sourceName: string, sheets: Array<{name: string, cells: Object, images: Array}>}} Mapper input.
+ */
+function toMappingWorkbook(workbook, sourceName) {
+  return {
+    sourceName,
+    sheets: [...workbook.sheets].map(([name, cells]) => ({
+      name,
+      cells: Object.fromEntries(cells),
+      images: [],
+    })),
+  };
+}
+
+/**
+ * Map every worksheet group onto its semantic report model, keyed by group.
+ *
+ * A workbook whose sheets cannot be mapped is not a pipeline failure: the
+ * export falls back to serving the reference report, so the reason is logged
+ * and an empty map returned.
+ * @param {{sheets: Map<string, Map<string, string>>}} workbook - Parsed workbook.
+ * @param {string} sourceName - Uploaded file name.
+ * @returns {Map<number, Object>} Semantic report models by group index.
+ */
+function mapReportModels(workbook, sourceName) {
+  const mapper = globalThis.docuAlignReportMapping;
+  if (!mapper) return new Map();
+
+  try {
+    const models = mapper.buildMappedReports(toMappingWorkbook(workbook, sourceName));
+    return new Map(models.map((model) => [model.groupIndex, model]));
+  } catch (error) {
+    globalThis.docuAlignLogger?.logWarn?.(
+      "Workbook could not be mapped to report models",
+      error,
+      {
+        feature: "ReportMapping",
+        function: "mapReportModels",
+        operation: "mapping.buildMappedReports",
+        category: "WorkbookMapping",
+      },
+    );
+    return new Map();
+  }
+}
+
+/**
  * Run the extract/transform/validate pipeline against a real workbook.
  * @param {File} file - The selected Excel workbook.
  * @returns {Promise<void>} Resolves once the pipeline settles.
@@ -129,6 +240,7 @@ async function startPipeline(file) {
     }
 
     parsedSheets = workbook.sheets;
+    mappedReports = mapReportModels(workbook, file.name);
     parsedDocuments = planExportDocuments(workbook, reports);
     pipelineStages.forEach((stage) => {
       stage.classList.remove("is-active");
@@ -240,26 +352,38 @@ function reportIdentifier(report) {
  * cover plus `TR1` results) is one document, and the standalone worksheets --
  * the summary, the coral/organic reference, and every `DS1` and `SB1`
  * datasheet -- are each their own separate document.
+ *
+ * Documents whose kind is currently withheld (see
+ * `TEMPORARILY_DISABLED_DOCUMENT_KINDS`) are still planned here and then
+ * filtered out, so restoring them needs no change to this function.
  * @param {{sheetNames: string[], sheets: Map<string, Map<string, string>>}} workbook - Parsed workbook.
  * @param {Array<Object>} reports - Detected reports.
- * @returns {Array<{slug: string, title: string, subtitle: string, sheets: string[], renderer?: string}>} Planned documents.
+ * @param {Map<number, Object>} [models] - Semantic report models by group index.
+ * @returns {Array<{slug: string, title: string, subtitle: string, kind: string, sheets: string[], renderer?: string}>} Planned documents.
  */
-function planExportDocuments(workbook, reports) {
+function planExportDocuments(workbook, reports, models = mappedReports) {
   const documents = [];
   const claimed = new Set();
 
   reports.forEach((report) => {
     const identifier = reportIdentifier(report);
     // The cover and test-result sheets belong to the report, which keeps its
-    // established layout: it is served as-is, never re-rendered from the grid.
+    // established layout: the reference pages are copied and only this group's
+    // own values are overlaid, never re-laid-out from the worksheet grid.
     [report.sheets.CV1, report.sheets.TR1].filter(Boolean).forEach((name) => claimed.add(name));
-    documents.push({
+    const document = {
       slug: identifier,
       title: `Test Report ${report.job_ref || report.group}`,
       subtitle: "",
-      assetPath: REPORT_ASSET_PATH,
+      kind: DOCUMENT_KINDS.REPORT,
+      groupIndex: report.group,
       sheets: [],
-    });
+    };
+    // Without a mapped model there is nothing to overlay, so the reference
+    // report is served unchanged rather than exporting nothing at all.
+    if (models.has(report.group)) document.renderer = "report";
+    else document.assetPath = REPORT_ASSET_PATH;
+    documents.push(document);
 
     // Each supporting datasheet is exported as its own separate document.
     ["DS1", "SB1"].forEach((prefix) => {
@@ -270,6 +394,7 @@ function planExportDocuments(workbook, reports) {
         slug: `${identifier}-${prefix}`,
         title: `${prefix} Datasheet ${report.job_ref || report.group}`,
         subtitle: sheetName,
+        kind: DOCUMENT_KINDS.DATASHEET,
         sheets: [sheetName],
       });
     });
@@ -278,17 +403,21 @@ function planExportDocuments(workbook, reports) {
   // Anything outside a report group (Summary, coral + org, …) stands alone.
   workbook.sheetNames.forEach((sheetName) => {
     if (claimed.has(sheetName)) return;
+    const isSummary = sheetName.trim() === "Summary";
     const document = {
       slug: slugify(sheetName) || "sheet",
       title: sheetName.trim(),
       subtitle: "",
+      kind: isSummary ? DOCUMENT_KINDS.SUMMARY : DOCUMENT_KINDS.WORKSHEET,
       sheets: [sheetName],
     };
-    if (sheetName.trim() === "Summary") document.renderer = "summary";
+    if (isSummary) document.renderer = "summary";
     documents.push(document);
   });
 
-  return documents;
+  // Withhold the document kinds that are temporarily disabled. The planning
+  // above is deliberately left intact so the full export can be restored.
+  return documents.filter(isDocumentEnabled);
 }
 
 /**
@@ -298,6 +427,14 @@ function planExportDocuments(workbook, reports) {
  * @returns {Uint8Array|Promise<Uint8Array>} The generated PDF.
  */
 function renderDocument(plan, sheets) {
+  // The test report copies the approved reference pages and overlays this
+  // group's mapped values, so the exported PDF carries the uploaded data.
+  if (plan.renderer === "report") {
+    return globalThis.docuAlignRakReportPdf.createRakReportPdf([
+      mappedReports.get(plan.groupIndex),
+    ]);
+  }
+
   if (plan.renderer === "summary") {
     const summaryCells = sheets.get(plan.sheets[0]) ?? new Map();
     return globalThis.docuAlignSummaryPdf.createDocument(summaryCells);
@@ -334,6 +471,9 @@ function documentSections(plan, sheets) {
  * @returns {string} Bounded JSON document data.
  */
 function serializeDocumentData(plan, sheets) {
+  if (plan.renderer === "report") {
+    return JSON.stringify({ renderer: "report", report: mappedReports.get(plan.groupIndex) });
+  }
   if (plan.renderer === "summary") {
     const cells = sheets.get(plan.sheets[0]) ?? new Map();
     return JSON.stringify({ renderer: "summary", cells: [...cells.entries()] });
@@ -351,9 +491,12 @@ function downloadDocument(plan, baseName) {
   // Documents backed by a fixed asset (the test report) are served unchanged;
   // only the supporting worksheets are generated from parsed data.
   const isGenerated = !plan.assetPath;
-  const triggerDownload = (bytes) => {
+  const triggerDownload = (rendered) => {
+    // Renderers return either raw PDF bytes or a ready-made Blob.
     const url = isGenerated
-      ? URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      ? URL.createObjectURL(
+        rendered instanceof Blob ? rendered : new Blob([rendered], { type: "application/pdf" }),
+      )
       : new URL(plan.assetPath, globalThis.location.href).href;
 
     const download = document.createElement("a");
@@ -413,13 +556,14 @@ pdfExport.addEventListener("click", () => {
       const download = downloadDocument(plan, baseName);
       if (download instanceof Promise) {
         download.catch((error) => {
+          const isReport = plan.renderer === "report";
           globalThis.docuAlignLogger?.logError?.(
-            "Summary PDF generation failed",
+            isReport ? "Test report PDF generation failed" : "Summary PDF generation failed",
             error,
             {
-              feature: "SummaryPdf",
+              feature: isReport ? "PdfTemplate" : "SummaryPdf",
               function: "downloadDocument",
-              operation: "pdf.copyAndOverlaySummary",
+              operation: isReport ? "pdf.copyAndOverlay" : "pdf.copyAndOverlaySummary",
               category: "LocalPdfGeneration",
               documentSlug: plan.slug,
             },
@@ -465,6 +609,7 @@ applyRuntimeNotice();
 // Exposed read-only for focused tests and support-console inspection. Runtime
 // UI code continues to use the locally scoped functions above.
 globalThis.docuAlignWorkspace = Object.freeze({
+  DOCUMENT_KINDS,
   advancePipeline,
   applyRuntimeNotice,
   clearFile,
@@ -476,6 +621,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   reportIdentifier,
   resetPipeline,
   selectFile,
+  setDisabledDocumentKinds,
   setFeedback,
   startPipeline,
 });

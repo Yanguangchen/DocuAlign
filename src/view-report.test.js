@@ -168,6 +168,47 @@ describe("view-report module", () => {
       expect(text).toContain("(Sieve)");
     });
 
+    it("rebuilds a shared test report by overlaying its mapped values", async () => {
+      const report = { groupIndex: 2, jobRef: "X-2026-522-2", cover: { sampleId: "3-A" } };
+      const createRakReportPdf = vi.fn(async () =>
+        new Blob([new Uint8Array([37, 80, 68, 70])], { type: "application/pdf" }));
+      globalThis.docuAlignRakReportPdf = { createRakReportPdf };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = await resolveDocumentUrl(
+        share({
+          reportName: "Test Report X-2026-522-2",
+          documentData: JSON.stringify({ renderer: "report", report }),
+        }),
+      );
+
+      expect(url).toBe("blob:rebuilt");
+      // The recipient sees the uploaded workbook's report, not the reference.
+      expect(createRakReportPdf).toHaveBeenCalledWith([report]);
+      const [blob] = URL.createObjectURL.mock.calls[0];
+      expect(blob.type).toBe("application/pdf");
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("falls back to the stored PDF when a shared report cannot be rebuilt", async () => {
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async () => {
+          throw new Error("Template unavailable");
+        }),
+      };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      const url = await resolveDocumentUrl(
+        share({
+          pdfUrl: "SampleDocuments/SampleOutput.pdf",
+          documentData: JSON.stringify({ renderer: "report", report: { jobRef: "X-1" } }),
+        }),
+      );
+
+      expect(url).toBe("SampleDocuments/SampleOutput.pdf");
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
     it("rebuilds a Summary share with the fixed-format renderer", async () => {
       const createDocument = vi.fn(async (cells) => {
         expect(cells).toEqual(new Map([["U10", "X-2026-522"]]));

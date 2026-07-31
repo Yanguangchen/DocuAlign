@@ -217,6 +217,29 @@ describe("Summary sample-template PDF renderer", () => {
     );
   });
 
+  it("renders every result row a longer workbook holds", async () => {
+    // The reference workbook stops at row 27; a file with more cargo holds
+    // must not have its extra rows silently dropped.
+    const cells = new Map([
+      ["A18", "08/04/2026"],
+      ["C18", "2-C"],
+      ["A28", "09/04/2026"],
+      ["C28", "6-A"],
+      ["A31", "09/04/2026"],
+      ["C31", "7-B"],
+      // Blank cells and Excel's phantom out-of-table references must not
+      // stretch the table past its real last row.
+      ["C44", "   "],
+      ["C50", null],
+      ["XEM60", "Date received"],
+    ]);
+    await import("./summary-pdf.js");
+    const plan = globalThis.docuAlignSummaryPdf.buildOverlayPlan(cells);
+
+    expect(plan.rows).toHaveLength(3);
+    expect(plan.rows.map((row) => row[1])).toEqual(["2-C", "6-A", "7-B"]);
+  });
+
   it("removes blank result rows and supports a direct-file embedded template", async () => {
     const cells = await sampleSummaryCells();
     cells.delete("A23");

@@ -292,6 +292,45 @@ describe("xlsx reader", () => {
     expect(reader.normalizeNumber("N/A")).toBe("N/A");
   });
 
+  it("displays fixed-decimal cells at the precision their format shows", async () => {
+    // The renderers draw these strings verbatim, so a cell Excel shows as 35
+    // must not reach the PDF as its cached 34.9041486172.
+    expect(parsed.cells.get("'TR1'!P56")).toBe("35");
+    expect(parsed.cells.get("'TR1'!R33")).toBe("9.6");
+    expect(parsed.cells.get("'TR1'!U50")).toBe("1.65");
+    expect(parsed.cells.get("'Summary'!L18")).toBe("1.7");
+    expect(parsed.cells.get("'Summary'!M18")).toBe("38");
+    expect(parsed.cells.get("'Summary'!AA18")).toBe("0.12");
+    // General-formatted cells keep the cleaned cached value.
+    expect(parsed.cells.get("'DS1  (2)'!V14")).toBe("1.8");
+
+    expect(reader.formatDecimal("34.9041486172", 1)).toBe("34.9");
+    expect(reader.formatDecimal("2", 2)).toBe("2.00");
+    // Excel rounds the displayed decimal half away from zero; toFixed would
+    // round the binary double and show 20.1 and -20.1 here.
+    expect(reader.formatDecimal("20.15", 1)).toBe("20.2");
+    expect(reader.formatDecimal("-20.15", 1)).toBe("-20.2");
+    // Values only expressible in exponential form keep plain fixed rounding.
+    expect(reader.formatDecimal("1e-7", 2)).toBe("0.00");
+    // Non-numeric text is returned untouched.
+    expect(reader.formatDecimal("<1", 1)).toBe("<1");
+  });
+
+  it("reads decimal places only from plain number formats", () => {
+    expect(reader.decimalPlaces("0.00")).toBe(2);
+    expect(reader.decimalPlaces("#,##0.0_);(#,##0.0)")).toBe(1);
+    expect(reader.decimalPlaces("0")).toBe(0);
+    expect(reader.decimalPlaces('"USD "#,##0.000')).toBe(3);
+    expect(reader.decimalPlaces("[Red]0.0")).toBe(1);
+    // Formats that rescale or restructure the value are rejected, because
+    // rounding alone would not reproduce what Excel displays.
+    expect(reader.decimalPlaces("0.0%")).toBeNull();
+    expect(reader.decimalPlaces("0.00E+00")).toBeNull();
+    expect(reader.decimalPlaces("# ?/?")).toBeNull();
+    expect(reader.decimalPlaces("dd/mm/yyyy")).toBeNull();
+    expect(reader.decimalPlaces("@")).toBeNull();
+  });
+
   it("treats cells as plain numbers when the workbook declares no styles", async () => {
     const sheet =
       '<worksheet><sheetData><row><c r="A1" s="7"><v>46120</v></c></row></sheetData></worksheet>';
