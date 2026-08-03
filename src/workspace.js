@@ -161,10 +161,11 @@ function failPipeline(error) {
  * Present the parsed workbook in the shape `src/report-mapping.js` expects.
  *
  * The dependency-free reader keys cells by A1 reference per sheet; the mapper
- * reads plain objects and an image list. Images stay empty because the reader
- * extracts cell values only -- the reference pages already carry the approved
- * signatures, so the overlay leaves them in place.
- * @param {{sheets: Map<string, Map<string, string>>}} workbook - Parsed workbook.
+ * reads plain objects and an image list. The signatures and appendix
+ * photographs travel as embedded pictures anchored to worksheet cells, so the
+ * reader's per-sheet picture list is passed straight through -- without it the
+ * report would keep the reference pages' own photographs.
+ * @param {{sheets: Map<string, Map<string, string>>, images?: Map<string, Array>}} workbook - Parsed workbook.
  * @param {string} sourceName - Uploaded file name.
  * @returns {{sourceName: string, sheets: Array<{name: string, cells: Object, images: Array}>}} Mapper input.
  */
@@ -174,7 +175,7 @@ function toMappingWorkbook(workbook, sourceName) {
     sheets: [...workbook.sheets].map(([name, cells]) => ({
       name,
       cells: Object.fromEntries(cells),
-      images: [],
+      images: workbook.images?.get(name) ?? [],
     })),
   };
 }
@@ -462,6 +463,34 @@ function documentSections(plan, sheets) {
 }
 
 /**
+ * Describe a mapped report's embedded pictures without their bytes.
+ *
+ * The downloaded report renders from the in-memory model, which carries the
+ * workbook's signatures and appendix photographs in full. A published share
+ * cannot: one report's pictures run to megabytes, far past the 100,000
+ * character `documentData` bound the Firestore rules validate in a single
+ * expression. Only the picture metadata travels, so a share rebuilt by the
+ * public viewer keeps the reference pages' own artwork.
+ * @param {Object} report - Semantic report model.
+ * @returns {Object} The report with picture bytes replaced by their metadata.
+ */
+function withoutPictureBytes(report) {
+  const describe = (asset) => (asset
+    ? { name: asset.name, row: asset.row, column: asset.column, mimeType: asset.mimeType }
+    : asset);
+
+  return Object.assign({}, report, {
+    assets: {
+      preparedSignature: describe(report.assets?.preparedSignature),
+      authorisedSignature: describe(report.assets?.authorisedSignature),
+    },
+    appendix: Object.assign({}, report.appendix, {
+      photos: (report.appendix?.photos ?? []).map(describe),
+    }),
+  });
+}
+
+/**
  * Serialise one generated document for persistence and public sharing.
  * The Summary retains its sparse A1 cell lookup so the public viewer can use
  * the approved fixed-format template; generic supporting sheets keep their
@@ -472,7 +501,10 @@ function documentSections(plan, sheets) {
  */
 function serializeDocumentData(plan, sheets) {
   if (plan.renderer === "report") {
-    return JSON.stringify({ renderer: "report", report: mappedReports.get(plan.groupIndex) });
+    return JSON.stringify({
+      renderer: "report",
+      report: withoutPictureBytes(mappedReports.get(plan.groupIndex)),
+    });
   }
   if (plan.renderer === "summary") {
     const cells = sheets.get(plan.sheets[0]) ?? new Map();

@@ -316,6 +316,92 @@ describe("xlsx reader", () => {
     expect(reader.formatDecimal("<1", 1)).toBe("<1");
   });
 
+  it("extracts embedded pictures with the cell they are anchored to", () => {
+    // Signatures and appendix photographs are pictures, not cell values, so
+    // the report would fall back to the reference pages' artwork without them.
+    const images = parsed.images.get("TR1");
+    const photos = images.filter((image) => image.row >= 147 && image.column === 5);
+    expect(photos).toHaveLength(2);
+    photos.forEach((photo) => {
+      expect(photo.mimeType).toBe("image/jpeg");
+      // A picture pdf-lib can embed starts with the JPEG start-of-image marker,
+      // which only survives if the bytes are copied out of the archive.
+      expect([photo.bytes[0], photo.bytes[1]]).toEqual([0xff, 0xd8]);
+      expect(photo.bytes.byteOffset).toBe(0);
+    });
+    // Each group photographs its own cargo hold, so no two share a picture.
+    const other = parsed.images.get("TR1 (3)").filter((image) =>
+      image.row >= 147 && image.column === 5);
+    expect(other[0].bytes.length).not.toBe(photos[0].bytes.length);
+
+    const signature = images.find((image) => image.row === 129 && image.column === 2);
+    expect(signature.mimeType).toBe("image/png");
+    expect([...signature.bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+    // Sheets without pictures still report an empty list rather than nothing.
+    expect(parsed.images.get("coral + org")).toEqual([]);
+  });
+
+  it("tolerates the picture shapes a hand-built drawing part can take", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+    const drawing = [
+      // Absolute relationship target, no picture name, and no anchor cell.
+      "<xdr:wsDr>",
+      '<xdr:oneCellAnchor><xdr:ext/><xdr:pic><xdr:blipFill>',
+      '<a:blip r:embed="rId10"/></xdr:blipFill></xdr:pic></xdr:oneCellAnchor>',
+      // Prefixless elements, anchored on a cell, with a media type pdf-lib
+      // cannot embed -- it must be skipped rather than handed to the renderer.
+      "<twoCellAnchor><from><col>4</col><row>9</row></from>",
+      '<pic><nvPicPr><cNvPr name="Bitmap"/></nvPicPr>',
+      '<blipFill><blip r:embed="rId11"/></blipFill></pic></twoCellAnchor>',
+      // Anchor whose relationship does not resolve at all.
+      '<twoCellAnchor><from><col>1</col><row>2</row></from>',
+      '<blip r:embed="rIdMissing"/></twoCellAnchor>',
+      // Relationship target with redundant path segments to walk through.
+      '<twoCellAnchor><from><col>2</col><row>7</row></from>',
+      '<pic><nvPicPr><cNvPr name="Stamp"/></nvPicPr>',
+      '<blipFill><blip r:embed="rId12"/></blipFill></pic></twoCellAnchor>',
+      "</xdr:wsDr>",
+    ].join("");
+
+    const archive = buildZip([
+      ...minimalWorkbookParts("<worksheet><sheetData/></worksheet>"),
+      {
+        name: "xl/worksheets/_rels/sheet1.xml.rels",
+        data: '<Relationships><Relationship Id="rId5" '
+          + 'Target="../drawings/drawing1.xml"/></Relationships>',
+      },
+      { name: "xl/drawings/drawing1.xml", data: drawing },
+      {
+        name: "xl/drawings/_rels/drawing1.xml.rels",
+        data: '<Relationships>'
+          + '<Relationship Id="rId10" Target="/xl/media/logo.png"/>'
+          + '<Relationship Id="rId11" Target="../media/scan.bmp"/>'
+          + '<Relationship Id="rId12" Target="./..//media/logo.png"/>'
+          // A relationship declaring no target at all must not throw.
+          + '<Relationship Id="rId13"/>'
+          + "</Relationships>",
+      },
+      { name: "xl/media/logo.png", data: png },
+      { name: "xl/media/scan.bmp", data: new Uint8Array([1, 2, 3]) },
+    ]);
+
+    const workbook = await reader.readWorkbook(new Blob([archive]));
+    const images = workbook.images.get("CV1");
+
+    // Only the embeddable pictures survive; the bitmap and the unresolvable
+    // relationship are both dropped.
+    expect(images).toHaveLength(2);
+    expect(images[0]).toMatchObject({
+      name: "Workbook image",
+      mimeType: "image/png",
+      row: -1,
+      column: -1,
+    });
+    expect(images[1]).toMatchObject({ name: "Stamp", row: 7, column: 2 });
+    images.forEach((image) => expect([...image.bytes]).toEqual([...png]));
+  });
+
   it("reads decimal places only from plain number formats", () => {
     expect(reader.decimalPlaces("0.00")).toBe(2);
     expect(reader.decimalPlaces("#,##0.0_);(#,##0.0)")).toBe(1);

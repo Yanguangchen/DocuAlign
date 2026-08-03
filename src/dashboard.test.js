@@ -295,6 +295,102 @@ describe("dashboard module", () => {
       expect(reportCard({ reportName: "Unsaved" })).not.toContain("share-button");
     });
 
+    it("publishes every stored document behind one link on click", async () => {
+      // The whole point: no ticking documents into a package first.
+      const documents = [
+        { slug: "X-1", title: "Test Report X-1" },
+        { slug: "X-1-DS1", title: "DS1 Datasheet X-1" },
+        { slug: "Summary", title: "Summary" },
+      ];
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve(documents));
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderOneReport();
+
+      // The card says how many documents the link will carry.
+      const button = document.querySelector(".share-button");
+      expect(button.textContent).toContain("3 documents");
+
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishBundle).toHaveBeenCalledWith(
+        expect.anything(),
+        documents.map((document) => ({
+          report: expect.objectContaining({ id: "doc-1" }),
+          document,
+        })),
+        { name: "Report 1" },
+      );
+      expect(mockPublishReport).not.toHaveBeenCalled();
+      expect(document.querySelector(".share-link a").getAttribute("href")).toBe(BUNDLE_URL);
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
+    it("names the package after the workbook when the report is untitled", async () => {
+      mockFetchReportDocuments.mockImplementation(() =>
+        Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      mockFetchReports.mockResolvedValueOnce([
+        { id: "doc-1", sourceFileName: "lab-data.xlsx", matchFilter: true },
+      ]);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-share" });
+      await new Promise((r) => setTimeout(r, 15));
+
+      document.querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishBundle).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        { name: "lab-data.xlsx" },
+      );
+      expect(dashboard).toBeTruthy();
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
+    it("falls back to an unnamed package when the report has no name at all", async () => {
+      mockFetchReportDocuments.mockImplementation(() =>
+        Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      mockFetchReports.mockResolvedValueOnce([{ id: "doc-1", matchFilter: true }]);
+      await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-share" });
+      await new Promise((r) => setTimeout(r, 15));
+
+      document.querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishBundle).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        { name: null },
+      );
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
+    it("explains a package that exceeds the size limit instead of inviting a retry", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockFetchReportDocuments.mockImplementation(() =>
+        Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
+      mockPublishBundle.mockRejectedValueOnce(
+        new TypeError("A package can hold at most 25 documents."),
+      );
+      await renderOneReport();
+
+      document.querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector(".share-link").textContent).toBe(
+        "A package can hold at most 25 documents.",
+      );
+      consoleSpy.mockRestore();
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
     it("publishes the report and shows the public URL on click", async () => {
       mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
       await renderOneReport();
