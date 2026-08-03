@@ -17,7 +17,6 @@
   const BLACK = Object.freeze([0, 0, 0]);
 
   /** Exact table geometry measured from `sample_summary.pdf`, in PDF points. */
-  const BODY_TOP = 352.1;
   const BODY_ROW_HEIGHT = 10.8;
   const REFERENCE_BODY_BOTTOM = 287;
 
@@ -28,8 +27,8 @@
    * different weight, or leaving part of the reference's own rule underneath,
    * is what makes the finished table look unevenly ruled.
    *
-   * These are deliberately distinct from `TABLE_BOUNDARIES`: those position
-   * cell *text* and sit up to 1.2pt to the left of the drawn rules.
+   * Every mask and every value is bounded by these rules too, so replacing a
+   * cell's contents cannot erase the lines that box it in.
    */
   const RULE_THICKNESS = 0.84;
 
@@ -66,36 +65,6 @@
     746.88,
     788.16,
   ]);
-  const TABLE_BOUNDARIES = Object.freeze([
-    35.35,
-    82.7,
-    117.41,
-    144.14,
-    171.7,
-    199.27,
-    226.83,
-    254.4,
-    281.75,
-    309.32,
-    336.88,
-    374.34,
-    408.43,
-    447.14,
-    472.18,
-    497.22,
-    522.05,
-    547.09,
-    572.13,
-    597.17,
-    622.21,
-    647.04,
-    672.08,
-    697.12,
-    721.95,
-    747.2,
-    788.44,
-  ]);
-
   const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const SUMMARY_COLUMNS = new Set([...LETTERS, "AA"]);
 
@@ -388,6 +357,22 @@
   }
 
   /**
+   * The interior of one table cell: the gap between its two vertical rules.
+   *
+   * Masks and text are both bounded by this, so replacing a cell's value can
+   * never paint over the rules that box it in. Deriving the span from the text
+   * boundaries instead erases them: those sit up to 1.2pt left of the rules.
+   * @param {number} slot - Zero-based column index.
+   * @returns {{left: number, right: number}} Inner edges of the cell.
+   */
+  function cellInterior(slot) {
+    return {
+      left: TABLE_RULE_X.at(slot) + RULE_THICKNESS,
+      right: TABLE_RULE_X.at(slot + 1),
+    };
+  }
+
+  /**
    * Replace worksheet-driven values in the two lower header rows.
    * @param {object} page - pdf-lib page.
    * @param {Object} plan - Summary overlay model.
@@ -404,17 +389,15 @@
     ];
 
     headerValues.forEach(([slot, text]) => {
-      const left = TABLE_BOUNDARIES.at(slot);
-      const right = TABLE_BOUNDARIES.at(slot + 1);
-      whiteout(page, pdfLib, left + 0.6, 363.55, right - left - 1.2, 12.6);
+      const { left, right } = cellInterior(slot);
+      whiteout(page, pdfLib, left, 363.55, right - left, 12.6);
       fittedText(page, text, left, right, 367.66, fonts.regular, 7.44, "center", pdfLib);
     });
 
     plan.limits.forEach((text, index) => {
       const slot = index + 3;
-      const left = TABLE_BOUNDARIES.at(slot);
-      const right = TABLE_BOUNDARIES.at(slot + 1);
-      whiteout(page, pdfLib, left + 0.6, 352.65, right - left - 1.2, 9.7);
+      const { left, right } = cellInterior(slot);
+      whiteout(page, pdfLib, left, 352.65, right - left, 9.7);
       fittedText(page, text, left, right, 354.58, fonts.bold, 7.44, "center", pdfLib);
     });
   }
@@ -459,17 +442,8 @@
       const baseline = 344.62 - rowIndex * BODY_ROW_HEIGHT;
       row.forEach((text, slot) => {
         const font = slot === 2 ? fonts.bold : fonts.regular;
-        fittedText(
-          page,
-          text,
-          TABLE_BOUNDARIES.at(slot),
-          TABLE_BOUNDARIES.at(slot + 1),
-          baseline,
-          font,
-          7.44,
-          "center",
-          pdfLib,
-        );
+        const { left, right } = cellInterior(slot);
+        fittedText(page, text, left, right, baseline, font, 7.44, "center", pdfLib);
       });
     });
   }
@@ -551,10 +525,8 @@
 
   globalThis.docuAlignSummaryPdf = Object.freeze({
     BODY_ROW_HEIGHT,
-    BODY_TOP,
     BODY_TOP_RULE,
     RULE_THICKNESS,
-    TABLE_BOUNDARIES,
     TABLE_RULE_X,
     buildOverlayPlan,
     cellsFromDocumentData,

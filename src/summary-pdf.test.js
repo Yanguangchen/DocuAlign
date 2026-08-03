@@ -268,6 +268,47 @@ describe("Summary sample-template PDF renderer", () => {
     );
   });
 
+  it("never masks over the vertical rules when replacing header values", async () => {
+    const cells = await sampleSummaryCells();
+    await import("./summary-pdf.js");
+    const renderer = globalThis.docuAlignSummaryPdf;
+
+    const drawn = [];
+    const page = {
+      drawRectangle: (options) => drawn.push(options),
+      drawText: () => {},
+    };
+    const recordingPdfLib = {
+      PDFDocument: {
+        load: async () => ({
+          getPageCount: () => 1,
+          getPage: () => page,
+          embedFont: async () => ({ widthOfTextAtSize: (text) => text.length * 4 }),
+          save: async () => new Uint8Array([37, 80, 68, 70]),
+        }),
+      },
+      StandardFonts: { Helvetica: "Helvetica", HelveticaBold: "Helvetica-Bold" },
+      rgb: (red, green, blue) => `rgb(${red},${green},${blue})`,
+    };
+
+    await renderer.createDocument(cells, { pdfLib: recordingPdfLib, templateBytes });
+
+    // The two header rows are masked cell by cell and their rules are never
+    // redrawn, so a mask that overlaps one erases it for good.
+    const headerMasks = drawn.filter((shape) =>
+      shape.color === "rgb(1,1,1)" && shape.y >= 352 && shape.y < 377 && shape.width < 100);
+    expect(headerMasks.length).toBeGreaterThan(20);
+
+    const overlaps = [];
+    headerMasks.forEach((mask) => {
+      renderer.TABLE_RULE_X.forEach((x) => {
+        const ruleRight = x + renderer.RULE_THICKNESS;
+        if (mask.x < ruleRight && mask.x + mask.width > x) overlaps.push({ mask: mask.x, rule: x });
+      });
+    });
+    expect(overlaps).toEqual([]);
+  });
+
   it("renders every result row a longer workbook holds", async () => {
     // The reference workbook stops at row 27; a file with more cargo holds
     // must not have its extra rows silently dropped.
