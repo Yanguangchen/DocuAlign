@@ -7,13 +7,6 @@
 (() => {
   const PAGE_HEIGHT = 841.68;
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
-  const REFERENCE_DATA_HASH = "c2863275";
-  const REFERENCE_ASSET_HASHES = Object.freeze([
-    "2dbe03bf",
-    "281bfde9",
-    "efeecd15",
-    "0baea1d7",
-  ]);
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({
@@ -30,55 +23,6 @@
       dashArray: Object.freeze([5, 3]),
     }),
   });
-
-  function stringHash(value) {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index += 1) {
-      hash ^= value.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16).padStart(8, "0");
-  }
-
-  function byteHash(bytes) {
-    if (!(bytes instanceof Uint8Array)) return "missing";
-    let hash = 2166136261;
-    for (const byte of bytes) {
-      hash ^= byte;
-      hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16).padStart(8, "0");
-  }
-
-  function reportDataHash(report) {
-    return stringHash(JSON.stringify({
-      cover: report.cover,
-      psd: report.psd,
-      siltCoral: report.siltCoral,
-      moisture: report.moisture,
-      directShear: report.directShear,
-      organicMatter: report.organicMatter,
-      metals: report.metals,
-      signoff: report.signoff,
-    }));
-  }
-
-  /**
-   * Detect the exact report represented by SampleOutput.pdf. When every mapped
-   * value and embedded image matches, copied template pages need no overlays
-   * and are therefore visually identical to the approved reference.
-   * @param {object} report - Semantic report model.
-   * @returns {boolean} Whether the report is the reference sample.
-   */
-  function matchesReferenceReport(report) {
-    const assets = [
-      report.assets?.preparedSignature,
-      report.assets?.authorisedSignature,
-      ...(report.appendix?.photos ?? []),
-    ].map((asset) => byteHash(asset?.bytes));
-    return reportDataHash(report) === REFERENCE_DATA_HASH
-      && JSON.stringify(assets) === JSON.stringify(REFERENCE_ASSET_HASHES);
-  }
 
   function pagePlan() {
     return {
@@ -668,38 +612,32 @@
       regular: await outputDocument.embedFont(pdfLib.StandardFonts.Helvetica),
       bold: await outputDocument.embedFont(pdfLib.StandardFonts.HelveticaBold),
     };
-    let referenceReportCount = 0;
     let overlayReportCount = 0;
     let valueMaskCount = 0;
     let maxValueMaskHeight = 0;
     let chartCount = 0;
     let imageOverlayCount = 0;
 
+    // Every report is overlaid from its own mapped values, including one whose
+    // data happens to equal the reference sample's. Copying the reference
+    // pages untouched for that case would leave one report in the document
+    // carrying the reference's values and typography rather than the uploaded
+    // workbook's -- the exported report must never be the static asset.
     for (const report of reports) {
       const pages = await outputDocument.copyPages(templateDocument, [0, 1, 2, 3, 4]);
       pages.forEach((page) => outputDocument.addPage(page));
-      if (matchesReferenceReport(report)) {
-        referenceReportCount += 1;
-      } else {
-        overlayReportCount += 1;
-        const plan = buildOverlayPlan(report);
-        for (const page of plan) {
-          const valueMasks = page.whiteouts.filter((mask) => mask.kind === "value-mask");
-          valueMaskCount += valueMasks.length;
-          for (const mask of valueMasks) {
-            maxValueMaskHeight = Math.max(maxValueMaskHeight, mask.height);
-          }
-          chartCount += (page.chart ? 1 : 0) + (page.charts?.length ?? 0);
-          imageOverlayCount += page.images.length;
+      overlayReportCount += 1;
+      const plan = buildOverlayPlan(report);
+      for (const page of plan) {
+        const valueMasks = page.whiteouts.filter((mask) => mask.kind === "value-mask");
+        valueMaskCount += valueMasks.length;
+        for (const mask of valueMasks) {
+          maxValueMaskHeight = Math.max(maxValueMaskHeight, mask.height);
         }
-        await applyOverlayPlan(
-          outputDocument,
-          pages,
-          plan,
-          fonts,
-          pdfLib,
-        );
+        chartCount += (page.chart ? 1 : 0) + (page.charts?.length ?? 0);
+        imageOverlayCount += page.images.length;
       }
+      await applyOverlayPlan(outputDocument, pages, plan, fonts, pdfLib);
     }
     const bytes = await outputDocument.save();
     globalThis.docuAlignLogger?.logInfo?.("PDF template rendering completed", {
@@ -710,7 +648,6 @@
       templateSource: options.templateBytes ? "injected" : "bundled",
       reportCount: reports.length,
       copiedPageCount: reports.length * 5,
-      referenceReportCount,
       overlayReportCount,
       valueMaskCount,
       maxValueMaskHeight,
@@ -725,6 +662,5 @@
     GRADING_SERIES_STYLES,
     buildOverlayPlan,
     createRakReportPdf,
-    matchesReferenceReport,
   });
 })();

@@ -73,11 +73,13 @@ describe("RAK sample-template PDF renderer", () => {
     });
   });
 
-  it("copies the exact five reference pages for the matching sample report", async () => {
+  it("overlays even the report whose data equals the reference sample", async () => {
     const reports = await sampleReports();
+    // Group 2 is the report SampleOutput.pdf was produced from. It must still
+    // be built from the workbook: serving the reference pages untouched would
+    // put one static report in the export, in the reference's own typography.
     const sample = reports.find((report) => report.groupIndex === 2);
 
-    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport(sample)).toBe(true);
     const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
       [sample],
       templateOptions(),
@@ -87,6 +89,7 @@ describe("RAK sample-template PDF renderer", () => {
 
     expect(blob.type).toBe("application/pdf");
     expect(output.getPageCount()).toBe(5);
+    // The approved geometry still comes from the copied reference pages.
     expect(output.getPages().map((page) => page.getSize())).toEqual(
       template.getPages().map((page) => page.getSize()),
     );
@@ -95,11 +98,13 @@ describe("RAK sample-template PDF renderer", () => {
       expect.objectContaining({
         reportCount: 1,
         copiedPageCount: 5,
-        referenceReportCount: 1,
-        overlayReportCount: 0,
-        valueMaskCount: 0,
+        overlayReportCount: 1,
+        valueMaskCount: expect.any(Number),
       }),
     );
+    const [, telemetry] = globalThis.docuAlignLogger.logInfo.mock.calls.at(-1);
+    expect(telemetry.valueMaskCount).toBeGreaterThan(0);
+    expect(telemetry.imageOverlayCount).toBeGreaterThan(0);
   });
 
   it("builds overlays at the measured sample-PDF coordinates", async () => {
@@ -115,7 +120,6 @@ describe("RAK sample-template PDF renderer", () => {
       },
     };
 
-    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport(changed)).toBe(false);
     const plan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(changed);
 
     expect(plan).toHaveLength(5);
@@ -179,12 +183,6 @@ describe("RAK sample-template PDF renderer", () => {
     expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "" }));
     expect(edgePlan[0].texts).toContainEqual(expect.objectContaining({ text: "MethodOnly" }));
     expect(edgePlan[4].images).toHaveLength(2);
-    expect(globalThis.docuAlignRakReportPdf.matchesReferenceReport({
-      ...changed,
-      assets: {},
-      appendix: undefined,
-    })).toBe(false);
-
     const edgeBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
       [edgeReport],
       templateOptions(),
@@ -215,8 +213,8 @@ describe("RAK sample-template PDF renderer", () => {
       expect.objectContaining({
         reportCount: 6,
         copiedPageCount: 30,
-        referenceReportCount: 1,
-        overlayReportCount: 5,
+        // Every report is overlaid; none is served as the reference asset.
+        overlayReportCount: 6,
       }),
     );
   });
