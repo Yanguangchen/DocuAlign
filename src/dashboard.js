@@ -178,11 +178,15 @@ export function reportCard(report) {
     : "";
   // Only saved documents can be shared: the public snapshot references the
   // Firestore id, so a report without one has nothing durable to point at.
+  const documentCount = documentsFor(report.id).length;
+  const shareLabel = documentCount > 1
+    ? `Create public link (${documentCount} documents)`
+    : "Create public link";
   const share = report.id
     ? `
       <div class="report-share">
         <button class="share-button" type="button" data-report-id="${escapeHtml(report.id)}">
-          Create public link
+          ${escapeHtml(shareLabel)}
         </button>
         <label class="bundle-select">
           <input
@@ -295,26 +299,51 @@ export async function handleBundleClick() {
 // Publish the clicked report as a public capability URL and surface the link
 // inside the card. The link keeps working for anyone who has it until the
 // share document is deleted (revoked) in Firestore.
+//
+// Every document the report holds goes into that one link: ticking each
+// document into a package first is a chore, and a recipient sent a link to a
+// report expects its datasheets and summary alongside it. The package
+// checkboxes remain for the narrower job of mixing documents across reports.
 export async function handleShareClick(button) {
   const report = allReports.find((entry) => entry.id === button.dataset.reportId);
   if (!report) return;
 
   const output = button.closest(".report-share")?.querySelector(".share-link");
+  const documents = documentsFor(report.id);
   button.disabled = true;
 
   try {
-    const token = await trackOperation(
-      "Publish public share link",
-      {
-        feature: "PublicShare",
-        function: "handleShareClick",
-        operation: "firestore.setDoc",
-        collection: "docuAlignPublicShares",
-        safeIdentifier: report.id,
-      },
-      () => publishReport(db, report),
-    );
-    const url = buildPublicUrl(token);
+    // Reports saved before documents were persisted have only themselves to
+    // publish, and a lone document reads better as a plain share than as a
+    // package of one.
+    const token = documents.length > 0
+      ? await trackOperation(
+        "Publish report package link",
+        {
+          feature: "PublicShare",
+          function: "handleShareClick",
+          operation: "firestore.setDoc",
+          collection: "docuAlignPublicBundles",
+          safeIdentifier: report.id,
+        },
+        () => publishBundle(
+          db,
+          documents.map((document) => ({ report, document })),
+          { name: report.reportName || report.sourceFileName || null },
+        ),
+      )
+      : await trackOperation(
+        "Publish public share link",
+        {
+          feature: "PublicShare",
+          function: "handleShareClick",
+          operation: "firestore.setDoc",
+          collection: "docuAlignPublicShares",
+          safeIdentifier: report.id,
+        },
+        () => publishReport(db, report),
+      );
+    const url = documents.length > 0 ? buildBundleUrl(token) : buildPublicUrl(token);
 
     if (output) {
       const anchor = document.createElement("a");
@@ -328,11 +357,14 @@ export async function handleShareClick(button) {
     button.textContent = "Public link created";
 
     await copyToClipboard(url, "handleShareClick");
-  } catch {
-    // Failure already logged by trackOperation; recover the UI.
+  } catch (error) {
+    // Failure already logged by trackOperation; recover the UI. A package that
+    // is simply too large needs its own wording, because retrying cannot help.
     button.disabled = false;
     if (output) {
-      output.textContent = "Could not create the public link. Try again.";
+      output.textContent = error instanceof TypeError
+        ? error.message
+        : "Could not create the public link. Try again.";
       output.hidden = false;
     }
   }
