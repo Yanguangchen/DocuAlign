@@ -423,8 +423,15 @@ describe("workspace controller", () => {
     expect(sixthModel.report.jobRef).toBe("X-2026-522-6");
     expect(sixthModel.report.cover.sampleId).toBe("5-B");
     expect(firstModel.report.cover.clientName).toBe("Xinsha Holding Pte Ltd");
-    // The published payload must stay within the public share bound.
+    // The published payload must stay within the public share bound, which
+    // means the workbook's pictures travel as metadata rather than bytes.
     expect(first.data.length).toBeLessThanOrEqual(100000);
+    expect(firstModel.report.appendix.photos).toHaveLength(2);
+    firstModel.report.appendix.photos.forEach((photo) => {
+      expect(photo.mimeType).toBe("image/jpeg");
+      expect(photo.bytes).toBeUndefined();
+    });
+    expect(firstModel.report.assets.preparedSignature.bytes).toBeUndefined();
 
     vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
@@ -447,6 +454,27 @@ describe("workspace controller", () => {
       "X-2026-522-5",
       "X-2026-522-6",
     ]);
+  });
+
+  it("publishes a report from a workbook that carries no pictures", async () => {
+    const { getExportDocuments, selectFile } = await loadMappedWorkspace();
+    // A workbook whose sheets hold no signatures or photographs at all: the
+    // published payload must still describe the report, with nothing to strip.
+    globalThis.docuAlignReportMapping = {
+      buildMappedReports: () => [
+        { groupIndex: 1, jobRef: "X-9", cover: { clientName: "Acme" }, assets: {} },
+      ],
+    };
+
+    await selectFile(workbook("no-pictures.xlsx"));
+    const report = getExportDocuments().find((entry) => entry.slug === "X-2026-522-1");
+    const published = JSON.parse(report.data);
+
+    expect(published.report.assets).toEqual({
+      preparedSignature: undefined,
+      authorisedSignature: undefined,
+    });
+    expect(published.report.appendix.photos).toEqual([]);
   });
 
   it("falls back to the reference report when the workbook cannot be mapped", async () => {

@@ -94,10 +94,52 @@ Two secondary defects surfaced during this work and were fixed alongside it:
   scans the actual cell data for the last populated row.
 - **Signature erasure guard** (`src/rak-report-pdf.js`): the overlay's image
   loop unconditionally whited out the signature and appendix-photo regions
-  even when there was no replacement image to draw (the current reader
-  extracts cell values only, no embedded images). Fixed by skipping the
+  even when there was no replacement image to draw. Fixed by skipping the
   whiteout+draw entirely when `image.asset?.bytes` is absent, so the
-  reference pages' own signatures survive.
+  reference pages' own artwork survives when a workbook supplies none.
+
+## 3a. Embedded pictures (second phase)
+
+The first phase fixed the *text* half of the report only. Signatures and
+appendix photographs are embedded pictures, not cell values, and
+`xlsx-reader.js` parsed cell values exclusively — it never opened
+`xl/drawings/` or `xl/media/`. Every exported report therefore carried the
+**reference sample's photographs**, verified as a zero-pixel difference
+between the template's and every generated report's appendix photo boxes.
+For a lab report that is misattributed evidence: one cargo hold's report
+showing another sample's photographs.
+
+`src/xlsx-reader.js` now extracts them:
+
+- `readEntryBytes` returns raw entry bytes (`readEntryText` decodes on top of
+  it). **Stored entries are copied, not returned as a view onto the archive
+  buffer** — pdf-lib's image embedders read `.buffer` directly and ignore a
+  view's `byteOffset`, which produced `SOI not found in JPEG` until fixed.
+  Excel stores already-compressed pictures with method 0, so every photograph
+  hit this path.
+- `readSheetImages` follows worksheet → `xl/drawings/drawingN.xml` →
+  drawing rels → `xl/media/*`, reading each anchor's zero-based `<from>`
+  row/column exactly as `src/report-mapping.js` expects (photos anchor at
+  `row >= 147, column === 5`; signatures at rows 129–131). Pictures anchored
+  on several sheets are inflated once via a media cache, and media types
+  pdf-lib cannot embed are skipped.
+- Drawing parts namespace their elements with a per-file prefix, so the
+  patterns anchor on `[:<]` before each local name. This keeps every
+  quantifier flat — the earlier `(?:[a-z]+:)?` form nested a quantifier
+  inside an optional group and tripped `security/detect-unsafe-regex`.
+- `readWorkbook` returns `images` (a `Map` of sheet name to picture list) and
+  `toMappingWorkbook` in `src/workspace.js` passes it straight through.
+
+**Share payload bound.** Passing real pictures pushed `documentData` to
+4,044,098 characters — 40× the 100,000 bound the Firestore rules enforce.
+`withoutPictureBytes` therefore strips picture bytes from the published
+payload, keeping name/anchor/MIME metadata, which returns it to ~7 KB. The
+downloaded report renders from the in-memory model and has full artwork; a
+share rebuilt by the public viewer keeps the reference pages' artwork.
+**This is a known remaining gap** — shared/public copies still show the
+reference photographs. Closing it needs the pictures hosted (for example
+Firebase Storage) and referenced by URL, which is a product decision, not a
+code cleanup.
 
 ## 4. Verification performed
 
@@ -117,7 +159,18 @@ Two secondary defects surfaced during this work and were fixed alongside it:
 - **Number formatting.** Compared all 5,862 non-blank cells of
   `SampleInput.xlsx` between the dependency-free reader and SheetJS's
   displayed (`.w`) values; 1 mismatch (the deliberate date format choice).
-- **Test suite.** `npm test`: 322 passed, 24 skipped (Firestore emulator
+- **Embedded pictures.** After extraction, the appendix photo boxes differ
+  between every pair of groups (millions of pixels of difference where the
+  measurement was previously exactly `0`), and each report's photographed
+  sample-bag label matches that report's own cargo hold (`2-C`, `3-D`, …) —
+  an independent check that pictures are matched to the right group, not
+  merely different from each other. Group 2 still matches the template
+  exactly, which is correct: `SampleOutput.pdf` *is* group 2's report.
+- **Charts.** The grading curve and both shear charts are whited out and
+  replotted from `report.psd.rows`, `directShear.rows`, and
+  `directShear.series`; their rendered regions differ between groups and from
+  the template, so no chart is inherited from the reference.
+- **Test suite.** `npm test`: 325 passed, 24 skipped (Firestore emulator
   tests, gated on `RUN_FIRESTORE_RULE_TESTS`). `npm run lint`: zero warnings.
   `npm run coverage`: 100% statements/branches/functions/lines on `src/**`.
 

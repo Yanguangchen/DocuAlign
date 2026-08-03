@@ -312,10 +312,26 @@
    * @throws {Error} When the entry uses an unsupported compression method.
    */
   function readEntryText(buffer, entry) {
+    return new TextDecoder().decode(readEntryBytes(buffer, entry));
+  }
+
+  /**
+   * Inflate (or pass through) a single archive entry as raw bytes. Embedded
+   * pictures are binary, so they must never round-trip through a text decoder.
+   * @param {ArrayBuffer} buffer - Raw archive bytes.
+   * @param {{offset: number, method: number, compressedSize: number, size: number}} entry - Entry descriptor.
+   * @returns {Uint8Array} Decompressed entry contents.
+   * @throws {Error} When the entry uses an unsupported compression method.
+   */
+  function readEntryBytes(buffer, entry) {
     const bytes = new Uint8Array(buffer, entry.offset, entry.compressedSize);
-    if (entry.method === 0) return new TextDecoder().decode(bytes);
+    // Stored entries -- which is how Excel keeps already-compressed pictures --
+    // are copied out rather than returned as a view onto the archive. Consumers
+    // that read `.buffer` directly, pdf-lib's image embedders among them, ignore
+    // a view's byte offset and would otherwise decode from the archive's start.
+    if (entry.method === 0) return bytes.slice();
     if (entry.method !== 8) throw new Error("Workbook uses an unsupported compression method.");
-    return new TextDecoder().decode(inflateRaw(bytes, entry.size));
+    return inflateRaw(bytes, entry.size);
   }
 
   const NAME_ATTR = /\sname="([^"]*)"/;
@@ -330,6 +346,16 @@
   const NUMFMT_TAG = /<numFmt\s[^>]*\/?>/g;
   const XF_TAG = /<xf\s[^>]*\/?>/g;
   const CELLXFS_BLOCK = /<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/;
+
+  // Drawing parts namespace their elements (`xdr:`, `a:`), but the prefix is
+  // declared per file and cannot be relied on. Each pattern therefore anchors
+  // on the character before the local name -- `<` when unprefixed, `:` when
+  // prefixed -- which keeps every quantifier flat and the match linear.
+  const ANCHOR_SPLIT = /[:<](?:twoCellAnchor|oneCellAnchor|absoluteAnchor)[\s>]/;
+  const ANCHOR_COLUMN = /[:<]col>(\d+)<\//;
+  const ANCHOR_ROW = /[:<]row>(\d+)<\//;
+  const BLIP_EMBED = /[:<]blip[^>]*\sr:embed="([^"]*)"/;
+  const PICTURE_NAME = /[:<]cNvPr[^>]*\sname="([^"]*)"/;
 
   /** Number-format ids that ECMA-376 reserves for dates and times. */
   const BUILT_IN_DATE_FORMATS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
@@ -531,6 +557,105 @@
       if (decimals !== undefined) decimalStyles.set(styleIndex, decimals);
     });
     return { dateStyles, decimalStyles };
+  }
+
+  /**
+   * Resolve a relationship target against the part that declares it.
+   * @param {string} basePath - Path of the part holding the relationship.
+   * @param {string} target - Raw `Target` attribute.
+   * @returns {string} Archive path of the referenced part.
+   */
+  function resolvePartPath(basePath, target) {
+    if (target.startsWith("/")) return target.slice(1);
+    const segments = basePath.split("/").slice(0, -1);
+    for (const part of target.split("/")) {
+      if (part === "..") segments.pop();
+      else if (part !== "." && part !== "") segments.push(part);
+    }
+    return segments.join("/");
+  }
+
+  /**
+   * Map a part's relationship ids onto their resolved archive paths.
+   * @param {ArrayBuffer} buffer - Raw archive bytes.
+   * @param {Map<string, Object>} entries - Central directory entries.
+   * @param {string} partPath - Path of the part whose relationships are read.
+   * @returns {Map<string, string>} Relationship id to archive path.
+   */
+  function readPartRelationships(buffer, entries, partPath) {
+    const segments = partPath.split("/");
+    const fileName = segments.pop();
+    const relsPath = [...segments, "_rels", `${fileName}.rels`].join("/");
+    const entry = entries.get(relsPath);
+    if (!entry) return new Map();
+
+    return new Map(
+      [...readEntryText(buffer, entry).matchAll(RELATIONSHIP_TAG)].map((tag) => [
+        readAttribute(tag[0], ID_ATTR),
+        resolvePartPath(partPath, readAttribute(tag[0], TARGET_ATTR) ?? ""),
+      ]),
+    );
+  }
+
+  /**
+   * Media types pdf-lib can embed. Anything else is skipped rather than
+   * handed to a renderer that cannot draw it.
+   * @param {string} path - Archive path of the picture.
+   * @returns {string|null} MIME type, or null when unsupported.
+   */
+  function pictureMediaType(path) {
+    const extension = path.split(".").at(-1)?.toLowerCase();
+    if (extension === "png") return "image/png";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    return null;
+  }
+
+  /**
+   * Read every picture anchored on one worksheet, with the cell it sits on.
+   *
+   * Reports carry their signatures and appendix photographs as embedded
+   * pictures rather than cell values, and `src/report-mapping.js` locates them
+   * by anchor row and column, so both are reported here. Anchor coordinates
+   * are the zero-based `<from>` values exactly as OOXML stores them.
+   * @param {ArrayBuffer} buffer - Raw archive bytes.
+   * @param {Map<string, Object>} entries - Central directory entries.
+   * @param {string} sheetPath - Archive path of the worksheet part.
+   * @param {Map<string, Uint8Array>} mediaCache - Decompressed pictures by path.
+   * @returns {Array<{name: string, row: number, column: number, mimeType: string, bytes: Uint8Array}>} Anchored pictures.
+   */
+  function readSheetImages(buffer, entries, sheetPath, mediaCache) {
+    const drawingPath = [...readPartRelationships(buffer, entries, sheetPath).values()]
+      .find((path) => path.includes("/drawings/") && path.endsWith(".xml"));
+    const drawingEntry = drawingPath ? entries.get(drawingPath) : undefined;
+    if (!drawingEntry) return [];
+
+    const media = readPartRelationships(buffer, entries, drawingPath);
+    const xml = readEntryText(buffer, drawingEntry);
+    const images = [];
+
+    // Each anchor holds its `<from>` cell before any `<to>` cell, so the first
+    // column and row inside the chunk are the picture's own anchor.
+    for (const chunk of xml.split(ANCHOR_SPLIT).slice(1)) {
+      const relationshipId = chunk.match(BLIP_EMBED)?.[1];
+      const mediaPath = relationshipId ? media.get(relationshipId) : undefined;
+      const mimeType = mediaPath ? pictureMediaType(mediaPath) : null;
+      const mediaEntry = mediaPath ? entries.get(mediaPath) : undefined;
+      if (!mimeType || !mediaEntry) continue;
+
+      // One picture is commonly anchored on several sheets; inflate it once.
+      if (!mediaCache.has(mediaPath)) {
+        mediaCache.set(mediaPath, readEntryBytes(buffer, mediaEntry));
+      }
+
+      images.push({
+        name: chunk.match(PICTURE_NAME)?.[1] ?? "Workbook image",
+        row: Number(chunk.match(ANCHOR_ROW)?.[1] ?? -1),
+        column: Number(chunk.match(ANCHOR_COLUMN)?.[1] ?? -1),
+        mimeType,
+        bytes: mediaCache.get(mediaPath),
+      });
+    }
+    return images;
   }
 
   /**
@@ -768,10 +893,13 @@
     const sheetIndex = readSheetIndex(buffer, entries);
     const cells = new Map();
     const sheets = new Map();
+    const images = new Map();
+    const mediaCache = new Map();
 
     for (const [sheetName, path] of sheetIndex) {
       const entry = entries.get(path);
       if (!entry) continue;
+      images.set(sheetName, readSheetImages(buffer, entries, path, mediaCache));
       const sheetLookup = new Map();
       collectCells(
         readEntryText(buffer, entry),
@@ -785,7 +913,7 @@
     }
 
     const sheetNames = [...sheetIndex.keys()];
-    return { sheetNames, cells, sheets, reportGroups: detectReportGroups(sheetNames) };
+    return { sheetNames, cells, sheets, images, reportGroups: detectReportGroups(sheetNames) };
   }
 
   globalThis.docuAlignXlsx = Object.freeze({
