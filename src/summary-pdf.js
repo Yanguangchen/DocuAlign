@@ -20,6 +20,52 @@
   const BODY_TOP = 352.1;
   const BODY_ROW_HEIGHT = 10.8;
   const REFERENCE_BODY_BOTTOM = 287;
+
+  /**
+   * Table rule geometry, measured from the rules the reference page itself
+   * draws. Every rule there is a filled rectangle 0.84pt thick, so the redrawn
+   * body grid is drawn the same way and at the same coordinates -- stroking a
+   * different weight, or leaving part of the reference's own rule underneath,
+   * is what makes the finished table look unevenly ruled.
+   *
+   * These are deliberately distinct from `TABLE_BOUNDARIES`: those position
+   * cell *text* and sit up to 1.2pt to the left of the drawn rules.
+   */
+  const RULE_THICKNESS = 0.84;
+
+  /** Bottom edge of the rule closing the header, which is the body's top rule. */
+  const BODY_TOP_RULE = 352.03;
+
+  /** Left edge of every vertical rule, in column order. */
+  const TABLE_RULE_X = Object.freeze([
+    36.12,
+    83.4,
+    118.08,
+    144.86,
+    172.34,
+    199.82,
+    227.3,
+    254.78,
+    282.26,
+    309.77,
+    337.25,
+    374.57,
+    408.65,
+    447.31,
+    472.27,
+    497.23,
+    522.19,
+    547.15,
+    572.11,
+    597.1,
+    622.06,
+    647.02,
+    671.98,
+    696.94,
+    721.9,
+    746.88,
+    788.16,
+  ]);
   const TABLE_BOUNDARIES = Object.freeze([
     35.35,
     82.7,
@@ -382,33 +428,31 @@
    * @returns {void}
    */
   function drawResultBody(page, rows, fonts, pdfLib) {
-    const bodyBottom = BODY_TOP - rows.length * BODY_ROW_HEIGHT;
-    const maskBottom = Math.min(REFERENCE_BODY_BOTTOM, bodyBottom) - 1;
-    whiteout(
-      page,
-      pdfLib,
-      TABLE_BOUNDARIES[0] - 1,
-      maskBottom,
-      TABLE_BOUNDARIES.at(-1) - TABLE_BOUNDARIES[0] + 2,
-      BODY_TOP - maskBottom,
-    );
+    const bodyBottomRule = BODY_TOP_RULE - rows.length * BODY_ROW_HEIGHT;
+    const gridLeft = TABLE_RULE_X[0];
+    const gridWidth = TABLE_RULE_X.at(-1) + RULE_THICKNESS - gridLeft;
+    // Clear the reference's own rules completely, the top one included: any
+    // part left behind sits under the redrawn rule and thickens it.
+    const maskTop = BODY_TOP_RULE + RULE_THICKNESS;
+    const maskBottom = Math.min(REFERENCE_BODY_BOTTOM, bodyBottomRule) - 1;
+    whiteout(page, pdfLib, gridLeft - 1, maskBottom, gridWidth + 2, maskTop - maskBottom);
 
-    const lineColor = color(pdfLib, BLACK);
-    const lineOptions = { thickness: 0.72, color: lineColor };
+    // Rules are filled rectangles, exactly as the reference page draws them,
+    // so every rule in the finished table carries the same weight.
+    const rule = (x, y, width, height) => page.drawRectangle({
+      x,
+      y,
+      width,
+      height,
+      color: color(pdfLib, BLACK),
+      borderWidth: 0,
+    });
+
     for (let row = 0; row <= rows.length; row += 1) {
-      const y = BODY_TOP - row * BODY_ROW_HEIGHT;
-      page.drawLine({
-        start: { x: TABLE_BOUNDARIES[0], y },
-        end: { x: TABLE_BOUNDARIES.at(-1), y },
-        ...lineOptions,
-      });
+      rule(gridLeft, BODY_TOP_RULE - row * BODY_ROW_HEIGHT, gridWidth, RULE_THICKNESS);
     }
-    TABLE_BOUNDARIES.forEach((x) => {
-      page.drawLine({
-        start: { x, y: bodyBottom },
-        end: { x, y: BODY_TOP },
-        ...lineOptions,
-      });
+    TABLE_RULE_X.forEach((x) => {
+      rule(x, bodyBottomRule, RULE_THICKNESS, BODY_TOP_RULE - bodyBottomRule + RULE_THICKNESS);
     });
 
     rows.forEach((row, rowIndex) => {
@@ -508,7 +552,10 @@
   globalThis.docuAlignSummaryPdf = Object.freeze({
     BODY_ROW_HEIGHT,
     BODY_TOP,
+    BODY_TOP_RULE,
+    RULE_THICKNESS,
     TABLE_BOUNDARIES,
+    TABLE_RULE_X,
     buildOverlayPlan,
     cellsFromDocumentData,
     createDocument,

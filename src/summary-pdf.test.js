@@ -217,6 +217,57 @@ describe("Summary sample-template PDF renderer", () => {
     );
   });
 
+  it("rules the result body at the reference page's own weight", async () => {
+    const cells = await sampleSummaryCells();
+    await import("./summary-pdf.js");
+    const renderer = globalThis.docuAlignSummaryPdf;
+
+    // Record what the renderer paints, so rule weight and placement can be
+    // asserted directly rather than inferred from the finished PDF.
+    const drawn = [];
+    const page = {
+      drawRectangle: (options) => drawn.push(options),
+      drawText: () => {},
+      drawLine: () => {
+        throw new Error("Rules must be filled rectangles, as the reference draws them.");
+      },
+    };
+    const recordingPdfLib = {
+      PDFDocument: {
+        load: async () => ({
+          getPageCount: () => 1,
+          getPage: () => page,
+          embedFont: async () => ({ widthOfTextAtSize: (text) => text.length * 4 }),
+          save: async () => new Uint8Array([37, 80, 68, 70]),
+        }),
+      },
+      StandardFonts: { Helvetica: "Helvetica", HelveticaBold: "Helvetica-Bold" },
+      rgb: (red, green, blue) => `rgb(${red},${green},${blue})`,
+    };
+
+    await renderer.createDocument(cells, { pdfLib: recordingPdfLib, templateBytes });
+
+    // The sample workbook holds six result rows, so the body is closed by
+    // seven horizontal rules, each at the reference's 0.84pt weight.
+    const black = drawn.filter((shape) => shape.color === "rgb(0,0,0)");
+    const horizontal = black.filter((shape) => shape.height === renderer.RULE_THICKNESS);
+    const vertical = black.filter((shape) => shape.width === renderer.RULE_THICKNESS);
+    expect(horizontal).toHaveLength(7);
+    expect(vertical).toHaveLength(renderer.TABLE_RULE_X.length);
+    expect(vertical.map((shape) => shape.x)).toEqual([...renderer.TABLE_RULE_X]);
+    horizontal.forEach((shape, index) =>
+      expect(shape.y).toBeCloseTo(renderer.BODY_TOP_RULE - index * renderer.BODY_ROW_HEIGHT, 5));
+
+    // The body mask must clear the reference's own top rule completely; any of
+    // it left behind sits under the redrawn rule and thickens it.
+    const bodyMask = drawn
+      .filter((shape) => shape.color === "rgb(1,1,1)")
+      .find((shape) => shape.y < renderer.BODY_TOP_RULE && shape.width > 700);
+    expect(bodyMask.y + bodyMask.height).toBeGreaterThanOrEqual(
+      renderer.BODY_TOP_RULE + renderer.RULE_THICKNESS,
+    );
+  });
+
   it("renders every result row a longer workbook holds", async () => {
     // The reference workbook stops at row 27; a file with more cargo holds
     // must not have its extra rows silently dropped.
