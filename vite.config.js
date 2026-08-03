@@ -58,8 +58,11 @@ export default defineConfig({
     globals: true,
     environment: "happy-dom",
     // PDF template copies are intentionally byte-for-byte and can exceed the
-    // default timeout when V8 coverage instrumentation is enabled.
-    testTimeout: 10000,
+    // default timeout when V8 coverage instrumentation is enabled. Every
+    // report is now overlaid from its own workbook values, embedding that
+    // group's photographs rather than copying the reference pages untouched,
+    // so a single template render is heavier than it once was.
+    testTimeout: 30000,
     coverage: {
       provider: "v8",
       all: true,
