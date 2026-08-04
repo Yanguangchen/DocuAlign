@@ -7,6 +7,13 @@
 (() => {
   const PAGE_HEIGHT = 841.68;
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
+
+  /**
+   * Downward nudge applied to the cover page's values, in PDF points. A point
+   * is 1/72in against a screen pixel's 1/96in, so 0.75pt is the one pixel the
+   * cover text sits high by at normal viewing scale.
+   */
+  const COVER_TEXT_NUDGE = 0.75;
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({
@@ -48,6 +55,14 @@
     plan.whiteouts.push({ x, top, width, height, kind });
   }
 
+  /**
+   * Replace one table cell's value.
+   *
+   * The reference centres every value inside its own cell, so `cell` gives the
+   * span between that cell's vertical rules and the replacement is centred in
+   * it. Drawing at a fixed x instead only looks centred for values the same
+   * width as the sample's -- a shorter or longer number sits visibly off.
+   */
   function addValue(plan, text, x, top, options = {}) {
     addWhiteout(
       plan,
@@ -57,8 +72,29 @@
       11.2,
       "value-mask",
     );
-    addText(plan, text, x, top, options);
+    const [left, right] = options.cell;
+    addText(plan, text, left, top, Object.assign({}, options, {
+      align: "center",
+      width: right - left,
+    }));
   }
+
+  /** Cell spans measured from the reference report, in PDF points. */
+  const CELLS = Object.freeze({
+    psdPassing: Object.freeze([152.5, 269.88]),
+    siltCoral: Object.freeze([285.12, 414.25]),
+    siltRequirement: Object.freeze([415.12, 518.88]),
+    wideResult: Object.freeze([285.12, 518.88]),
+    shearSummary: Object.freeze([328.0, 518.88]),
+    shearAngle: Object.freeze([36.88, 255.0]),
+    shearStress: Object.freeze([
+      Object.freeze([211.88, 255.0]),
+      Object.freeze([255.88, 341.38]),
+      Object.freeze([342.25, 430.75]),
+      Object.freeze([431.62, 518.88]),
+    ]),
+    metalResult: Object.freeze([197.62, 369.88]),
+  });
 
   function addHeaderJob(plan, report) {
     addWhiteout(plan, 475, 51.5, 85, 14);
@@ -113,6 +149,13 @@
     for (const [text, top, bold] of details) {
       addText(plan, text, 181.1, top, { bold });
     }
+
+    // Every cover value sits a hair high against the reference's own baselines,
+    // so the whole block is nudged down by COVER_TEXT_NUDGE. Applying it here,
+    // once, keeps the individual coordinates as measured from the reference.
+    plan.texts.forEach((operation) => {
+      operation.top += COVER_TEXT_NUDGE;
+    });
     return plan;
   }
 
@@ -124,41 +167,52 @@
       addValue(plan, row.cumulativePassingPercent, 206.42, valueTops.at(index), {
         eraseX: 196,
         eraseWidth: 32,
+        cell: CELLS.psdPassing,
       });
     });
 
-    addWhiteout(plan, 38.28, 277.5, 490.56, 176.5);
+    // The chart box is measured from the reference page: its frame starts
+    // immediately below the table's bottom rule (which ends at 276.0) and runs
+    // to 453.8. Clearing or drawing outside that span either leaves the
+    // reference's own frame showing beside the redrawn one, or paints over the
+    // table above.
+    addWhiteout(plan, 38.28, 276.05, 490.56, 178.0);
     plan.chart = {
       kind: "grading",
       x: 38.28,
-      top: 277.5,
+      top: 276.38,
       width: 490.56,
-      height: 176.5,
+      height: 177.0,
       rows: report.psd.rows,
     };
 
     addValue(plan, report.siltCoral.siltPercent, 343.51, 529.09, {
       eraseX: 335,
       eraseWidth: 31,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.coralShellPercent, 343.51, 545.65, {
       eraseX: 335,
       eraseWidth: 31,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.totalPercent, 343.51, 562.33, {
       eraseX: 335,
       eraseWidth: 31,
       bold: true,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.requirement, 424.78, 562.33, {
       eraseX: 414,
       eraseWidth: 108,
       bold: true,
+      cell: CELLS.siltRequirement,
     });
     addValue(plan, report.moisture.percent, 395.83, 613.96, {
       eraseX: 386,
       eraseWidth: 35,
       bold: true,
+      cell: CELLS.wideResult,
     });
     addWhiteout(plan, 92, 628.5, 405, 15);
     addText(plan, report.moisture.remark, 93.84, 630.88);
@@ -170,18 +224,19 @@
     const shear = report.directShear;
     addHeaderJob(plan, report);
     const summaryValues = [
-      [shear.maximumDryDensity, 414.7, 129.06, false],
-      [shear.minimumDryDensity, 414.7, 143.6, false],
-      [shear.retainedOn2mmPercent, 418.66, 158.12, false],
-      [shear.shearingRate, 417.34, 172.64, false],
-      [shear.initialBulkDensity, 414.7, 187.16, false],
-      [shear.initialDryDensity, 414.7, 201.68, false],
-      [shear.angle, 141.14, 230.84, true],
+      [shear.maximumDryDensity, 414.7, 129.06, false, CELLS.shearSummary],
+      [shear.minimumDryDensity, 414.7, 143.6, false, CELLS.shearSummary],
+      [shear.retainedOn2mmPercent, 418.66, 158.12, false, CELLS.shearSummary],
+      [shear.shearingRate, 417.34, 172.64, false, CELLS.shearSummary],
+      [shear.initialBulkDensity, 414.7, 187.16, false, CELLS.shearSummary],
+      [shear.initialDryDensity, 414.7, 201.68, false, CELLS.shearSummary],
+      [shear.angle, 141.14, 230.84, true, CELLS.shearAngle],
     ];
-    for (const [text, x, top, bold] of summaryValues) {
+    for (const [text, x, top, bold, cell] of summaryValues) {
       addValue(plan, text, x, top, {
         eraseWidth: 35,
         bold,
+        cell,
       });
     }
 
@@ -194,32 +249,38 @@
       for (const [text, top] of values) {
         addValue(plan, text, xPositions.at(index), top, {
           eraseWidth: 28,
+          cell: CELLS.shearStress.at(index),
         });
       }
     });
 
-    addWhiteout(plan, 38.28, 301.5, 490.56, 158.5);
+    // Measured from the reference page: the shear table's bottom rule ends at
+    // 302.2 and the chart frames run 303.25 to 451.05. The mask used to start
+    // at 301.5, inside that rule, so the table lost its bottom border and the
+    // chart frame was drawn across it.
+    addWhiteout(plan, 38.28, 302.6, 490.56, 148.45);
     plan.charts = [
       {
         kind: "normal-shear",
         x: 38.28,
-        top: 301.5,
+        top: 303.65,
         width: 245.0,
-        height: 158.5,
+        height: 147.0,
         rows: shear.rows,
       },
       {
         kind: "displacement-shear",
         x: 289.5,
-        top: 301.5,
+        top: 303.65,
         width: 239.34,
-        height: 158.5,
+        height: 147.0,
         series: shear.series,
       },
     ];
     addValue(plan, report.organicMatter.percent, 393.19, 492.25, {
       eraseWidth: 32,
       bold: true,
+      cell: CELLS.wideResult,
     });
     return plan;
   }
@@ -232,6 +293,7 @@
       addValue(plan, row.resultPpm, 276.29, valueTops.at(index), {
         eraseX: 265,
         eraseWidth: 42,
+        cell: CELLS.metalResult,
       });
     });
     plan.images.push(
@@ -307,9 +369,13 @@
   function drawText(page, operation, fonts, pdfLib) {
     const font = operation.bold ? fonts.bold : fonts.regular;
     let x = operation.x;
-    if (operation.align === "center" && operation.width) {
-      x += (operation.width - font.widthOfTextAtSize(operation.text, operation.size)) / 2;
-    }
+    // Axis values are right-aligned so their digits end on a common edge, as
+    // the reference sets them; without this they ragged-left instead.
+    const slack = operation.width
+      ? operation.width - font.widthOfTextAtSize(operation.text, operation.size)
+      : 0;
+    if (operation.align === "center") x += slack / 2;
+    else if (operation.align === "right") x += slack;
     const options = {
       x,
       y: PAGE_HEIGHT - operation.top - operation.size,
@@ -384,35 +450,91 @@
     });
   }
 
+  /**
+   * Grading chart geometry, measured from the reference page. The plot body is
+   * shorter than a naive full-height box, the horizontal grid steps every 4%,
+   * and the sieve axis carries a full logarithmic minor grid (2..9 inside each
+   * decade) with the decade lines and the 1.00 line progressively darker.
+   */
+  const GRADING_PLOT = Object.freeze({
+    left: 84.62,
+    right: 495.62,
+    top: 311.12,
+    bottom: 389.0,
+  });
+  const GRADING_MINOR_GRID = Object.freeze([0.94, 0.94, 0.94]);
+  const GRADING_DECADE_GRID = Object.freeze([0.86, 0.86, 0.86]);
+  const GRADING_UNIT_GRID = Object.freeze([0.75, 0.75, 0.75]);
+
+  /**
+   * The reference's chart text is Calibri; the overlay draws Helvetica, whose
+   * glyphs stand about a tenth taller at the same point size. Sizes measured
+   * from the reference are scaled by this so the rendered text matches it.
+   */
+  const CHART_FONT_SCALE = 0.9;
+
+  /** Shear-chart font sizes, measured from the reference, as drawn in Helvetica. */
+  const CHART_FONTS = Object.freeze({
+    axisValue: 8.544 * CHART_FONT_SCALE,
+    axisTitle: 9.456 * CHART_FONT_SCALE,
+    note: 8.568 * CHART_FONT_SCALE,
+  });
+
+  /** Font sizes the reference chart uses, in points, as drawn in Helvetica. */
+  const GRADING_FONTS = Object.freeze({
+    title: 13.32 * CHART_FONT_SCALE,
+    axisValue: 8.544 * CHART_FONT_SCALE,
+    axisTitle: 9.48 * CHART_FONT_SCALE,
+    legend: 8.568 * CHART_FONT_SCALE,
+  });
+
+  /** Horizontal position of one sieve size on the logarithmic axis. */
+  function gradingX(value) {
+    const span = GRADING_PLOT.right - GRADING_PLOT.left;
+    return GRADING_PLOT.left + ((Math.log10(Math.max(value, 0.01)) + 2) / 3) * span;
+  }
+
+  function drawGradingGrid(page, fonts, pdfLib) {
+    const height = GRADING_PLOT.bottom - GRADING_PLOT.top;
+    // Excel rules this axis every 4%, labelling every 20%.
+    for (let value = 0; value <= 100; value += 4) {
+      const top = GRADING_PLOT.bottom - (value / 100) * height;
+      line(page, GRADING_PLOT.left, top, GRADING_PLOT.right, top, pdfLib, GRADING_MINOR_GRID, 0.5);
+    }
+    for (let value = 0; value <= 100; value += 20) {
+      const top = GRADING_PLOT.bottom - (value / 100) * height;
+      // The reference sets each value's baseline 2.88pt below its gridline.
+      chartText(page, String(value), 60, top + 2.88 - GRADING_FONTS.axisValue,
+        GRADING_FONTS.axisValue, fonts, pdfLib, { width: 18, align: "right" });
+    }
+
+    for (let exponent = -2; exponent <= 1; exponent += 1) {
+      const decade = 10 ** exponent;
+      if (exponent < 1) {
+        for (let step = 2; step <= 9; step += 1) {
+          const x = gradingX(decade * step);
+          line(page, x, GRADING_PLOT.top, x, GRADING_PLOT.bottom, pdfLib,
+            GRADING_MINOR_GRID, 0.5);
+        }
+      }
+      const x = gradingX(decade);
+      const shade = decade === 1 ? GRADING_UNIT_GRID : GRADING_DECADE_GRID;
+      line(page, x, GRADING_PLOT.top, x, GRADING_PLOT.bottom, pdfLib, shade, 0.5);
+      chartText(page, decade.toFixed(2), x - 12, 403 - GRADING_FONTS.axisValue,
+        GRADING_FONTS.axisValue, fonts, pdfLib, { width: 24, align: "center" });
+    }
+  }
+
   function drawGradingChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    chartText(page, "Grading Chart", 220, 285.8, 13.32, fonts, pdfLib, {
-      width: 115,
-      align: "center",
-    });
-    const plot = { left: 85, right: 508, top: 310, bottom: 394 };
-    const grid = [0.9, 0.9, 0.9];
-    for (let value = 0; value <= 100; value += 10) {
-      const top = plot.bottom - (value / 100) * (plot.bottom - plot.top);
-      line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
-      if (value % 20 === 0) {
-        chartText(page, String(value), 61, top - 4, 8.5, fonts, pdfLib, {
-          width: 18,
-          align: "right",
-        });
-      }
-    }
-    for (let exponent = -2; exponent <= 1; exponent += 1) {
-      const x = plot.left + ((exponent + 2) / 3) * (plot.right - plot.left);
-      line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
-      chartText(page, (10 ** exponent).toFixed(2), x - 12, 396.3, 8.5, fonts, pdfLib);
-    }
+    chartText(page, "Grading Chart", chart.x, 296.1 - GRADING_FONTS.title,
+      GRADING_FONTS.title, fonts, pdfLib, { width: chart.width, align: "center" });
+    drawGradingGrid(page, fonts, pdfLib);
+
+    const height = GRADING_PLOT.bottom - GRADING_PLOT.top;
     const toPoint = (row, field) => ({
-      x: plot.left
-        + ((Math.log10(Math.max(numeric(row.sieveSizeMm), 0.01)) + 2) / 3)
-          * (plot.right - plot.left),
-      top: plot.bottom
-        - (numeric(Reflect.get(row, field)) / 100) * (plot.bottom - plot.top),
+      x: gradingX(numeric(row.sieveSizeMm)),
+      top: GRADING_PLOT.bottom - (numeric(Reflect.get(row, field)) / 100) * height,
     });
     const series = [
       ["cumulativePassingPercent", GRADING_SERIES_STYLES.cumulativePassingPercent],
@@ -440,29 +562,22 @@
         circle(page, point.x, point.top, pdfLib, style.color, 2.2);
       });
     }
-    chartText(page, "Cumulative % passing", 51, 390, 9.2, fonts, pdfLib, {
-      rotate: 90,
-    });
-    chartText(page, "Sieve Size (mm)", 250, 410, 9.2, fonts, pdfLib);
+
+    const axisTitleSize = 9.456 * CHART_FONT_SCALE;
+    chartText(page, "Cumulative % passing", 58.7, 400 - axisTitleSize, axisTitleSize,
+      fonts, pdfLib, { rotate: 90 });
+    chartText(page, "Sieve Size (mm)", 260.4, 417.1 - GRADING_FONTS.axisTitle,
+      GRADING_FONTS.axisTitle, fonts, pdfLib);
     const legends = [
-      ["Grading Curve", 190, GRADING_SERIES_STYLES.cumulativePassingPercent],
-      ["Lower Limit", 285, GRADING_SERIES_STYLES.lowerLimit],
-      ["Upper Limit", 370, GRADING_SERIES_STYLES.upperLimit],
+      ["Grading Curve", 185.9, GRADING_SERIES_STYLES.cumulativePassingPercent],
+      ["Lower Limit", 276.4, GRADING_SERIES_STYLES.lowerLimit],
+      ["Upper Limit", 358.0, GRADING_SERIES_STYLES.upperLimit],
     ];
     for (const [label, x, style] of legends) {
-      line(
-        page,
-        x - 14,
-        438,
-        x + 8,
-        438,
-        pdfLib,
-        style.color,
-        1.5,
-        style.dashArray,
-      );
-      circle(page, x - 3, 438, pdfLib, style.color, 2);
-      chartText(page, label, x + 12, 433.5, 8.5, fonts, pdfLib);
+      line(page, x - 26, 439, x - 6, 439, pdfLib, style.color, 1.5, style.dashArray);
+      circle(page, x - 16, 439, pdfLib, style.color, 2);
+      chartText(page, label, x, 442 - GRADING_FONTS.legend, GRADING_FONTS.legend,
+        fonts, pdfLib);
     }
   }
 
@@ -471,7 +586,7 @@
     for (let value = 0; value <= 140; value += 20) {
       const top = plot.bottom - (value / 140) * (plot.bottom - plot.top);
       line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
-      chartText(page, String(value), plot.left - 22, top - 4, 8.3, fonts, pdfLib, {
+      chartText(page, String(value), plot.left - 22, top - 4, CHART_FONTS.axisValue, fonts, pdfLib, {
         width: 18,
         align: "right",
       });
@@ -480,7 +595,8 @@
     for (const value of steps) {
       const x = plot.left + (value / xMax) * (plot.right - plot.left);
       line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
-      chartText(page, xMax === 6 ? value.toFixed(1) : String(value), x - 8, plot.bottom + 5, 8.3, fonts, pdfLib);
+      chartText(page, xMax === 6 ? value.toFixed(1) : String(value), x - 8, plot.bottom + 5,
+        CHART_FONTS.axisValue, fonts, pdfLib);
     }
   }
 
@@ -502,11 +618,11 @@
     const last = points.at(-1);
     const lastStress = numeric(chart.rows.at(-1).maxShearStressKpa);
     const slope = lastStress / Math.max(numeric(chart.rows.at(-1).normalStressKpa), 1);
-    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, 8.5, fonts, pdfLib);
-    chartText(page, "Max. Shear Stress (kPa)", 51, 406, 9.2, fonts, pdfLib, {
+    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, CHART_FONTS.note, fonts, pdfLib);
+    chartText(page, "Max. Shear Stress (kPa)", 51, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Normal Stress (kPa)", 130, 428, 9.2, fonts, pdfLib);
+    chartText(page, "Normal Stress (kPa)", 130, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
     circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
   }
 
@@ -533,10 +649,10 @@
         circle(page, point.x, point.top, pdfLib, seriesColor, 1.5);
       });
     });
-    chartText(page, "Max. Shear Stress (kPa)", 297, 406, 9.2, fonts, pdfLib, {
+    chartText(page, "Max. Shear Stress (kPa)", 297, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Horizontal Displacement (mm)", 350, 428, 9.2, fonts, pdfLib);
+    chartText(page, "Horizontal Displacement (mm)", 350, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
   }
 
   async function drawImage(outputDocument, page, operation) {
