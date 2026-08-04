@@ -14,6 +14,7 @@ const projectRoot = resolve(".");
 const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "utf8");
 const rakReportSource = readFileSync(resolve(projectRoot, "src/rak-report-pdf.js"), "utf8");
 const mappingSource = readFileSync(resolve(projectRoot, "src/report-mapping.js"), "utf8");
+const zipWriterSource = readFileSync(resolve(projectRoot, "src/zip-writer.js"), "utf8");
 const indexSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
 const viewSource = readFileSync(resolve(projectRoot, "view.html"), "utf8");
 const viteConfigSource = readFileSync(resolve(projectRoot, "vite.config.js"), "utf8");
@@ -62,6 +63,17 @@ describe("PDF export", () => {
     [rakReportSource, mappingSource].forEach((source) => {
       expect(source).not.toMatch(/^\s*(import|export)\s/m);
     });
+  });
+
+  it("exports every document as one archive rather than a burst of downloads", () => {
+    // The export button used to fire one <a download> per document, spaced
+    // out to dodge the browser's multiple-download prompt. It now builds a
+    // single ZIP so there is exactly one download and one prompt, if any.
+    expect(workspaceSource).toContain("docuAlignZip.createArchive");
+    expect(workspaceSource).toContain('download.download = `${baseName}.zip`');
+    expect(indexSource).toContain('src="./src/zip-writer.js"');
+    expect(viteConfigSource).toContain('"zip-writer.js"');
+    expect(zipWriterSource).not.toMatch(/^\s*(import|export)\s/m);
   });
 
   it.each([...REFERENCE_ASSETS.keys()])(

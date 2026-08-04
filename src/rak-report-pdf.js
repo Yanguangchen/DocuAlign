@@ -9,11 +9,11 @@
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
 
   /**
-   * Downward nudge applied to the cover page's values, in PDF points. A point
-   * is 1/72in against a screen pixel's 1/96in, so 0.75pt is the one pixel the
-   * cover text sits high by at normal viewing scale.
+   * Downward nudge applied to the cover page's values, in PDF points. The
+   * first pass used 0.75pt, which read as two pixels on screen and sat a pixel
+   * too low; half of it seats the block where the reference has it.
    */
-  const COVER_TEXT_NUDGE = 0.75;
+  const COVER_TEXT_NUDGE = 0.375;
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({

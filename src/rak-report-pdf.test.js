@@ -123,18 +123,18 @@ describe("RAK sample-template PDF renderer", () => {
     const plan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(changed);
 
     expect(plan).toHaveLength(5);
-    // Cover values carry the 0.75pt downward nudge that seats them on the
-    // reference's own baselines, so each sits one nudge below its measurement.
+    // Cover values carry the downward nudge that seats them on the reference's
+    // own baselines, so each sits one nudge below its measurement.
     expect(plan[0].texts).toContainEqual(expect.objectContaining({
       text: "Replacement Client",
       x: 181.1,
-      top: 139.64 + 0.75,
+      top: 139.64 + 0.375,
       size: 9.48,
     }));
     expect(plan[0].texts).toContainEqual(expect.objectContaining({
       text: "X-2026-522-9",
       x: 181.1,
-      top: 457.21 + 0.75,
+      top: 457.21 + 0.375,
       bold: true,
     }));
     // The chart box matches the reference's own frame, which starts below the
