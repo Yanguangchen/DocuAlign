@@ -52,11 +52,49 @@ async function loadWorkspace() {
   await import("./xlsx-reader.js");
   await import("./pdf-writer.js");
   await import("./summary-pdf.js");
+  await import("./zip-writer.js");
   globalThis.docuAlignSummaryPdf = {
     createDocument: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
   };
   await import("./workspace.js");
   return globalThis.docuAlignWorkspace;
+}
+
+/**
+ * Read back a ZIP archive's stored entries. Only the format the workspace
+ * itself writes needs supporting: local headers holding uncompressed data,
+ * scanned until the central directory begins.
+ * @param {Uint8Array} bytes - Archive bytes.
+ * @returns {Array<{name: string, data: Uint8Array}>} Stored entries, in order.
+ */
+function readZipEntries(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  const entries = [];
+  let offset = 0;
+
+  while (view.getUint32(offset, true) === 0x04034b50) {
+    const nameLength = view.getUint16(offset + 26, true);
+    const dataLength = view.getUint32(offset + 22, true);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength;
+    entries.push({
+      name: decoder.decode(bytes.subarray(nameStart, dataStart)),
+      data: bytes.subarray(dataStart, dataStart + dataLength),
+    });
+    offset = dataStart + dataLength;
+  }
+  return entries;
+}
+
+/**
+ * Read the archive most recently handed to `URL.createObjectURL` by the
+ * export button, decoded into its stored entries.
+ * @returns {Promise<Array<{name: string, data: Uint8Array}>>} Archive entries.
+ */
+async function downloadedArchiveEntries() {
+  const [blob] = URL.createObjectURL.mock.calls.at(-1);
+  return readZipEntries(new Uint8Array(await blob.arrayBuffer()));
 }
 
 /**
@@ -98,6 +136,13 @@ describe("workspace controller", () => {
       createObjectURL: vi.fn(() => "blob:generated"),
       revokeObjectURL: vi.fn(),
     }));
+    // Reports without a mapped model fall back to fetching the reference
+    // asset for the archive, so every test gets a working default; tests that
+    // care about the fetched bytes or a fetch failure override this.
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+    })));
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     renderWorkspace();
@@ -197,15 +242,13 @@ describe("workspace controller", () => {
     );
     expect(document.querySelector("#pdf-export").disabled).toBe(false);
 
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(350);
-    vi.useRealTimers();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
-    expect(clickSpy).toHaveBeenCalledOnce();
     expect(document.querySelector("#feedback").textContent).toBe(
-      "Started 1 separate PDF. Cloud save is now available.",
+      "Downloaded single.zip with 1 document. Cloud save is now available.",
     );
+    expect(clickSpy.mock.contexts[0].download).toBe("single.zip");
   });
 
   it("fails the pipeline when the workbook holds no complete report groups", async () => {
@@ -311,7 +354,7 @@ describe("workspace controller", () => {
     clearFile();
   });
 
-  it("blocks premature export, then downloads a separate PDF for every document", async () => {
+  it("blocks premature export, then downloads one archive holding every document", async () => {
     const { clearFile, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const exportButton = document.querySelector("#pdf-export");
@@ -321,57 +364,160 @@ describe("workspace controller", () => {
     expect(clickSpy).not.toHaveBeenCalled();
 
     await selectFile(workbook("Client Sample 01.xlsx"));
-    vi.useFakeTimers();
     exportButton.click();
-
-    // Downloads are spaced out so the browser does not drop all but the first.
-    expect(clickSpy).toHaveBeenCalledTimes(0);
-    vi.advanceTimersByTime(7 * 350);
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(7));
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
     // Six reports + the Summary. The DS1/SB1 datasheets and the coral + org
     // worksheet are temporarily withheld from the export.
     expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
-    const names = clickSpy.mock.contexts.map((anchor) => anchor.download);
+    expect(clickSpy.mock.contexts[0].download).toBe("Client-Sample-01.zip");
+    expect(URL.createObjectURL).toHaveBeenCalledOnce();
+    expect(URL.createObjectURL.mock.calls[0][0].type).toBe("application/zip");
+
+    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
+    expect(names).toHaveLength(7);
     expect(names.slice(0, 3)).toEqual([
-      "Client-Sample-01-X-2026-522-1.pdf",
-      "Client-Sample-01-X-2026-522-2.pdf",
-      "Client-Sample-01-X-2026-522-3.pdf",
+      "Client-Sample-01/Client-Sample-01-X-2026-522-1.pdf",
+      "Client-Sample-01/Client-Sample-01-X-2026-522-2.pdf",
+      "Client-Sample-01/Client-Sample-01-X-2026-522-3.pdf",
     ]);
-    expect(names).toContain("Client-Sample-01-Summary.pdf");
+    expect(names).toContain("Client-Sample-01/Client-Sample-01-Summary.pdf");
     expect(names.some((name) => /-DS1\.pdf$|-SB1\.pdf$/.test(name))).toBe(false);
-    expect(names).not.toContain("Client-Sample-01-coral-org.pdf");
-    // The six test reports keep their established layout and are served from
-    // the reference asset; only the Summary is generated right now.
-    const hrefs = clickSpy.mock.contexts.map((anchor) => anchor.href);
-    const reportHrefs = hrefs.filter((href) => href.includes("SampleOutput.pdf"));
-    expect(reportHrefs).toHaveLength(6);
-    expect(hrefs.filter((href) => href === "blob:generated")).toHaveLength(1);
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(names).not.toContain("Client-Sample-01/Client-Sample-01-coral-org.pdf");
+    // The six test reports keep their established layout: each is fetched
+    // from the reference asset rather than generated.
+    expect(fetch).toHaveBeenCalledTimes(6);
+    fetch.mock.calls.forEach(([url]) => expect(url).toContain("SampleOutput.pdf"));
 
     expect(document.querySelector("#feedback").textContent).toBe(
-      "Started 7 separate PDFs -- allow multiple downloads if your browser asks. " +
-        "Cloud save is now available.",
+      "Downloaded Client-Sample-01.zip with 7 documents. Cloud save is now available.",
     );
     expect(document.querySelector("#cloud-save").disabled).toBe(false);
     clearFile();
   });
 
-  it("releases each generated document's object URL", async () => {
+  it("releases the archive's object URL after the grace period", async () => {
     const { selectFile } = await loadWorkspace();
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     await selectFile(workbook("lab-data.xlsx"));
     vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    // The generated Summary is queued last, after the six asset-backed reports.
-    await vi.advanceTimersByTimeAsync(7 * 350);
+    // Let the fetch/render promise chain settle before checking the timer;
+    // it resolves on the microtask queue, which fake timers do not gate.
+    await vi.advanceTimersByTimeAsync(0);
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(60000);
     vi.useRealTimers();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:generated");
+  });
+
+  /**
+   * A workbook holding exactly one report and nothing else, so a build's
+   * single fetch call can be held open and released on demand.
+   * @returns {void}
+   */
+  function stubSingleReportWorkbook() {
+    stubReader({
+      readWorkbook: () => ({
+        sheetNames: ["CV1", "TR1"],
+        cells: new Map(),
+        sheets: new Map([
+          ["CV1", new Map([["A1", "Client"]])],
+          ["TR1", new Map([["A1", "Results"]])],
+        ]),
+        reportGroups: [{ group: 1, sheets: { CV1: "CV1", TR1: "TR1" } }],
+      }),
+      extractReportIdentity: () => ({ job_ref: "X-1" }),
+    });
+  }
+
+  it("disables the button for the build's duration, blocking a repeat click", async () => {
+    const { selectFile } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const exportButton = document.querySelector("#pdf-export");
+    let releaseFetch;
+    fetch.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseFetch = () => resolve({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+      });
+    }));
+    stubSingleReportWorkbook();
+    await selectFile(workbook("single.xlsx"));
+
+    exportButton.click();
+    expect(exportButton.disabled).toBe(true);
+
+    // A disabled button does not dispatch click at all (the click() algorithm
+    // no-ops for it), so a repeat click here starts no second build; only one
+    // archive is ever produced for this export.
+    exportButton.click();
+    releaseFetch();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(exportButton.disabled).toBe(false);
+  });
+
+  it("drops the archive when the workbook is reset before the build finishes", async () => {
+    const { clearFile, selectFile } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    let releaseFetch;
+    fetch.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseFetch = () => resolve({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+      });
+    }));
+    stubSingleReportWorkbook();
+    await selectFile(workbook("single.xlsx"));
+
+    document.querySelector("#pdf-export").click();
+    // The workbook is cleared while the fetch for its report is still pending.
+    clearFile();
+    releaseFetch();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+
+    // No download for a workbook that is no longer selected, and the export
+    // button stays disabled -- clearFile()'s own reset, left undisturbed.
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(document.querySelector("#pdf-export").disabled).toBe(true);
+  });
+
+  it("reports a build failure that touches no document, without disturbing a newer workbook", async () => {
+    const { selectFile } = await loadWorkspace();
+    let rejectFetch;
+    fetch.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectFetch = reject;
+    }));
+    stubSingleReportWorkbook();
+    await selectFile(workbook("single.xlsx"));
+
+    document.querySelector("#pdf-export").click();
+    // A second workbook is selected before the failing build settles; the
+    // failure belongs to the first click and must not touch the new state.
+    await selectFile(workbook("single.xlsx"));
+    const feedbackBeforeRejection = document.querySelector("#feedback").textContent;
+    rejectFetch(new Error("network down"));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+
+    expect(document.querySelector("#feedback").textContent).toBe(feedbackBeforeRejection);
+  });
+
+  it("reports a build failure for the current workbook when every document fails", async () => {
+    const { selectFile } = await loadWorkspace();
+    fetch.mockResolvedValue({ ok: false, status: 503 });
+    stubSingleReportWorkbook();
+
+    await selectFile(workbook("single.xlsx"));
+    document.querySelector("#pdf-export").click();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Could not build the export. No document could be generated.",
+      ));
+    expect(document.querySelector("#pdf-export").disabled).toBe(false);
   });
 
   it("plans the test report and the Summary while datasheets stay disabled", async () => {
@@ -433,15 +579,11 @@ describe("workspace controller", () => {
     });
     expect(firstModel.report.assets.preparedSignature.bytes).toBeUndefined();
 
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(7 * 350);
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(7));
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
-    // Every report is generated now, so no download points at the static asset.
-    const hrefs = clickSpy.mock.contexts.map((anchor) => anchor.href);
-    expect(hrefs.filter((href) => href.includes("SampleOutput.pdf"))).toHaveLength(0);
+    // Every report is generated now, so the reference asset is never fetched.
+    expect(fetch).not.toHaveBeenCalled();
     expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).toHaveBeenCalledTimes(6);
     const renderedJobRefs = globalThis.docuAlignRakReportPdf.createRakReportPdf.mock.calls.map(
       ([reports]) => reports[0].jobRef,
@@ -503,33 +645,34 @@ describe("workspace controller", () => {
       expect.objectContaining({ feature: "ReportMapping" }),
     );
 
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(350);
-    vi.useRealTimers();
-    expect(clickSpy.mock.contexts[0].href).toContain("SampleOutput.pdf");
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("SampleOutput.pdf"));
     expect(globalThis.docuAlignRakReportPdf.createRakReportPdf).not.toHaveBeenCalled();
   });
 
   it("reports a test report generation failure without blocking other exports", async () => {
     const { selectFile } = await loadMappedWorkspace();
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     globalThis.docuAlignRakReportPdf.createRakReportPdf.mockRejectedValueOnce(
       new Error("Template unavailable"),
     );
     globalThis.docuAlignLogger = { logError: vi.fn() };
 
     await selectFile(workbook("lab-data.xlsx"));
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(7 * 350);
-    vi.useRealTimers();
 
+    // The other six documents (five reports + Summary) are still worth
+    // having, so the failure of one does not stop the archive.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Could not generate Test Report X-2026-522-1. Try exporting again.",
+        "Downloaded lab-data.zip with 6 documents; could not generate Test Report X-2026-522-1.",
       ),
     );
+    expect(clickSpy).toHaveBeenCalledOnce();
+    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
+    expect(names).toHaveLength(6);
+    expect(names.some((name) => name.includes("X-2026-522-1"))).toBe(false);
     expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
       "Test report PDF generation failed",
       expect.any(Error),
@@ -621,14 +764,13 @@ describe("workspace controller", () => {
     expect(sections[0].heading).toBe("DS1");
     expect(sections[0].rows.length).toBeGreaterThan(0);
 
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(20 * 350);
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(20));
-    const names = clickSpy.mock.contexts.map((anchor) => anchor.download);
-    expect(names).toContain("lab-data-X-2026-522-1-DS1.pdf");
-    expect(names).toContain("lab-data-coral-org.pdf");
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+    expect(clickSpy.mock.contexts[0].download).toBe("lab-data.zip");
+    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
+    expect(names).toHaveLength(20);
+    expect(names).toContain("lab-data/lab-data-X-2026-522-1-DS1.pdf");
+    expect(names).toContain("lab-data/lab-data-coral-org.pdf");
   });
 
   it("plans around reports whose datasheets are missing", async () => {
@@ -676,15 +818,40 @@ describe("workspace controller", () => {
     });
 
     await selectFile(workbook("ghost.xlsx"));
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(2 * 350);
-    vi.useRealTimers();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
-    expect(clickSpy.mock.contexts.map((anchor) => anchor.download)).toEqual([
-      "ghost-X-1.pdf",
-      "ghost-Ghost.pdf",
-    ]);
+    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
+    expect(names).toEqual(["ghost/ghost-X-1.pdf", "ghost/ghost-Ghost.pdf"]);
+  });
+
+  it("archives a generated document whichever byte container its renderer returns", async () => {
+    const { selectFile, setDisabledDocumentKinds } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    setDisabledDocumentKinds([]);
+    stubReader({
+      readWorkbook: () => ({
+        sheetNames: ["CV1", "TR1", "Notes"],
+        cells: new Map(),
+        sheets: new Map([["CV1", new Map()], ["TR1", new Map()], ["Notes", new Map()]]),
+        reportGroups: [{ group: 1, sheets: { CV1: "CV1", TR1: "TR1" } }],
+      }),
+      extractReportIdentity: () => ({ job_ref: "X-1" }),
+    });
+    // The generic writer's documented return type is a Uint8Array, but the
+    // archive step also accepts a plain ArrayBuffer -- pdf-lib's own save()
+    // can return either depending on version, and neither should be coerced
+    // through an unnecessary extra copy when it is already a Uint8Array.
+    globalThis.docuAlignPdf = {
+      createDocument: vi.fn(() => new Uint8Array([1, 2, 3]).buffer),
+    };
+
+    await selectFile(workbook("notes.xlsx"));
+    document.querySelector("#pdf-export").click();
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+
+    const notes = (await downloadedArchiveEntries()).find((entry) => entry.name.endsWith("Notes.pdf"));
+    expect([...notes.data]).toEqual([1, 2, 3]);
   });
 
   it("reports a fixed-format Summary generation failure without blocking other exports", async () => {
@@ -708,17 +875,17 @@ describe("workspace controller", () => {
     const summary = getExportDocuments().find((document) => document.slug === "Summary");
     expect(JSON.parse(summary.data)).toEqual({ renderer: "summary", cells: [] });
 
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(2 * 350);
-    vi.useRealTimers();
 
+    // The report is still worth having even though the Summary failed.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Could not generate Summary. Try exporting again.",
+        "Downloaded summary-error.zip with 1 document; could not generate Summary.",
       ),
     );
     expect(clickSpy).toHaveBeenCalledOnce();
+    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
+    expect(names).toEqual(["summary-error/summary-error-X-1.pdf"]);
     expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
       "Summary PDF generation failed",
       expect.any(Error),
@@ -747,54 +914,15 @@ describe("workspace controller", () => {
     ]);
   });
 
-  it("cancels pending downloads when the workspace is reset mid-export", async () => {
-    const { clearFile, selectFile } = await loadWorkspace();
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-    await selectFile(workbook("lab-data.xlsx"));
-    vi.useFakeTimers();
-    document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(350);
-    expect(clickSpy).toHaveBeenCalledTimes(2);
-
-    clearFile();
-    vi.advanceTimersByTime(10 * 350);
-    vi.useRealTimers();
-
-    // The five still-queued downloads must not fire after the reset.
-    expect(clickSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("restarts the queue instead of doubling it when export is clicked twice", async () => {
-    const { selectFile } = await loadWorkspace();
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const exportButton = document.querySelector("#pdf-export");
-
-    await selectFile(workbook("lab-data.xlsx"));
-    vi.useFakeTimers();
-    exportButton.click();
-    vi.advanceTimersByTime(350);
-    expect(clickSpy).toHaveBeenCalledTimes(2);
-
-    // A second click discards the queued downloads and re-queues all 7.
-    exportButton.click();
-    vi.advanceTimersByTime(10 * 350);
-    vi.useRealTimers();
-
-    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(9));
-  });
-
   it("uses a fallback PDF name and applies the file runtime warning", async () => {
     const { applyRuntimeNotice, clearFile, reportBaseName, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     await selectFile(workbook("---.xlsx"));
     expect(reportBaseName()).toBe("report");
-    vi.useFakeTimers();
     document.querySelector("#pdf-export").click();
-    vi.advanceTimersByTime(350);
-    vi.useRealTimers();
-    expect(clickSpy.mock.contexts[0].download).toBe("report-X-2026-522-1.pdf");
+    await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+    expect(clickSpy.mock.contexts[0].download).toBe("report.zip");
 
     applyRuntimeNotice("https:");
     applyRuntimeNotice("file:");

@@ -87,13 +87,6 @@ function isDocumentEnabled(plan) {
   return !disabledDocumentKinds.includes(plan.kind);
 }
 
-/**
- * Gap between document downloads. Browsers throttle multiple programmatic
- * downloads triggered in one synchronous burst -- Chrome in particular keeps
- * only the first -- so the anchors are spaced out instead of fired in a loop.
- */
-const DOWNLOAD_INTERVAL_MS = 350;
-
 /** Grace period before a download's object URL is released. */
 const REVOKE_DELAY_MS = 60000;
 
@@ -101,7 +94,6 @@ let selectedSourceName = "";
 let parsedDocuments = null;
 let parsedSheets = new Map();
 let mappedReports = new Map();
-let downloadTimers = [];
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -123,8 +115,6 @@ function resetPipeline() {
   parsedDocuments = null;
   parsedSheets = new Map();
   mappedReports = new Map();
-  downloadTimers.forEach((timer) => clearTimeout(timer));
-  downloadTimers = [];
   pipelineStep.classList.remove("is-active", "is-complete");
   exportStep.classList.remove("is-active", "is-complete");
   saveStep.classList.remove("is-active");
@@ -514,43 +504,103 @@ function serializeDocumentData(plan, sheets) {
 }
 
 /**
- * Generate and download one planned document.
+ * Render one planned document to PDF bytes for the archive.
+ *
+ * A document backed by the reference asset carries no data of its own, so its
+ * bytes are fetched rather than generated.
  * @param {Object} plan - Planned document.
- * @param {string} baseName - Sanitized workbook name.
- * @returns {void|Promise<void>}
+ * @returns {Promise<Uint8Array>} The document's PDF bytes.
  */
-function downloadDocument(plan, baseName) {
-  // Documents backed by a fixed asset (the test report) are served unchanged;
-  // only the supporting worksheets are generated from parsed data.
-  const isGenerated = !plan.assetPath;
-  const triggerDownload = (rendered) => {
-    // Renderers return either raw PDF bytes or a ready-made Blob.
-    const url = isGenerated
-      ? URL.createObjectURL(
-        rendered instanceof Blob ? rendered : new Blob([rendered], { type: "application/pdf" }),
-      )
-      : new URL(plan.assetPath, globalThis.location.href).href;
-
-    const download = document.createElement("a");
-    download.href = url;
-    download.download = `${baseName}-${plan.slug}.pdf`;
-    download.rel = "noopener";
-    document.body.appendChild(download);
-    download.click();
-    download.remove();
-
-    // Release the blob once the browser has taken the download.
-    if (isGenerated) setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
-  };
-
-  if (!isGenerated) {
-    triggerDownload();
-    return;
+async function documentBytes(plan) {
+  if (plan.assetPath) {
+    const response = await fetch(new URL(plan.assetPath, globalThis.location.href).href);
+    if (!response.ok) {
+      throw new Error(`Could not read the reference report (${response.status}).`);
+    }
+    return new Uint8Array(await response.arrayBuffer());
   }
 
-  const rendered = renderDocument(plan, parsedSheets);
-  if (rendered instanceof Promise) return rendered.then(triggerDownload);
-  triggerDownload(rendered);
+  const rendered = await renderDocument(plan, parsedSheets);
+  if (rendered instanceof Blob) return new Uint8Array(await rendered.arrayBuffer());
+  return rendered instanceof Uint8Array ? rendered : new Uint8Array(rendered);
+}
+
+/**
+ * Record a document's generation failure without stopping the export.
+ * @param {Object} plan - Planned document.
+ * @param {unknown} error - The failure raised while rendering.
+ * @returns {void}
+ */
+function logDocumentFailure(plan, error) {
+  const isReport = plan.renderer === "report";
+  globalThis.docuAlignLogger?.logError?.(
+    isReport ? "Test report PDF generation failed" : "Summary PDF generation failed",
+    error,
+    {
+      feature: isReport ? "PdfTemplate" : "SummaryPdf",
+      function: "buildExportArchive",
+      operation: isReport ? "pdf.copyAndOverlay" : "pdf.copyAndOverlaySummary",
+      category: "LocalPdfGeneration",
+      documentSlug: plan.slug,
+    },
+  );
+}
+
+/**
+ * Render every planned document and pack them into one archive.
+ *
+ * A document that fails to render is left out rather than failing the whole
+ * export: the rest are still worth having, and the caller reports what was
+ * dropped. Entries are named into a folder so the archive unpacks tidily.
+ *
+ * Takes the plan list explicitly, rather than reading it off module state,
+ * so a reset that runs while this is in flight can never change which
+ * documents it renders midway through.
+ * @param {Array<Object>} documents - Planned documents, as captured at click time.
+ * @param {string} baseName - Sanitized workbook name.
+ * @returns {Promise<{archive: Uint8Array, included: number, failed: string[]}>} The archive.
+ */
+async function buildExportArchive(documents, baseName) {
+  const entries = [];
+  const failed = [];
+
+  for (const plan of documents) {
+    try {
+      entries.push({
+        name: `${baseName}/${baseName}-${plan.slug}.pdf`,
+        data: await documentBytes(plan),
+      });
+    } catch (error) {
+      logDocumentFailure(plan, error);
+      failed.push(plan.title);
+    }
+  }
+
+  if (entries.length === 0) throw new Error("No document could be generated.");
+  return {
+    archive: globalThis.docuAlignZip.createArchive(entries),
+    included: entries.length,
+    failed,
+  };
+}
+
+/**
+ * Download the finished archive as a single file.
+ * @param {Uint8Array} archive - Archive bytes.
+ * @param {string} baseName - Sanitized workbook name.
+ * @returns {void}
+ */
+function downloadArchive(archive, baseName) {
+  const url = URL.createObjectURL(new Blob([archive], { type: "application/zip" }));
+  const download = document.createElement("a");
+  download.href = url;
+  download.download = `${baseName}.zip`;
+  download.rel = "noopener";
+  document.body.appendChild(download);
+  download.click();
+  download.remove();
+  // Release the blob once the browser has taken the download.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 }
 
 /**
@@ -574,47 +624,49 @@ function getExportDocuments() {
   }));
 }
 
-pdfExport.addEventListener("click", () => {
+pdfExport.addEventListener("click", async () => {
   if (!parsedDocuments) {
     setFeedback("Select and process a workbook before exporting the PDF.", true);
     return;
   }
+  // A repeat click while a build is running cannot re-enter here: disabling
+  // the button below (per the HTML click() algorithm) stops a disabled
+  // button from dispatching further click events at all.
 
+  // One archive rather than a burst of downloads: browsers throttle multiple
+  // programmatic downloads and prompt before allowing them. The plan list is
+  // captured now so a reset mid-build can be detected below rather than
+  // silently changing which documents this call renders.
+  const documents = parsedDocuments;
   const baseName = reportBaseName();
-  const documentCount = parsedDocuments.length;
-  downloadTimers.forEach((timer) => clearTimeout(timer));
-  downloadTimers = parsedDocuments.map((plan, index) =>
-    setTimeout(() => {
-      const download = downloadDocument(plan, baseName);
-      if (download instanceof Promise) {
-        download.catch((error) => {
-          const isReport = plan.renderer === "report";
-          globalThis.docuAlignLogger?.logError?.(
-            isReport ? "Test report PDF generation failed" : "Summary PDF generation failed",
-            error,
-            {
-              feature: isReport ? "PdfTemplate" : "SummaryPdf",
-              function: "downloadDocument",
-              operation: isReport ? "pdf.copyAndOverlay" : "pdf.copyAndOverlaySummary",
-              category: "LocalPdfGeneration",
-              documentSlug: plan.slug,
-            },
-          );
-          setFeedback(`Could not generate ${plan.title}. Try exporting again.`, true);
-        });
-      }
-    }, index * DOWNLOAD_INTERVAL_MS),
-  );
+  pdfExport.disabled = true;
+  setFeedback("Generating documents\u2026", true);
 
-  exportStep.classList.add("is-complete");
-  saveStep.classList.add("is-active");
-  cloudSave.disabled = false;
-  setFeedback(
-    documentCount === 1
-      ? "Started 1 separate PDF. Cloud save is now available."
-      : `Started ${documentCount} separate PDFs -- allow multiple downloads if your browser asks. Cloud save is now available.`,
-    true,
-  );
+  try {
+    const { archive, included, failed } = await buildExportArchive(documents, baseName);
+    // The workbook was cleared or replaced while this was building; the
+    // archive describes a workbook that is no longer selected; drop it.
+    if (parsedDocuments !== documents) return;
+    downloadArchive(archive, baseName);
+
+    exportStep.classList.add("is-complete");
+    saveStep.classList.add("is-active");
+    cloudSave.disabled = false;
+    const documentCount = `${included} ${included === 1 ? "document" : "documents"}`;
+    setFeedback(
+      failed.length === 0
+        ? `Downloaded ${baseName}.zip with ${documentCount}. Cloud save is now available.`
+        : `Downloaded ${baseName}.zip with ${documentCount}; could not generate ${failed.join(", ")}.`,
+      true,
+    );
+  } catch (error) {
+    if (parsedDocuments !== documents) return;
+    setFeedback(`Could not build the export. ${error.message}`, true);
+  } finally {
+    // Only re-enable for the workbook this build was for; a reset already
+    // set the button's disabled state appropriately for whatever came after.
+    if (parsedDocuments === documents) pdfExport.disabled = false;
+  }
 });
 
 dropzone.addEventListener("dragenter", (event) => {
