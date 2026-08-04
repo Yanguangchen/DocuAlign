@@ -9,11 +9,12 @@
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
 
   /**
-   * Downward nudge applied to the cover page's values, in PDF points. The
-   * first pass used 0.75pt, which read as two pixels on screen and sat a pixel
-   * too low; half of it seats the block where the reference has it.
+   * Downward nudge applied to the cover page's values, in PDF points. Started
+   * at 0.75pt (one screen pixel by the naive 72/96 ratio, which read as two
+   * pixels and sat low), halved to 0.375pt, and now nudged back up by 0.2px
+   * (0.15pt at 96dpi) to 0.225pt.
    */
-  const COVER_TEXT_NUDGE = 0.375;
+  const COVER_TEXT_NUDGE = 0.225;
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({
@@ -171,17 +172,17 @@
       });
     });
 
-    // The chart box is measured from the reference page: its frame starts
-    // immediately below the table's bottom rule (which ends at 276.0) and runs
-    // to 453.8. Clearing or drawing outside that span either leaves the
-    // reference's own frame showing beside the redrawn one, or paints over the
-    // table above.
-    addWhiteout(plan, 38.28, 276.05, 490.56, 178.0);
+    // The chart box is measured from the reference page: its frame spans
+    // 37.38 to 515.75 horizontally and starts immediately below the table's
+    // bottom rule (which ends at 276.0), running to 453.8. Clearing or drawing
+    // outside that span either leaves the reference's own frame showing beside
+    // the redrawn one, or paints over the table above.
+    addWhiteout(plan, 37.0, 276.05, 479.5, 178.0);
     plan.chart = {
       kind: "grading",
-      x: 38.28,
+      x: 37.38,
       top: 276.38,
-      width: 490.56,
+      width: 478.37,
       height: 177.0,
       rows: report.psd.rows,
     };
@@ -202,9 +203,12 @@
       bold: true,
       cell: CELLS.siltCoral,
     });
+    // The mask stays inside the cell's own rules: reaching to 414 would paint
+    // over the column separator and the table's right border, which nothing
+    // redraws afterwards.
     addValue(plan, report.siltCoral.requirement, 424.78, 562.33, {
-      eraseX: 414,
-      eraseWidth: 108,
+      eraseX: 416,
+      eraseWidth: 102,
       bold: true,
       cell: CELLS.siltRequirement,
     });
@@ -258,21 +262,21 @@
     // 302.2 and the chart frames run 303.25 to 451.05. The mask used to start
     // at 301.5, inside that rule, so the table lost its bottom border and the
     // chart frame was drawn across it.
-    addWhiteout(plan, 38.28, 302.6, 490.56, 148.45);
+    addWhiteout(plan, 37.2, 302.6, 474.4, 148.45);
     plan.charts = [
       {
         kind: "normal-shear",
         x: 38.28,
         top: 303.65,
-        width: 245.0,
+        width: 238.5,
         height: 147.0,
         rows: shear.rows,
       },
       {
         kind: "displacement-shear",
-        x: 289.5,
+        x: 283.13,
         top: 303.65,
-        width: 239.34,
+        width: 228.25,
         height: 147.0,
         series: shear.series,
       },
@@ -602,7 +606,7 @@
 
   function drawNormalShearChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    const plot = { left: 83, right: 255, top: 310, bottom: 409 };
+    const plot = { left: 84.88, right: 248.25, top: 313.25, bottom: 407.5 };
     drawAxes(page, plot, fonts, pdfLib, 150);
     const points = chart.rows.map((row) => ({
       x: plot.left + (numeric(row.normalStressKpa) / 150) * (plot.right - plot.left),
@@ -618,17 +622,17 @@
     const last = points.at(-1);
     const lastStress = numeric(chart.rows.at(-1).maxShearStressKpa);
     const slope = lastStress / Math.max(numeric(chart.rows.at(-1).normalStressKpa), 1);
-    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, CHART_FONTS.note, fonts, pdfLib);
-    chartText(page, "Max. Shear Stress (kPa)", 51, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
+    chartText(page, `y = ${slope.toFixed(4)}x`, 186.5, 329.25, CHART_FONTS.note, fonts, pdfLib);
+    chartText(page, "Max. Shear Stress (kPa)", 52.88, 404.5, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Normal Stress (kPa)", 130, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
+    chartText(page, "Normal Stress (kPa)", 127.57, 426.5, CHART_FONTS.axisTitle, fonts, pdfLib);
     circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
   }
 
   function drawDisplacementShearChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    const plot = { left: 324, right: 505, top: 310, bottom: 409 };
+    const plot = { left: 330.0, right: 495.12, top: 313.25, bottom: 407.5 };
     drawAxes(page, plot, fonts, pdfLib, 6);
     const colors = [
       [0.8, 0.3, 0.28],
@@ -649,10 +653,11 @@
         circle(page, point.x, point.top, pdfLib, seriesColor, 1.5);
       });
     });
-    chartText(page, "Max. Shear Stress (kPa)", 297, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
+    chartText(page, "Max. Shear Stress (kPa)", 303, 404.5, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Horizontal Displacement (mm)", 350, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
+    chartText(page, "Horizontal Displacement (mm)", 348.06, 426.5, CHART_FONTS.axisTitle,
+      fonts, pdfLib);
   }
 
   async function drawImage(outputDocument, page, operation) {
