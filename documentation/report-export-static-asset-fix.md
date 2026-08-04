@@ -203,16 +203,100 @@ and adding overlay streams. That reassembly can shift anti-aliased line edges
 by a sub-pixel amount without changing the underlying vector geometry at all.
 This is a rendering/comparison artifact, not a defect in the exported PDF.
 
-**Conclusion:** for the exact dataset in the reported screenshot, the
-Summary's table grid is complete: every reference rule has a corresponding
-line in the generated output once sub-pixel rasterization differences are
-accounted for. No code change was made for this report. If grid lines are
-still visibly missing in a real render, get a specific row/column pointer (or
-the exact generated PDF) rather than re-deriving this from a screenshot alone
-— the failure mode above shows how easy it is to mistake a 1px rasterization
-offset for missing content.
+**Conclusion at the time:** for the exact dataset in that screenshot, the
+*horizontal* rules were all present once sub-pixel rasterization differences
+were accounted for, and no code change was made.
 
-## 6. What to check before touching this again
+> [!WARNING]
+> **That conclusion was too broad, and later reports proved it wrong.** The
+> ±2px-tolerance pass answered only "is each reference rule present *somewhere*
+> nearby", which is why two real defects survived it — uneven rule *weight*
+> (§7) and erased *vertical* rules (§8). The lesson is not "grid complaints are
+> false alarms": it is that whole-page ink diffing between two independently
+> built PDFs is too noisy to settle this question. Both real defects were found
+> instead by measuring specific geometry — rule thickness in points, and ink
+> coverage sampled at each of the 27 known rule x-positions. Reach for a
+> targeted measurement, not a whole-page diff, and treat a reported grid
+> problem as real until a targeted measurement says otherwise.
+
+## 7. Uneven rule weight in the result body
+
+The finished table showed rules of visibly different weights. Three causes,
+all in the redrawn result body:
+
+- The body grid **stroked 0.72pt lines** while every rule the reference page
+  draws is a **0.84pt filled rectangle**.
+- The body mask stopped at `BODY_TOP` (352.1) but the reference's top body
+  rule spans 352.03–352.87, so a 0.77pt sliver survived *underneath* the
+  redrawn rule and rendered it about 1.13pt thick.
+- `TABLE_BOUNDARIES`, which positioned cell text, sits up to 1.2pt left of
+  the rules the reference actually draws, so body verticals jogged against
+  the header's.
+
+Rules are now filled rectangles at the measured reference geometry
+(`TABLE_RULE_X`, `BODY_TOP_RULE`, `RULE_THICKNESS`), and the mask clears the
+reference's top rule completely. Measured on a four-row workbook, body rule
+weights went from `0.88, 0.75, 0.75, 0.75, 0.62` pt to a uniform `0.88` pt.
+
+## 8. Erased vertical rules in the two header rows
+
+Sampling ink coverage at each of the 27 rule positions showed the sieve-size
+header row missing columns 3–9 and the limits row missing columns 3–10 — 2–3%
+of each rule remaining where the reference has 100%.
+
+Same root cause as §7, in the one place that fix did not reach. Both header
+rows are masked cell by cell before their values are redrawn, and those masks
+were positioned from `TABLE_BOUNDARIES` — the *text* boundaries — so each mask
+began left of its own cell's opening rule and painted over it. The body
+survived only because it redraws its rules afterwards; these rows never do, so
+the lines were gone for good. The boundary drift shrinks from 1.19pt at the
+left of the table to 0.14pt at the right, which is exactly why the left-hand
+columns vanished and the right-hand ones survived.
+
+Masks and values are now bounded by `cellInterior()`, the span between a
+cell's two rules. `TABLE_BOUNDARIES` is deleted outright: the rule geometry is
+the single source of truth for drawing *and* text placement. A regression test
+asserts no header mask ever horizontally overlaps a rule.
+
+## 9. The last static report
+
+Auditing all six reports for static content found one still served as the
+bundled asset. `createRakReportPdf` short-circuited any report whose mapped
+data and pictures hashed equal to the reference sample: its five pages were
+copied from `SampleOutput.pdf` untouched, with no overlay. For the sample
+workbook that is group 2 — the report `SampleOutput.pdf` was produced from —
+so one report in every export carried the bundled PDF's photographs, values
+and typography, and stayed in the reference's original typography while the
+other five were redrawn.
+
+Byte-level checking caught it: group 2's own workbook photographs were absent
+from its PDF while the other five embedded theirs. Every report is now
+overlaid from its own mapped values, and the reference-hashing helpers
+(`matchesReferenceReport`, `reportDataHash`, `stringHash`, `byteHash`) are
+removed with the branch they served.
+
+**Audit method worth reusing:** resolve each group's photographs straight out
+of the workbook (worksheet → drawing → media relationships), hash them, and
+assert those exact bytes appear in the generated PDF. Pixel comparison alone
+would have accepted group 2, because its static pages *looked* correct — they
+are that group's own report.
+
+## 10. One link per report
+
+Publishing a public link required ticking each document into a package first.
+The report card's own button now publishes the report's whole document set as
+a single package link and says how many documents it carries; reports saved
+before per-document storage still publish as a plain share. The package
+checkboxes remain for the narrower job of mixing documents across reports. A
+package over `MAX_BUNDLE_REPORTS` (25) surfaces that reason rather than
+inviting a retry that cannot succeed.
+
+Two consequences to keep in mind: a recipient now sees every document in a
+report rather than only what was ticked, and re-enabling the DS1/SB1 and
+standalone-worksheet exports takes a workbook from 7 documents back to 20+,
+which will approach that 25-document ceiling.
+
+## 11. What to check before touching this again
 
 - Never let `assetPath` be the default for a report plan — it must only be
   set in the explicit fallback branch of `planExportDocuments` when
@@ -220,6 +304,12 @@ offset for missing content.
   locks in that `docuAlignRakReportPdf.createRakReportPdf` is the normal
   path and `document.assetPath = REPORT_ASSET_PATH` only appears as a
   fallback assignment.
+- Never reintroduce a "this report equals the reference, copy it untouched"
+  short-circuit (§9). It looks like a harmless optimisation and silently puts
+  one static report into every export.
+- Anything that paints over a table cell must be bounded by `cellInterior()`,
+  never by a text-boundary array (§8). A mask that is a point too wide erases
+  a rule that nothing redraws.
 - Any renderer that draws mapped values verbatim (report or Summary) is only
   as correct as `xlsx-reader.js`'s number formatting. If a value looks like a
   raw float in output, suspect a missing or misclassified number format in
