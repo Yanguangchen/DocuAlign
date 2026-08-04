@@ -128,19 +128,19 @@ describe("RAK sample-template PDF renderer", () => {
     expect(plan[0].texts).toContainEqual(expect.objectContaining({
       text: "Replacement Client",
       x: 181.1,
-      top: 139.64 + 0.375,
+      top: 139.64 + 0.225,
       size: 9.48,
     }));
     expect(plan[0].texts).toContainEqual(expect.objectContaining({
       text: "X-2026-522-9",
       x: 181.1,
-      top: 457.21 + 0.375,
+      top: 457.21 + 0.225,
       bold: true,
     }));
     // The chart box matches the reference's own frame, which starts below the
     // table's bottom rule rather than across it.
     expect(plan[1]).toMatchObject({
-      chart: { kind: "grading", x: 38.28, top: 276.38, height: 177.0 },
+      chart: { kind: "grading", x: 37.38, top: 276.38, width: 478.37, height: 177.0 },
     });
     expect(plan[2].charts.every((chart) => chart.top === 303.65)).toBe(true);
     // Replaced values are centred in their cell, not drawn at a fixed x.

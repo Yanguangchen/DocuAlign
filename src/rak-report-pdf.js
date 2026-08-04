@@ -9,11 +9,12 @@
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
 
   /**
-   * Downward nudge applied to the cover page's values, in PDF points. The
-   * first pass used 0.75pt, which read as two pixels on screen and sat a pixel
-   * too low; half of it seats the block where the reference has it.
+   * Downward nudge applied to the cover page's values, in PDF points. Started
+   * at 0.75pt (one screen pixel by the naive 72/96 ratio, which read as two
+   * pixels and sat low), halved to 0.375pt, and now nudged back up by 0.2px
+   * (0.15pt at 96dpi) to 0.225pt.
    */
-  const COVER_TEXT_NUDGE = 0.375;
+  const COVER_TEXT_NUDGE = 0.225;
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({
@@ -171,17 +172,17 @@
       });
     });
 
-    // The chart box is measured from the reference page: its frame starts
-    // immediately below the table's bottom rule (which ends at 276.0) and runs
-    // to 453.8. Clearing or drawing outside that span either leaves the
-    // reference's own frame showing beside the redrawn one, or paints over the
-    // table above.
-    addWhiteout(plan, 38.28, 276.05, 490.56, 178.0);
+    // The chart box is measured from the reference page: its frame spans
+    // 37.38 to 515.75 horizontally and starts immediately below the table's
+    // bottom rule (which ends at 276.0), running to 453.8. Clearing or drawing
+    // outside that span either leaves the reference's own frame showing beside
+    // the redrawn one, or paints over the table above.
+    addWhiteout(plan, 37.0, 276.05, 479.5, 178.0);
     plan.chart = {
       kind: "grading",
-      x: 38.28,
+      x: 37.38,
       top: 276.38,
-      width: 490.56,
+      width: 478.37,
       height: 177.0,
       rows: report.psd.rows,
     };
@@ -202,9 +203,12 @@
       bold: true,
       cell: CELLS.siltCoral,
     });
+    // The mask stays inside the cell's own rules: reaching to 414 would paint
+    // over the column separator and the table's right border, which nothing
+    // redraws afterwards.
     addValue(plan, report.siltCoral.requirement, 424.78, 562.33, {
-      eraseX: 414,
-      eraseWidth: 108,
+      eraseX: 416,
+      eraseWidth: 102,
       bold: true,
       cell: CELLS.siltRequirement,
     });
