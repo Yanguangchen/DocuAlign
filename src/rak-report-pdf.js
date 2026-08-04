@@ -7,6 +7,13 @@
 (() => {
   const PAGE_HEIGHT = 841.68;
   const TEMPLATE_PATH = "./SampleDocuments/SampleOutput.pdf";
+
+  /**
+   * Downward nudge applied to the cover page's values, in PDF points. A point
+   * is 1/72in against a screen pixel's 1/96in, so 0.75pt is the one pixel the
+   * cover text sits high by at normal viewing scale.
+   */
+  const COVER_TEXT_NUDGE = 0.75;
   const BLACK = Object.freeze([0, 0, 0]);
   const WHITE = Object.freeze([1, 1, 1]);
   const GRADING_SERIES_STYLES = Object.freeze({
@@ -48,6 +55,14 @@
     plan.whiteouts.push({ x, top, width, height, kind });
   }
 
+  /**
+   * Replace one table cell's value.
+   *
+   * The reference centres every value inside its own cell, so `cell` gives the
+   * span between that cell's vertical rules and the replacement is centred in
+   * it. Drawing at a fixed x instead only looks centred for values the same
+   * width as the sample's -- a shorter or longer number sits visibly off.
+   */
   function addValue(plan, text, x, top, options = {}) {
     addWhiteout(
       plan,
@@ -57,8 +72,29 @@
       11.2,
       "value-mask",
     );
-    addText(plan, text, x, top, options);
+    const [left, right] = options.cell;
+    addText(plan, text, left, top, Object.assign({}, options, {
+      align: "center",
+      width: right - left,
+    }));
   }
+
+  /** Cell spans measured from the reference report, in PDF points. */
+  const CELLS = Object.freeze({
+    psdPassing: Object.freeze([152.5, 269.88]),
+    siltCoral: Object.freeze([285.12, 414.25]),
+    siltRequirement: Object.freeze([415.12, 518.88]),
+    wideResult: Object.freeze([285.12, 518.88]),
+    shearSummary: Object.freeze([328.0, 518.88]),
+    shearAngle: Object.freeze([36.88, 255.0]),
+    shearStress: Object.freeze([
+      Object.freeze([211.88, 255.0]),
+      Object.freeze([255.88, 341.38]),
+      Object.freeze([342.25, 430.75]),
+      Object.freeze([431.62, 518.88]),
+    ]),
+    metalResult: Object.freeze([197.62, 369.88]),
+  });
 
   function addHeaderJob(plan, report) {
     addWhiteout(plan, 475, 51.5, 85, 14);
@@ -113,6 +149,13 @@
     for (const [text, top, bold] of details) {
       addText(plan, text, 181.1, top, { bold });
     }
+
+    // Every cover value sits a hair high against the reference's own baselines,
+    // so the whole block is nudged down by COVER_TEXT_NUDGE. Applying it here,
+    // once, keeps the individual coordinates as measured from the reference.
+    plan.texts.forEach((operation) => {
+      operation.top += COVER_TEXT_NUDGE;
+    });
     return plan;
   }
 
@@ -124,41 +167,52 @@
       addValue(plan, row.cumulativePassingPercent, 206.42, valueTops.at(index), {
         eraseX: 196,
         eraseWidth: 32,
+        cell: CELLS.psdPassing,
       });
     });
 
-    addWhiteout(plan, 38.28, 277.5, 490.56, 176.5);
+    // The chart box is measured from the reference page: its frame starts
+    // immediately below the table's bottom rule (which ends at 276.0) and runs
+    // to 453.8. Clearing or drawing outside that span either leaves the
+    // reference's own frame showing beside the redrawn one, or paints over the
+    // table above.
+    addWhiteout(plan, 38.28, 276.05, 490.56, 178.0);
     plan.chart = {
       kind: "grading",
       x: 38.28,
-      top: 277.5,
+      top: 276.38,
       width: 490.56,
-      height: 176.5,
+      height: 177.0,
       rows: report.psd.rows,
     };
 
     addValue(plan, report.siltCoral.siltPercent, 343.51, 529.09, {
       eraseX: 335,
       eraseWidth: 31,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.coralShellPercent, 343.51, 545.65, {
       eraseX: 335,
       eraseWidth: 31,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.totalPercent, 343.51, 562.33, {
       eraseX: 335,
       eraseWidth: 31,
       bold: true,
+      cell: CELLS.siltCoral,
     });
     addValue(plan, report.siltCoral.requirement, 424.78, 562.33, {
       eraseX: 414,
       eraseWidth: 108,
       bold: true,
+      cell: CELLS.siltRequirement,
     });
     addValue(plan, report.moisture.percent, 395.83, 613.96, {
       eraseX: 386,
       eraseWidth: 35,
       bold: true,
+      cell: CELLS.wideResult,
     });
     addWhiteout(plan, 92, 628.5, 405, 15);
     addText(plan, report.moisture.remark, 93.84, 630.88);
@@ -170,18 +224,19 @@
     const shear = report.directShear;
     addHeaderJob(plan, report);
     const summaryValues = [
-      [shear.maximumDryDensity, 414.7, 129.06, false],
-      [shear.minimumDryDensity, 414.7, 143.6, false],
-      [shear.retainedOn2mmPercent, 418.66, 158.12, false],
-      [shear.shearingRate, 417.34, 172.64, false],
-      [shear.initialBulkDensity, 414.7, 187.16, false],
-      [shear.initialDryDensity, 414.7, 201.68, false],
-      [shear.angle, 141.14, 230.84, true],
+      [shear.maximumDryDensity, 414.7, 129.06, false, CELLS.shearSummary],
+      [shear.minimumDryDensity, 414.7, 143.6, false, CELLS.shearSummary],
+      [shear.retainedOn2mmPercent, 418.66, 158.12, false, CELLS.shearSummary],
+      [shear.shearingRate, 417.34, 172.64, false, CELLS.shearSummary],
+      [shear.initialBulkDensity, 414.7, 187.16, false, CELLS.shearSummary],
+      [shear.initialDryDensity, 414.7, 201.68, false, CELLS.shearSummary],
+      [shear.angle, 141.14, 230.84, true, CELLS.shearAngle],
     ];
-    for (const [text, x, top, bold] of summaryValues) {
+    for (const [text, x, top, bold, cell] of summaryValues) {
       addValue(plan, text, x, top, {
         eraseWidth: 35,
         bold,
+        cell,
       });
     }
 
@@ -194,32 +249,38 @@
       for (const [text, top] of values) {
         addValue(plan, text, xPositions.at(index), top, {
           eraseWidth: 28,
+          cell: CELLS.shearStress.at(index),
         });
       }
     });
 
-    addWhiteout(plan, 38.28, 301.5, 490.56, 158.5);
+    // Measured from the reference page: the shear table's bottom rule ends at
+    // 302.2 and the chart frames run 303.25 to 451.05. The mask used to start
+    // at 301.5, inside that rule, so the table lost its bottom border and the
+    // chart frame was drawn across it.
+    addWhiteout(plan, 38.28, 302.6, 490.56, 148.45);
     plan.charts = [
       {
         kind: "normal-shear",
         x: 38.28,
-        top: 301.5,
+        top: 303.65,
         width: 245.0,
-        height: 158.5,
+        height: 147.0,
         rows: shear.rows,
       },
       {
         kind: "displacement-shear",
         x: 289.5,
-        top: 301.5,
+        top: 303.65,
         width: 239.34,
-        height: 158.5,
+        height: 147.0,
         series: shear.series,
       },
     ];
     addValue(plan, report.organicMatter.percent, 393.19, 492.25, {
       eraseWidth: 32,
       bold: true,
+      cell: CELLS.wideResult,
     });
     return plan;
   }
@@ -232,6 +293,7 @@
       addValue(plan, row.resultPpm, 276.29, valueTops.at(index), {
         eraseX: 265,
         eraseWidth: 42,
+        cell: CELLS.metalResult,
       });
     });
     plan.images.push(
