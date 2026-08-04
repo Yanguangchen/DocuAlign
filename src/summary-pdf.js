@@ -390,7 +390,10 @@
 
     headerValues.forEach(([slot, text]) => {
       const { left, right } = cellInterior(slot);
-      whiteout(page, pdfLib, left, 363.55, right - left, 12.6);
+      // The rule under this row spans 362.76 to 363.7. Starting the mask at
+      // 363.55 clipped 0.15pt off its top, rendering it at 0.75 where every
+      // other rule in the table is 0.88.
+      whiteout(page, pdfLib, left, 363.7, right - left, 12.45);
       fittedText(page, text, left, right, 367.66, fonts.regular, 7.44, "center", pdfLib);
     });
 
