@@ -369,9 +369,13 @@
   function drawText(page, operation, fonts, pdfLib) {
     const font = operation.bold ? fonts.bold : fonts.regular;
     let x = operation.x;
-    if (operation.align === "center" && operation.width) {
-      x += (operation.width - font.widthOfTextAtSize(operation.text, operation.size)) / 2;
-    }
+    // Axis values are right-aligned so their digits end on a common edge, as
+    // the reference sets them; without this they ragged-left instead.
+    const slack = operation.width
+      ? operation.width - font.widthOfTextAtSize(operation.text, operation.size)
+      : 0;
+    if (operation.align === "center") x += slack / 2;
+    else if (operation.align === "right") x += slack;
     const options = {
       x,
       y: PAGE_HEIGHT - operation.top - operation.size,
@@ -446,35 +450,91 @@
     });
   }
 
+  /**
+   * Grading chart geometry, measured from the reference page. The plot body is
+   * shorter than a naive full-height box, the horizontal grid steps every 4%,
+   * and the sieve axis carries a full logarithmic minor grid (2..9 inside each
+   * decade) with the decade lines and the 1.00 line progressively darker.
+   */
+  const GRADING_PLOT = Object.freeze({
+    left: 84.62,
+    right: 495.62,
+    top: 311.12,
+    bottom: 389.0,
+  });
+  const GRADING_MINOR_GRID = Object.freeze([0.94, 0.94, 0.94]);
+  const GRADING_DECADE_GRID = Object.freeze([0.86, 0.86, 0.86]);
+  const GRADING_UNIT_GRID = Object.freeze([0.75, 0.75, 0.75]);
+
+  /**
+   * The reference's chart text is Calibri; the overlay draws Helvetica, whose
+   * glyphs stand about a tenth taller at the same point size. Sizes measured
+   * from the reference are scaled by this so the rendered text matches it.
+   */
+  const CHART_FONT_SCALE = 0.9;
+
+  /** Shear-chart font sizes, measured from the reference, as drawn in Helvetica. */
+  const CHART_FONTS = Object.freeze({
+    axisValue: 8.544 * CHART_FONT_SCALE,
+    axisTitle: 9.456 * CHART_FONT_SCALE,
+    note: 8.568 * CHART_FONT_SCALE,
+  });
+
+  /** Font sizes the reference chart uses, in points, as drawn in Helvetica. */
+  const GRADING_FONTS = Object.freeze({
+    title: 13.32 * CHART_FONT_SCALE,
+    axisValue: 8.544 * CHART_FONT_SCALE,
+    axisTitle: 9.48 * CHART_FONT_SCALE,
+    legend: 8.568 * CHART_FONT_SCALE,
+  });
+
+  /** Horizontal position of one sieve size on the logarithmic axis. */
+  function gradingX(value) {
+    const span = GRADING_PLOT.right - GRADING_PLOT.left;
+    return GRADING_PLOT.left + ((Math.log10(Math.max(value, 0.01)) + 2) / 3) * span;
+  }
+
+  function drawGradingGrid(page, fonts, pdfLib) {
+    const height = GRADING_PLOT.bottom - GRADING_PLOT.top;
+    // Excel rules this axis every 4%, labelling every 20%.
+    for (let value = 0; value <= 100; value += 4) {
+      const top = GRADING_PLOT.bottom - (value / 100) * height;
+      line(page, GRADING_PLOT.left, top, GRADING_PLOT.right, top, pdfLib, GRADING_MINOR_GRID, 0.5);
+    }
+    for (let value = 0; value <= 100; value += 20) {
+      const top = GRADING_PLOT.bottom - (value / 100) * height;
+      // The reference sets each value's baseline 2.88pt below its gridline.
+      chartText(page, String(value), 60, top + 2.88 - GRADING_FONTS.axisValue,
+        GRADING_FONTS.axisValue, fonts, pdfLib, { width: 18, align: "right" });
+    }
+
+    for (let exponent = -2; exponent <= 1; exponent += 1) {
+      const decade = 10 ** exponent;
+      if (exponent < 1) {
+        for (let step = 2; step <= 9; step += 1) {
+          const x = gradingX(decade * step);
+          line(page, x, GRADING_PLOT.top, x, GRADING_PLOT.bottom, pdfLib,
+            GRADING_MINOR_GRID, 0.5);
+        }
+      }
+      const x = gradingX(decade);
+      const shade = decade === 1 ? GRADING_UNIT_GRID : GRADING_DECADE_GRID;
+      line(page, x, GRADING_PLOT.top, x, GRADING_PLOT.bottom, pdfLib, shade, 0.5);
+      chartText(page, decade.toFixed(2), x - 12, 403 - GRADING_FONTS.axisValue,
+        GRADING_FONTS.axisValue, fonts, pdfLib, { width: 24, align: "center" });
+    }
+  }
+
   function drawGradingChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    chartText(page, "Grading Chart", 220, 285.8, 13.32, fonts, pdfLib, {
-      width: 115,
-      align: "center",
-    });
-    const plot = { left: 85, right: 508, top: 310, bottom: 394 };
-    const grid = [0.9, 0.9, 0.9];
-    for (let value = 0; value <= 100; value += 10) {
-      const top = plot.bottom - (value / 100) * (plot.bottom - plot.top);
-      line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
-      if (value % 20 === 0) {
-        chartText(page, String(value), 61, top - 4, 8.5, fonts, pdfLib, {
-          width: 18,
-          align: "right",
-        });
-      }
-    }
-    for (let exponent = -2; exponent <= 1; exponent += 1) {
-      const x = plot.left + ((exponent + 2) / 3) * (plot.right - plot.left);
-      line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
-      chartText(page, (10 ** exponent).toFixed(2), x - 12, 396.3, 8.5, fonts, pdfLib);
-    }
+    chartText(page, "Grading Chart", chart.x, 296.1 - GRADING_FONTS.title,
+      GRADING_FONTS.title, fonts, pdfLib, { width: chart.width, align: "center" });
+    drawGradingGrid(page, fonts, pdfLib);
+
+    const height = GRADING_PLOT.bottom - GRADING_PLOT.top;
     const toPoint = (row, field) => ({
-      x: plot.left
-        + ((Math.log10(Math.max(numeric(row.sieveSizeMm), 0.01)) + 2) / 3)
-          * (plot.right - plot.left),
-      top: plot.bottom
-        - (numeric(Reflect.get(row, field)) / 100) * (plot.bottom - plot.top),
+      x: gradingX(numeric(row.sieveSizeMm)),
+      top: GRADING_PLOT.bottom - (numeric(Reflect.get(row, field)) / 100) * height,
     });
     const series = [
       ["cumulativePassingPercent", GRADING_SERIES_STYLES.cumulativePassingPercent],
@@ -502,29 +562,22 @@
         circle(page, point.x, point.top, pdfLib, style.color, 2.2);
       });
     }
-    chartText(page, "Cumulative % passing", 51, 390, 9.2, fonts, pdfLib, {
-      rotate: 90,
-    });
-    chartText(page, "Sieve Size (mm)", 250, 410, 9.2, fonts, pdfLib);
+
+    const axisTitleSize = 9.456 * CHART_FONT_SCALE;
+    chartText(page, "Cumulative % passing", 58.7, 400 - axisTitleSize, axisTitleSize,
+      fonts, pdfLib, { rotate: 90 });
+    chartText(page, "Sieve Size (mm)", 260.4, 417.1 - GRADING_FONTS.axisTitle,
+      GRADING_FONTS.axisTitle, fonts, pdfLib);
     const legends = [
-      ["Grading Curve", 190, GRADING_SERIES_STYLES.cumulativePassingPercent],
-      ["Lower Limit", 285, GRADING_SERIES_STYLES.lowerLimit],
-      ["Upper Limit", 370, GRADING_SERIES_STYLES.upperLimit],
+      ["Grading Curve", 185.9, GRADING_SERIES_STYLES.cumulativePassingPercent],
+      ["Lower Limit", 276.4, GRADING_SERIES_STYLES.lowerLimit],
+      ["Upper Limit", 358.0, GRADING_SERIES_STYLES.upperLimit],
     ];
     for (const [label, x, style] of legends) {
-      line(
-        page,
-        x - 14,
-        438,
-        x + 8,
-        438,
-        pdfLib,
-        style.color,
-        1.5,
-        style.dashArray,
-      );
-      circle(page, x - 3, 438, pdfLib, style.color, 2);
-      chartText(page, label, x + 12, 433.5, 8.5, fonts, pdfLib);
+      line(page, x - 26, 439, x - 6, 439, pdfLib, style.color, 1.5, style.dashArray);
+      circle(page, x - 16, 439, pdfLib, style.color, 2);
+      chartText(page, label, x, 442 - GRADING_FONTS.legend, GRADING_FONTS.legend,
+        fonts, pdfLib);
     }
   }
 
@@ -533,7 +586,7 @@
     for (let value = 0; value <= 140; value += 20) {
       const top = plot.bottom - (value / 140) * (plot.bottom - plot.top);
       line(page, plot.left, top, plot.right, top, pdfLib, grid, 0.5);
-      chartText(page, String(value), plot.left - 22, top - 4, 8.3, fonts, pdfLib, {
+      chartText(page, String(value), plot.left - 22, top - 4, CHART_FONTS.axisValue, fonts, pdfLib, {
         width: 18,
         align: "right",
       });
@@ -542,7 +595,8 @@
     for (const value of steps) {
       const x = plot.left + (value / xMax) * (plot.right - plot.left);
       line(page, x, plot.top, x, plot.bottom, pdfLib, grid, 0.5);
-      chartText(page, xMax === 6 ? value.toFixed(1) : String(value), x - 8, plot.bottom + 5, 8.3, fonts, pdfLib);
+      chartText(page, xMax === 6 ? value.toFixed(1) : String(value), x - 8, plot.bottom + 5,
+        CHART_FONTS.axisValue, fonts, pdfLib);
     }
   }
 
@@ -564,11 +618,11 @@
     const last = points.at(-1);
     const lastStress = numeric(chart.rows.at(-1).maxShearStressKpa);
     const slope = lastStress / Math.max(numeric(chart.rows.at(-1).normalStressKpa), 1);
-    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, 8.5, fonts, pdfLib);
-    chartText(page, "Max. Shear Stress (kPa)", 51, 406, 9.2, fonts, pdfLib, {
+    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, CHART_FONTS.note, fonts, pdfLib);
+    chartText(page, "Max. Shear Stress (kPa)", 51, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Normal Stress (kPa)", 130, 428, 9.2, fonts, pdfLib);
+    chartText(page, "Normal Stress (kPa)", 130, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
     circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
   }
 
@@ -595,10 +649,10 @@
         circle(page, point.x, point.top, pdfLib, seriesColor, 1.5);
       });
     });
-    chartText(page, "Max. Shear Stress (kPa)", 297, 406, 9.2, fonts, pdfLib, {
+    chartText(page, "Max. Shear Stress (kPa)", 297, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Horizontal Displacement (mm)", 350, 428, 9.2, fonts, pdfLib);
+    chartText(page, "Horizontal Displacement (mm)", 350, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
   }
 
   async function drawImage(outputDocument, page, operation) {
