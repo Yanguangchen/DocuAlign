@@ -35,6 +35,24 @@
   /** Bottom edge of the rule closing the header, which is the body's top rule. */
   const BODY_TOP_RULE = 352.03;
 
+  /**
+   * Weight multiplier for the two rules that divide the sieve-size and limits
+   * rows. The reference draws them at RULE_THICKNESS like every other rule, but
+   * they are the only part-width rules in the table and read too light beside
+   * the merged full-height headers on either side of them.
+   */
+  const SUB_HEADER_RULE_SCALE = 1.5;
+
+  /**
+   * The two sub-header rules: the bottom edge the reference drew them on, and
+   * the vertical-rule columns each run spans. Neither crosses the merged
+   * columns, so each is described by the runs it actually covers.
+   */
+  const SUB_HEADER_RULES = Object.freeze([
+    { y: 376.59, spans: [[3, 10], [13, 24]] },
+    { y: 362.78, spans: [[3, 25]] },
+  ]);
+
   /** Left edge of every vertical rule, in column order. */
   const TABLE_RULE_X = Object.freeze([
     36.12,
@@ -406,6 +424,34 @@
   }
 
   /**
+   * Redraw the two sub-header rules heavier than the reference drew them.
+   *
+   * Called after the header masks so the thicker rule paints over them rather
+   * than being clipped by whichever mask happens to abut it.
+   * @param {object} page - pdf-lib page.
+   * @param {object} pdfLib - pdf-lib API.
+   * @returns {void}
+   */
+  function drawSubHeaderRules(page, pdfLib) {
+    const thickness = RULE_THICKNESS * SUB_HEADER_RULE_SCALE;
+    // Grown about its own centre, so both rows keep the reference's height.
+    const offset = (thickness - RULE_THICKNESS) / 2;
+    SUB_HEADER_RULES.forEach(({ y, spans }) => {
+      spans.forEach(([from, to]) => {
+        const left = TABLE_RULE_X.at(from);
+        page.drawRectangle({
+          x: left,
+          y: y - offset,
+          width: TABLE_RULE_X.at(to) + RULE_THICKNESS - left,
+          height: thickness,
+          color: color(pdfLib, BLACK),
+          borderWidth: 0,
+        });
+      });
+    });
+  }
+
+  /**
    * Replace the entire result body so the row count follows the uploaded file.
    * @param {object} page - pdf-lib page.
    * @param {string[][]} rows - Visible result rows.
@@ -510,6 +556,7 @@
     const page = document.getPage(0);
     drawMetadata(page, plan.metadata, fonts, pdfLib);
     drawHeaderValues(page, plan, fonts, pdfLib);
+    drawSubHeaderRules(page, pdfLib);
     drawResultBody(page, plan.rows, fonts, pdfLib);
     const bytes = await document.save();
 
@@ -530,6 +577,8 @@
     BODY_ROW_HEIGHT,
     BODY_TOP_RULE,
     RULE_THICKNESS,
+    SUB_HEADER_RULES,
+    SUB_HEADER_RULE_SCALE,
     TABLE_RULE_X,
     buildOverlayPlan,
     cellsFromDocumentData,
