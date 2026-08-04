@@ -152,7 +152,7 @@ describe("RAK sample-template PDF renderer", () => {
     expect(plan[2]).toMatchObject({
       charts: [
         { kind: "normal-shear", x: 38.28 },
-        { kind: "displacement-shear", x: 289.5 },
+        { kind: "displacement-shear", x: 283.13 },
       ],
     });
     expect(plan[4].images).toHaveLength(2);

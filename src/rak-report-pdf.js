@@ -262,21 +262,21 @@
     // 302.2 and the chart frames run 303.25 to 451.05. The mask used to start
     // at 301.5, inside that rule, so the table lost its bottom border and the
     // chart frame was drawn across it.
-    addWhiteout(plan, 38.28, 302.6, 490.56, 148.45);
+    addWhiteout(plan, 37.2, 302.6, 474.4, 148.45);
     plan.charts = [
       {
         kind: "normal-shear",
         x: 38.28,
         top: 303.65,
-        width: 245.0,
+        width: 238.5,
         height: 147.0,
         rows: shear.rows,
       },
       {
         kind: "displacement-shear",
-        x: 289.5,
+        x: 283.13,
         top: 303.65,
-        width: 239.34,
+        width: 228.25,
         height: 147.0,
         series: shear.series,
       },
@@ -606,7 +606,7 @@
 
   function drawNormalShearChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    const plot = { left: 83, right: 255, top: 310, bottom: 409 };
+    const plot = { left: 84.88, right: 248.25, top: 313.25, bottom: 407.5 };
     drawAxes(page, plot, fonts, pdfLib, 150);
     const points = chart.rows.map((row) => ({
       x: plot.left + (numeric(row.normalStressKpa) / 150) * (plot.right - plot.left),
@@ -622,17 +622,17 @@
     const last = points.at(-1);
     const lastStress = numeric(chart.rows.at(-1).maxShearStressKpa);
     const slope = lastStress / Math.max(numeric(chart.rows.at(-1).normalStressKpa), 1);
-    chartText(page, `y = ${slope.toFixed(4)}x`, 190, 326, CHART_FONTS.note, fonts, pdfLib);
-    chartText(page, "Max. Shear Stress (kPa)", 51, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
+    chartText(page, `y = ${slope.toFixed(4)}x`, 186.5, 329.25, CHART_FONTS.note, fonts, pdfLib);
+    chartText(page, "Max. Shear Stress (kPa)", 52.88, 404.5, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Normal Stress (kPa)", 130, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
+    chartText(page, "Normal Stress (kPa)", 127.57, 426.5, CHART_FONTS.axisTitle, fonts, pdfLib);
     circle(page, last.x, last.top, pdfLib, [0.31, 0.55, 0.78], 2.4);
   }
 
   function drawDisplacementShearChart(page, chart, fonts, pdfLib) {
     drawChartFrame(page, chart, fonts, pdfLib);
-    const plot = { left: 324, right: 505, top: 310, bottom: 409 };
+    const plot = { left: 330.0, right: 495.12, top: 313.25, bottom: 407.5 };
     drawAxes(page, plot, fonts, pdfLib, 6);
     const colors = [
       [0.8, 0.3, 0.28],
@@ -653,10 +653,11 @@
         circle(page, point.x, point.top, pdfLib, seriesColor, 1.5);
       });
     });
-    chartText(page, "Max. Shear Stress (kPa)", 297, 406, CHART_FONTS.axisTitle, fonts, pdfLib, {
+    chartText(page, "Max. Shear Stress (kPa)", 303, 404.5, CHART_FONTS.axisTitle, fonts, pdfLib, {
       rotate: 90,
     });
-    chartText(page, "Horizontal Displacement (mm)", 350, 428, CHART_FONTS.axisTitle, fonts, pdfLib);
+    chartText(page, "Horizontal Displacement (mm)", 348.06, 426.5, CHART_FONTS.axisTitle,
+      fonts, pdfLib);
   }
 
   async function drawImage(outputDocument, page, operation) {

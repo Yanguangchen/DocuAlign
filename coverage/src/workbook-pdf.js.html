@@ -3,7 +3,7 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for src/pdf-writer.js</title>
+    <title>Code coverage report for src/workbook-pdf.js</title>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="../prettify.css" />
     <link rel="stylesheet" href="../base.css" />
@@ -19,34 +19,34 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../index.html">All files</a> / <a href="index.html">src</a> pdf-writer.js</h1>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">src</a> workbook-pdf.js</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>116/116</span>
+                <span class='fraction'>165/165</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>37/37</span>
+                <span class='fraction'>133/133</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>29/29</span>
+                <span class='fraction'>30/30</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>105/105</span>
+                <span class='fraction'>140/140</span>
             </div>
         
             
@@ -363,183 +363,269 @@
 <a name='L298'></a><a href='#L298'>298</a>
 <a name='L299'></a><a href='#L299'>299</a>
 <a name='L300'></a><a href='#L300'>300</a>
-<a name='L301'></a><a href='#L301'>301</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L301'></a><a href='#L301'>301</a>
+<a name='L302'></a><a href='#L302'>302</a>
+<a name='L303'></a><a href='#L303'>303</a>
+<a name='L304'></a><a href='#L304'>304</a>
+<a name='L305'></a><a href='#L305'>305</a>
+<a name='L306'></a><a href='#L306'>306</a>
+<a name='L307'></a><a href='#L307'>307</a>
+<a name='L308'></a><a href='#L308'>308</a>
+<a name='L309'></a><a href='#L309'>309</a>
+<a name='L310'></a><a href='#L310'>310</a>
+<a name='L311'></a><a href='#L311'>311</a>
+<a name='L312'></a><a href='#L312'>312</a>
+<a name='L313'></a><a href='#L313'>313</a>
+<a name='L314'></a><a href='#L314'>314</a>
+<a name='L315'></a><a href='#L315'>315</a>
+<a name='L316'></a><a href='#L316'>316</a>
+<a name='L317'></a><a href='#L317'>317</a>
+<a name='L318'></a><a href='#L318'>318</a>
+<a name='L319'></a><a href='#L319'>319</a>
+<a name='L320'></a><a href='#L320'>320</a>
+<a name='L321'></a><a href='#L321'>321</a>
+<a name='L322'></a><a href='#L322'>322</a>
+<a name='L323'></a><a href='#L323'>323</a>
+<a name='L324'></a><a href='#L324'>324</a>
+<a name='L325'></a><a href='#L325'>325</a>
+<a name='L326'></a><a href='#L326'>326</a>
+<a name='L327'></a><a href='#L327'>327</a>
+<a name='L328'></a><a href='#L328'>328</a>
+<a name='L329'></a><a href='#L329'>329</a>
+<a name='L330'></a><a href='#L330'>330</a>
+<a name='L331'></a><a href='#L331'>331</a>
+<a name='L332'></a><a href='#L332'>332</a>
+<a name='L333'></a><a href='#L333'>333</a>
+<a name='L334'></a><a href='#L334'>334</a>
+<a name='L335'></a><a href='#L335'>335</a>
+<a name='L336'></a><a href='#L336'>336</a>
+<a name='L337'></a><a href='#L337'>337</a>
+<a name='L338'></a><a href='#L338'>338</a>
+<a name='L339'></a><a href='#L339'>339</a>
+<a name='L340'></a><a href='#L340'>340</a>
+<a name='L341'></a><a href='#L341'>341</a>
+<a name='L342'></a><a href='#L342'>342</a>
+<a name='L343'></a><a href='#L343'>343</a>
+<a name='L344'></a><a href='#L344'>344</a>
+<a name='L345'></a><a href='#L345'>345</a>
+<a name='L346'></a><a href='#L346'>346</a>
+<a name='L347'></a><a href='#L347'>347</a>
+<a name='L348'></a><a href='#L348'>348</a>
+<a name='L349'></a><a href='#L349'>349</a>
+<a name='L350'></a><a href='#L350'>350</a>
+<a name='L351'></a><a href='#L351'>351</a>
+<a name='L352'></a><a href='#L352'>352</a>
+<a name='L353'></a><a href='#L353'>353</a>
+<a name='L354'></a><a href='#L354'>354</a>
+<a name='L355'></a><a href='#L355'>355</a>
+<a name='L356'></a><a href='#L356'>356</a>
+<a name='L357'></a><a href='#L357'>357</a>
+<a name='L358'></a><a href='#L358'>358</a>
+<a name='L359'></a><a href='#L359'>359</a>
+<a name='L360'></a><a href='#L360'>360</a>
+<a name='L361'></a><a href='#L361'>361</a>
+<a name='L362'></a><a href='#L362'>362</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-yes">17x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">188x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">187x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">28305x</span>
+<span class="cline-any cline-yes">3793049x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1848712x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5434x</span>
-<span class="cline-any cline-yes">5434x</span>
-<span class="cline-any cline-yes">44552x</span>
-<span class="cline-any cline-yes">44552x</span>
-<span class="cline-any cline-yes">44483x</span>
-<span class="cline-any cline-yes">607x</span>
-<span class="cline-any cline-yes">43876x</span>
-<span class="cline-any cline-yes">43875x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5434x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-yes">11x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5346x</span>
-<span class="cline-any cline-yes">5346x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5346x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1255x</span>
+<span class="cline-any cline-yes">1254x</span>
+<span class="cline-any cline-yes">1254x</span>
+<span class="cline-any cline-yes">1254x</span>
+<span class="cline-any cline-yes">3532x</span>
+<span class="cline-any cline-yes">1043x</span>
+<span class="cline-any cline-yes">2489x</span>
+<span class="cline-any cline-yes">2487x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1254x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">370x</span>
+<span class="cline-any cline-yes">370x</span>
+<span class="cline-any cline-yes">370x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">556x</span>
+<span class="cline-any cline-yes">556x</span>
+<span class="cline-any cline-yes">545x</span>
+<span class="cline-any cline-yes">539x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5431x</span>
+<span class="cline-any cline-yes">556x</span>
+<span class="cline-any cline-yes">556x</span>
+<span class="cline-any cline-yes">545x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5336x</span>
+<span class="cline-any cline-yes">134361x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4967x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">51x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1423x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">370x</span>
+<span class="cline-any cline-yes">370x</span>
+<span class="cline-any cline-yes">361x</span>
+<span class="cline-any cline-yes">1256x</span>
+<span class="cline-any cline-yes">1256x</span>
+<span class="cline-any cline-yes">1256x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">361x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">935x</span>
+<span class="cline-any cline-yes">935x</span>
+<span class="cline-any cline-yes">345x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">295x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">1297x</span>
-<span class="cline-any cline-yes">21042x</span>
-<span class="cline-any cline-yes">21041x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">935x</span>
+<span class="cline-any cline-yes">935x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">295x</span>
-<span class="cline-any cline-yes">295x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">177x</span>
+<span class="cline-any cline-yes">177x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">177x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">176x</span>
+<span class="cline-any cline-yes">176x</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">933x</span>
+<span class="cline-any cline-yes">933x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1237x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">295x</span>
-<span class="cline-any cline-yes">295x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1237x</span>
+<span class="cline-any cline-yes">1237x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">51x</span>
-<span class="cline-any cline-yes">51x</span>
-<span class="cline-any cline-yes">51x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">51x</span>
-<span class="cline-any cline-yes">571x</span>
+<span class="cline-any cline-yes">176x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">51x</span>
-<span class="cline-any cline-yes">51x</span>
-<span class="cline-any cline-yes">51x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">1297x</span>
-<span class="cline-any cline-yes">18x</span>
-<span class="cline-any cline-yes">18x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1297x</span>
-<span class="cline-any cline-yes">21042x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4772x</span>
-<span class="cline-any cline-yes">14998x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">4772x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">21042x</span>
+<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1297x</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">33x</span>
+<span class="cline-any cline-yes">184x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">184x</span>
+<span class="cline-any cline-yes">177x</span>
+<span class="cline-any cline-yes">184x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">1778157x</span>
+<span class="cline-any cline-yes">1777244x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">186x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -547,74 +633,46 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">5482x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">13x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">43x</span>
-<span class="cline-any cline-yes">43x</span>
-<span class="cline-any cline-yes">43x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-yes">11x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">51x</span>
+<span class="cline-any cline-yes">11x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">13x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-yes">13x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">33x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">67x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
+<span class="cline-any cline-yes">186x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">182x</span>
-<span class="cline-any cline-yes">182x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">43x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">43x</span>
+<span class="cline-any cline-yes">186x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -623,39 +681,103 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">43x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">182x</span>
-<span class="cline-any cline-yes">182x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">182x</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
+<span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
-<span class="cline-any cline-yes">271981x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">24x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">42x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">17x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -664,303 +786,364 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
- * @file pdf-writer.js
- * @description Dependency-free PDF generator for DocuAlign exports. Renders
- * worksheet-derived tables into a PDF 1.4 document using the standard Helvetica
- * fonts, so no font embedding, external service, or third-party library is
- * required.
- *
- * This file intentionally remains classic-script compatible (no `import` /
- * `export`) so the workspace keeps working over `file://`, matching the
- * dual-environment contract in AGENTS.md. It publishes its API on
- * `globalThis.docuAlignPdf`.
+ * @file workbook-pdf.js
+ * @description Browser-side Excel ingestion and deterministic PDF rendering.
+ * The module is intentionally classic-script compatible so uploaded workbooks
+ * can still be processed when the workspace is opened directly over file://.
  */
-(function initPdfWriter() {
-  /** A4 landscape, in PDF points; worksheet tables are far wider than tall. */
-  const PAGE_WIDTH = 842;
-  const PAGE_HEIGHT = 595;
-  const MARGIN = 36;
-&nbsp;
-  const TITLE_SIZE = 15;
-  const HEADING_SIZE = 10;
-  const CELL_SIZE = 7;
-  const LINE_HEIGHT = 11;
-&nbsp;
-  /** Helvetica averages close to half the point size per character. */
-  const CHAR_WIDTH_RATIO = 0.5;
-  const MIN_COLUMN_CHARS = 3;
-&nbsp;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+(() =&gt; {
+  const OFFICE_RELATIONSHIPS =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  const PDF_OPTIONS = Object.freeze({
+    orientation: "landscape",
+    unit: "mm",
+    format: "a4",
+    compress: true,
+  });
 &nbsp;
   /**
-   * Escape a string for inclusion in a PDF literal string, dropping characters
-   * the WinAnsi-compatible standard fonts cannot represent.
-   * @param {string} value - Raw text.
-   * @returns {string} Escaped, latin1-safe text.
+   * Remove rows with no displayable values while preserving populated values
+   * and their worksheet order.
+   * @param {unknown} rows - SheetJS array-of-arrays output.
+   * @returns {Array&lt;Array&lt;unknown&gt;&gt;} Populated worksheet rows.
    */
-  function escapeText(value) {
-    let escaped = "";
-    for (const character of String(value)) {
-      const code = character.codePointAt(0);
-      if (code &gt; 255) escaped += "?";
-      else if (character === "\\" || character === "(" || character === ")") {
-        escaped += `\\${character}`;
-      } else if (code &lt; 32) escaped += " ";
-      else escaped += character;
-    }
-    return escaped;
+  function populatedRows(rows) {
+    if (!Array.isArray(rows)) return [];
+&nbsp;
+    return rows
+      .map((row) =&gt; {
+        if (!Array.isArray(row)) return [row ?? ""];
+        return row.map((cell) =&gt; cell ?? "");
+      })
+      .filter((row) =&gt; row.some((cell) =&gt; String(cell).trim() !== ""));
   }
 &nbsp;
   /**
-   * Truncate text to the number of characters that fit a column.
-   * @param {string} value - Raw text.
-   * @param {number} width - Column width in points.
-   * @returns {string} Text clipped to the available width.
+   * Validate the workbook representation consumed by PDF generation.
+   * @param {object} workbookData - Parsed workbook data.
+   * @returns {{isValid: boolean, sheetCount: number}} Validation result.
    */
-  function clipText(value, width) {
-    const maxChars = Math.max(1, Math.floor(width / (CELL_SIZE * CHAR_WIDTH_RATIO)));
-    const text = String(value);
-    // The marker stays ASCII; the standard fonts cannot render a true ellipsis.
-    return text.length &lt;= maxChars ? text : `${text.slice(0, Math.max(1, maxChars - 2))}..`;
-  }
-&nbsp;
-  /**
-   * Emit a positioned run of text as PDF content-stream operators.
-   * @param {string} font - Font resource name (`F1` or `F2`).
-   * @param {number} size - Font size in points.
-   * @param {number} x - Left edge in points.
-   * @param {number} y - Baseline in points.
-   * @param {string} text - Text to draw.
-   * @returns {string} Content stream fragment.
-   */
-  function drawText(font, size, x, y, text) {
-    return `BT /${font} ${size} Tf ${x.toFixed(2)} ${y.toFixed(2)} Td (${escapeText(text)}) Tj ET\n`;
-  }
-&nbsp;
-  /**
-   * Emit a horizontal rule.
-   * @param {number} y - Vertical position in points.
-   * @returns {string} Content stream fragment.
-   */
-  function drawRule(y) {
-    return `0.6 w ${MARGIN} ${y.toFixed(2)} m ${PAGE_WIDTH - MARGIN} ${y.toFixed(2)} l S\n`;
-  }
-&nbsp;
-  /* eslint-disable security/detect-object-injection -- Numeric table indices
-     only; every index comes from array iteration or column arithmetic. */
-&nbsp;
-  /**
-   * Allocate column widths proportionally to their widest cell, so dense
-   * worksheet columns stay readable instead of every column sharing the page
-   * equally.
-   * @param {Array&lt;string[]&gt;} rows - Table rows.
-   * @param {string[]} headers - Column headers.
-   * @returns {number[]} Column widths in points.
-   */
-  function measureColumns(rows, headers) {
-    const lengths = headers.map((header) =&gt; Math.max(MIN_COLUMN_CHARS, String(header).length));
-    rows.forEach((row) =&gt; {
-      row.forEach((cell, index) =&gt; {
-        if (index &lt; lengths.length) {
-          lengths[index] = Math.max(lengths[index], String(cell ?? "").length);
-        }
-      });
-    });
-&nbsp;
-    const total = lengths.reduce((sum, length) =&gt; sum + length, 0) || 1;
-    return lengths.map((length) =&gt; (length / total) * CONTENT_WIDTH);
-  }
-&nbsp;
-  /**
-   * Lay a section's rows out across as many pages as they need.
-   * @param {Object} section - Section descriptor.
-   * @param {Object} state - Mutable pagination state.
-   * @returns {void}
-   */
-  function renderSection(section, state) {
-    const headers = section.columns ?? [];
-    const rows = section.rows ?? [];
-    const widths = measureColumns(rows, headers);
-    const offsets = [];
-    widths.reduce((cursor, width) =&gt; {
-      offsets.push(cursor);
-      return cursor + width;
-    }, MARGIN);
-&nbsp;
-    /**
-     * Draw the section heading plus column headers at the current cursor.
-     * @returns {void}
-     */
-    function openBlock() {
-      state.ensureRoom(LINE_HEIGHT * 3);
-      state.write(drawText("F2", HEADING_SIZE, MARGIN, state.y, section.heading));
-      state.y -= LINE_HEIGHT * 1.4;
-&nbsp;
-      headers.forEach((header, index) =&gt; {
-        state.write(
-          drawText("F2", CELL_SIZE, offsets[index], state.y, clipText(header, widths[index])),
-        );
-      });
-      state.y -= 3;
-      state.write(drawRule(state.y));
-      state.y -= LINE_HEIGHT;
-    }
-&nbsp;
-    openBlock();
-    rows.forEach((row) =&gt; {
-      if (state.y &lt; MARGIN + LINE_HEIGHT) {
-        state.newPage();
-        openBlock();
-      }
-      row.forEach((cell, index) =&gt; {
-        if (index &gt;= widths.length || cell === "" || cell === undefined) return;
-&nbsp;
-        // Spreadsheet labels routinely spill across the blank cells beside them,
-        // so a value may use the run of empty columns that follows it.
-        let end = index + 1;
-        while (end &lt; widths.length &amp;&amp; (row[end] === "" || row[end] === undefined)) end += 1;
-        const available =
-          (end &lt; widths.length ? offsets[end] : PAGE_WIDTH - MARGIN) - offsets[index];
-&nbsp;
-        state.write(drawText("F1", CELL_SIZE, offsets[index], state.y, clipText(cell, available)));
-      });
-      state.y -= LINE_HEIGHT;
-    });
-    state.y -= LINE_HEIGHT;
-  }
-&nbsp;
-  /* eslint-enable security/detect-object-injection */
-&nbsp;
-  /**
-   * Render a document made of titled worksheet sections into PDF bytes.
-   * @param {{title: string, subtitle?: string, sections: Array&lt;{heading: string, columns: string[], rows: Array&lt;string[]&gt;}&gt;}} document - Document spec.
-   * @returns {Uint8Array} The complete PDF file.
-   */
-  function createDocument(document) {
-    const pages = [];
-    const state = {
-      y: 0,
-      buffer: "",
-      /**
-       * Append content-stream operators to the current page.
-       * @param {string} fragment - Operators to append.
-       * @returns {void}
-       */
-      write(fragment) {
-        state.buffer += fragment;
-      },
-      /**
-       * Finish the current page and start a fresh one.
-       * @returns {void}
-       */
-      newPage() {
-        pages.push(state.buffer);
-        state.buffer = "";
-        state.y = PAGE_HEIGHT - MARGIN;
-      },
-      /**
-       * Start a new page when the requested vertical space is unavailable.
-       * @param {number} needed - Required height in points.
-       * @returns {void}
-       */
-      ensureRoom(needed) {
-        if (state.y - needed &lt; MARGIN) state.newPage();
-      },
+  function validateWorkbook(workbookData = {}) {
+    const sheetCount = Array.isArray(workbookData.sheets) ? workbookData.sheets.length : 0;
+    return {
+      isValid: sheetCount &gt; 0,
+      sheetCount,
     };
+  }
 &nbsp;
-    state.newPage();
-    state.write(drawText("F2", TITLE_SIZE, MARGIN, state.y, document.title));
-    state.y -= LINE_HEIGHT * 1.6;
-    if (document.subtitle) {
-      state.write(drawText("F1", HEADING_SIZE, MARGIN, state.y, document.subtitle));
-      state.y -= LINE_HEIGHT * 1.6;
+  function normalizeZipPath(baseFile, target) {
+    if (target.startsWith("/")) return target.slice(1);
+    const segments = baseFile.split("/");
+    segments.pop();
+    for (const part of target.split("/")) {
+      if (part === "..") {
+        segments.pop();
+      } else if (part !== "." &amp;&amp; part !== "") {
+        segments.push(part);
+      }
     }
+    return segments.join("/");
+  }
 &nbsp;
-    document.sections.forEach((section) =&gt; renderSection(section, state));
-    pages.push(state.buffer);
+  function relationshipPath(filePath) {
+    const segments = filePath.split("/");
+    const fileName = segments.pop();
+    return [...segments, "_rels", `${fileName}.rels`].join("/");
+  }
 &nbsp;
-    // A page break with nothing drawn after it leaves an empty buffer behind.
-    return assemble(pages.filter((content) =&gt; content !== ""));
+  function fileContent(files, filePath) {
+    const entry = Reflect.get(files, filePath);
+    if (!entry?.content) return null;
+    if (typeof entry.content === "string") return entry.content;
+    return new TextDecoder().decode(entry.content);
+  }
+&nbsp;
+  function parseXml(files, filePath) {
+    const content = fileContent(files, filePath);
+    if (!content) return null;
+    return new DOMParser().parseFromString(content, "application/xml");
+  }
+&nbsp;
+  function elementsByLocalName(parent, localName) {
+    return Array.from(parent.getElementsByTagName("*"))
+      .filter((element) =&gt; element.localName === localName);
+  }
+&nbsp;
+  function firstByLocalName(parent, localName) {
+    return elementsByLocalName(parent, localName).at(0) ?? null;
+  }
+&nbsp;
+  function relationshipAttribute(element, localName, qualifiedName) {
+    return element?.getAttributeNS(OFFICE_RELATIONSHIPS, localName)
+      ?? element?.getAttribute(qualifiedName)
+      ?? null;
+  }
+&nbsp;
+  function relationshipMap(document, baseFile) {
+    const relationships = new Map();
+    if (!document) return relationships;
+    for (const relationship of elementsByLocalName(document, "Relationship")) {
+      const id = relationship.getAttribute("Id");
+      const target = relationship.getAttribute("Target");
+      if (id &amp;&amp; target) relationships.set(id, {
+        path: normalizeZipPath(baseFile, target),
+        type: relationship.getAttribute("Type") ?? "",
+      });
+    }
+    return relationships;
+  }
+&nbsp;
+  function mediaType(filePath) {
+    const extension = filePath.split(".").at(-1)?.toLowerCase();
+    if (extension === "png") return "image/png";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    return null;
+  }
+&nbsp;
+  function mediaBytes(files, filePath) {
+    const content = Reflect.get(files, filePath)?.content;
+    if (content instanceof Uint8Array) return content;
+    if (content instanceof ArrayBuffer) return new Uint8Array(content);
+    return null;
+  }
+&nbsp;
+  function anchoredImages(files, drawingPath) {
+    const drawing = parseXml(files, drawingPath);
+    const drawingRelationships = relationshipMap(
+      parseXml(files, relationshipPath(drawingPath)),
+      drawingPath,
+    );
+    if (!drawing) return [];
+&nbsp;
+    const images = [];
+    for (const anchor of drawing.documentElement.children) {
+      const blip = firstByLocalName(anchor, "blip");
+      const relationshipId = relationshipAttribute(blip, "embed", "r:embed");
+      const mediaPath = drawingRelationships.get(relationshipId)?.path;
+      const mimeType = mediaPath ? mediaType(mediaPath) : null;
+      const bytes = mediaPath ? mediaBytes(files, mediaPath) : null;
+      if (!mimeType || !bytes) continue;
+&nbsp;
+      const from = firstByLocalName(anchor, "from");
+      const row = from
+        ? Number(firstByLocalName(from, "row")?.textContent)
+        : -1;
+      const column = from
+        ? Number(firstByLocalName(from, "col")?.textContent)
+        : -1;
+      const properties = firstByLocalName(anchor, "cNvPr");
+      images.push({
+        name: properties?.getAttribute("name") ?? "Workbook image",
+        row,
+        column,
+        mimeType,
+        bytes,
+      });
+    }
+    return images;
   }
 &nbsp;
   /**
-   * Assemble page content streams into a complete PDF file with a valid
-   * cross-reference table.
-   * @param {string[]} pages - Per-page content streams.
-   * @returns {Uint8Array} The PDF bytes.
+   * Associate embedded workbook pictures with their worksheet and anchor cell.
+   * @param {object} workbook - SheetJS workbook parsed with `bookFiles: true`.
+   * @returns {Map&lt;string, Array&lt;object&gt;&gt;} Images keyed by worksheet name.
    */
-  function assemble(pages) {
-    const objects = [];
+  function extractWorkbookImages(workbook) {
+    const files = workbook.files;
+    if (!files) return new Map();
+    const workbookPath = "xl/workbook.xml";
+    const workbookXml = parseXml(files, workbookPath);
+    const workbookRelationships = relationshipMap(
+      parseXml(files, relationshipPath(workbookPath)),
+      workbookPath,
+    );
+    if (!workbookXml) return new Map();
 &nbsp;
-    /**
-     * Register one indirect object and return its object number.
-     * @param {string} body - Object body.
-     * @returns {number} The 1-based object number.
-     */
-    function addObject(body) {
-      objects.push(body);
-      return objects.length;
-    }
+    const imagesBySheet = new Map();
+    for (const sheet of elementsByLocalName(workbookXml, "sheet")) {
+      const sheetName = sheet.getAttribute("name");
+      const relationshipId = relationshipAttribute(sheet, "id", "r:id");
+      const worksheetPath = workbookRelationships.get(relationshipId)?.path;
+      if (!sheetName || !worksheetPath) continue;
 &nbsp;
-    // Reserve 1 for the catalog and 2 for the page tree; both need forward
-    // references to objects that do not exist yet.
-    addObject("");
-    addObject("");
-    const regularFont = addObject("&lt;&lt; /Type /Font /Subtype /Type1 /BaseFont /Helvetica &gt;&gt;");
-    const boldFont = addObject("&lt;&lt; /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold &gt;&gt;");
-&nbsp;
-    const pageIds = [];
-    pages.forEach((content) =&gt; {
-      const streamId = addObject(
-        `&lt;&lt; /Length ${content.length} &gt;&gt;\nstream\n${content}endstream`,
+      const worksheetRelationships = relationshipMap(
+        parseXml(files, relationshipPath(worksheetPath)),
+        worksheetPath,
       );
-      pageIds.push(
-        addObject(
-          "&lt;&lt; /Type /Page /Parent 2 0 R " +
-            `/MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] ` +
-            `/Resources &lt;&lt; /Font &lt;&lt; /F1 ${regularFont} 0 R /F2 ${boldFont} 0 R &gt;&gt; &gt;&gt; ` +
-            `/Contents ${streamId} 0 R &gt;&gt;`,
-        ),
+      const drawing = Array.from(worksheetRelationships.values())
+        .find((relationship) =&gt; relationship.type.endsWith("/drawing"));
+      imagesBySheet.set(
+        sheetName,
+        drawing ? anchoredImages(files, drawing.path) : [],
       );
-    });
-&nbsp;
-    objects[0] = "&lt;&lt; /Type /Catalog /Pages 2 0 R &gt;&gt;";
-    objects[1] =
-      `&lt;&lt; /Type /Pages /Count ${pageIds.length} ` +
-      `/Kids [${pageIds.map((id) =&gt; `${id} 0 R`).join(" ")}] &gt;&gt;`;
-&nbsp;
-    let file = "%PDF-1.4\n";
-    const offsets = [];
-    objects.forEach((body, index) =&gt; {
-      offsets.push(file.length);
-      file += `${index + 1} 0 obj\n${body}\nendobj\n`;
-    });
-&nbsp;
-    const xrefOffset = file.length;
-    file += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-    offsets.forEach((offset) =&gt; {
-      file += `${String(offset).padStart(10, "0")} 00000 n \n`;
-    });
-    file +=
-      `trailer\n&lt;&lt; /Size ${objects.length + 1} /Root 1 0 R &gt;&gt;\n` +
-      `startxref\n${xrefOffset}\n%%EOF\n`;
-&nbsp;
-    const bytes = new Uint8Array(file.length);
-    /* eslint-disable security/detect-object-injection -- Sequential write into
-       a fixed-length typed array. */
-    for (let index = 0; index &lt; file.length; index += 1) {
-      bytes[index] = file.charCodeAt(index) &amp; 0xff;
     }
-    /* eslint-enable security/detect-object-injection */
-    return bytes;
+    return imagesBySheet;
   }
 &nbsp;
-  globalThis.docuAlignPdf = Object.freeze({
-    PAGE_HEIGHT,
-    PAGE_WIDTH,
-    clipText,
-    createDocument,
-    escapeText,
+  function displayCells(worksheet) {
+    const cells = {};
+    for (const [address, cell] of Object.entries(worksheet ?? {})) {
+      if (!/^[A-Z]+\d+$/.test(address) || !cell || typeof cell !== "object") continue;
+      Reflect.set(cells, address, cell.w ?? cell.v ?? "");
+    }
+    return cells;
+  }
+&nbsp;
+  /**
+   * Parse every worksheet in an uploaded XLS/XLSX file in workbook tab order.
+   * @param {File|{name?: string, arrayBuffer: () =&gt; Promise&lt;ArrayBuffer&gt;}} file
+   * @param {object} [xlsxApi=globalThis.XLSX] - SheetJS browser API.
+   * @returns {Promise&lt;{sourceName: string, sheets: Array&lt;object&gt;}&gt;}
+   */
+  async function parseWorkbook(file, xlsxApi = globalThis.XLSX) {
+    if (!file || typeof file.arrayBuffer !== "function") {
+      throw new TypeError("The selected workbook could not be read.");
+    }
+    if (
+      !xlsxApi
+      || typeof xlsxApi.read !== "function"
+      || typeof xlsxApi.utils?.sheet_to_json !== "function"
+    ) {
+      throw new Error("The Excel workbook parser is unavailable.");
+    }
+&nbsp;
+    const workbookBytes = await file.arrayBuffer();
+    const workbook = xlsxApi.read(workbookBytes, {
+      bookFiles: true,
+      cellDates: true,
+      cellStyles: true,
+    });
+    const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames : [];
+&nbsp;
+    if (sheetNames.length === 0) {
+      throw new Error("The workbook does not contain any worksheets.");
+    }
+&nbsp;
+    const sheetMetadata = Array.isArray(workbook.Workbook?.Sheets)
+      ? workbook.Workbook.Sheets
+      : [];
+    const imagesBySheet = extractWorkbookImages(workbook);
+    const sheets = sheetNames.map((name, index) =&gt; {
+      const worksheet = Reflect.get(workbook.Sheets ?? {}, name);
+      const metadata = sheetMetadata.at(index);
+      const rows = xlsxApi.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+        raw: false,
+        blankrows: true,
+      });
+&nbsp;
+      return {
+        name,
+        hidden: Number(metadata?.Hidden ?? 0) &gt; 0,
+        cells: displayCells(worksheet),
+        images: imagesBySheet.get(name) ?? [],
+        rows: populatedRows(rows),
+      };
+    });
+&nbsp;
+    return {
+      sourceName: file.name ?? "workbook",
+      sheets,
+    };
+  }
+&nbsp;
+  function resolvePdfConstructor(pdfApi) {
+    if (pdfApi === null) return null;
+    return pdfApi?.jsPDF ?? globalThis.jspdf?.jsPDF ?? null;
+  }
+&nbsp;
+  function resolveAutoTable(pdfApi, pdfDocument) {
+    if (typeof pdfApi?.autoTable === "function") return pdfApi.autoTable;
+    if (typeof globalThis.jspdfAutoTable?.autoTable === "function") {
+      return globalThis.jspdfAutoTable.autoTable;
+    }
+    if (typeof globalThis.autoTable === "function") return globalThis.autoTable;
+    if (typeof pdfDocument.autoTable === "function") {
+      return (document, options) =&gt; document.autoTable(options);
+    }
+    return null;
+  }
+&nbsp;
+  function drawSheetHeading(pdfDocument, sheet) {
+    pdfDocument.setFont("helvetica", "bold");
+    pdfDocument.setFontSize(15);
+    pdfDocument.setTextColor(22, 67, 82);
+    const title = sheet.hidden ? `${sheet.name} (hidden worksheet)` : sheet.name;
+    pdfDocument.text(title, 10, 11);
+  }
+&nbsp;
+  /**
+   * Render every parsed worksheet to a generated PDF Blob. Each workbook tab
+   * starts on a new page; wide and long tables are paginated by AutoTable.
+   * @param {{sheets: Array&lt;object&gt;}} workbookData - Parsed workbook data.
+   * @param {{jsPDF?: Function, autoTable?: Function}} [pdfApi] - Injectable PDF APIs.
+   * @returns {Blob} Generated workbook PDF.
+   */
+  function createWorkbookPdf(workbookData, pdfApi) {
+    const validation = validateWorkbook(workbookData);
+    if (!validation.isValid) {
+      throw new Error("The parsed workbook does not contain any worksheets.");
+    }
+&nbsp;
+    const PdfConstructor = resolvePdfConstructor(pdfApi);
+    if (typeof PdfConstructor !== "function") {
+      throw new Error("The browser PDF generator is unavailable.");
+    }
+&nbsp;
+    const pdfDocument = new PdfConstructor(PDF_OPTIONS);
+    const autoTable = resolveAutoTable(pdfApi, pdfDocument);
+    if (typeof autoTable !== "function") {
+      throw new Error("The PDF table renderer is unavailable.");
+    }
+&nbsp;
+    workbookData.sheets.forEach((sheet, index) =&gt; {
+      if (index &gt; 0) pdfDocument.addPage();
+      drawSheetHeading(pdfDocument, sheet);
+&nbsp;
+      if (sheet.rows.length === 0) {
+        pdfDocument.setFont("helvetica", "normal");
+        pdfDocument.setFontSize(10);
+        pdfDocument.setTextColor(80, 96, 104);
+        pdfDocument.text("This worksheet has no populated cells.", 10, 20);
+        return;
+      }
+&nbsp;
+      autoTable(pdfDocument, {
+        body: sheet.rows,
+        startY: 16,
+        margin: { top: 16, right: 8, bottom: 10, left: 8 },
+        theme: "grid",
+        showHead: "never",
+        rowPageBreak: "avoid",
+        horizontalPageBreak: true,
+        horizontalPageBreakBehaviour: "immediately",
+        styles: {
+          font: "helvetica",
+          fontSize: 7,
+          cellPadding: 1.2,
+          overflow: "linebreak",
+          valign: "top",
+          textColor: [30, 48, 55],
+          lineColor: [196, 211, 216],
+          lineWidth: 0.1,
+        },
+        alternateRowStyles: {
+          fillColor: [244, 248, 249],
+        },
+      });
+    });
+&nbsp;
+    return pdfDocument.output("blob");
+  }
+&nbsp;
+  globalThis.docuAlignWorkbookPdf = Object.freeze({
+    createWorkbookPdf,
+    displayCells,
+    extractWorkbookImages,
+    parseWorkbook,
+    populatedRows,
+    validateWorkbook,
   });
 })();
 &nbsp;</pre></td></tr></table></pre>
