@@ -268,6 +268,62 @@ describe("Summary sample-template PDF renderer", () => {
     );
   });
 
+  it("draws the two sub-header rules heavier, centred on the reference's own", async () => {
+    const cells = await sampleSummaryCells();
+    await import("./summary-pdf.js");
+    const renderer = globalThis.docuAlignSummaryPdf;
+
+    const drawn = [];
+    const page = {
+      drawRectangle: (options) => drawn.push(options),
+      drawText: () => {},
+    };
+    const recordingPdfLib = {
+      PDFDocument: {
+        load: async () => ({
+          getPageCount: () => 1,
+          getPage: () => page,
+          embedFont: async () => ({ widthOfTextAtSize: (text) => text.length * 4 }),
+          save: async () => new Uint8Array([37, 80, 68, 70]),
+        }),
+      },
+      StandardFonts: { Helvetica: "Helvetica", HelveticaBold: "Helvetica-Bold" },
+      rgb: (red, green, blue) => `rgb(${red},${green},${blue})`,
+    };
+
+    await renderer.createDocument(cells, { pdfLib: recordingPdfLib, templateBytes });
+
+    const thickness = renderer.RULE_THICKNESS * renderer.SUB_HEADER_RULE_SCALE;
+    const heavy = drawn.filter(
+      (shape) => shape.color === "rgb(0,0,0)" && shape.height === thickness,
+    );
+    // One run for each span the reference actually rules: neither sub-header
+    // rule crosses the merged full-height columns.
+    const spans = renderer.SUB_HEADER_RULES.flatMap((entry) =>
+      entry.spans.map((span) => ({ y: entry.y, span })));
+    expect(heavy).toHaveLength(spans.length);
+
+    heavy.forEach((shape, index) => {
+      const { y, span } = spans.at(index);
+      const [from, to] = span;
+      expect(shape.x).toBe(renderer.TABLE_RULE_X.at(from));
+      expect(shape.x + shape.width).toBeCloseTo(
+        renderer.TABLE_RULE_X.at(to) + renderer.RULE_THICKNESS,
+        5,
+      );
+      // Grown about its centre, so the rows above and below keep their heights.
+      const grown = thickness - renderer.RULE_THICKNESS;
+      expect(shape.y).toBeCloseTo(y - grown / 2, 5);
+      expect(shape.y + shape.height).toBeCloseTo(y + renderer.RULE_THICKNESS + grown / 2, 5);
+    });
+
+    // The heavier rules must not disturb the body, which keeps its own weight.
+    const bodyRules = drawn.filter(
+      (shape) => shape.color === "rgb(0,0,0)" && shape.height === renderer.RULE_THICKNESS,
+    );
+    expect(bodyRules.every((shape) => shape.y <= renderer.BODY_TOP_RULE)).toBe(true);
+  });
+
   it("never masks over the vertical rules when replacing header values", async () => {
     const cells = await sampleSummaryCells();
     await import("./summary-pdf.js");
