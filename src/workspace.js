@@ -65,6 +65,18 @@ const TEMPORARILY_DISABLED_DOCUMENT_KINDS = Object.freeze([
   DOCUMENT_KINDS.WORKSHEET,
 ]);
 
+/**
+ * The order document kinds take in the merged export: the client wants the
+ * Summary first, then the test reports. The two withheld kinds are ordered
+ * here as well so restoring them needs no change to the sort.
+ */
+const DOCUMENT_KIND_ORDER = Object.freeze([
+  DOCUMENT_KINDS.SUMMARY,
+  DOCUMENT_KINDS.REPORT,
+  DOCUMENT_KINDS.DATASHEET,
+  DOCUMENT_KINDS.WORKSHEET,
+]);
+
 let disabledDocumentKinds = TEMPORARILY_DISABLED_DOCUMENT_KINDS;
 
 /**
@@ -245,9 +257,9 @@ async function startPipeline(file) {
     exportStep.classList.add("is-active");
     pdfExport.disabled = false;
     setFeedback(
-      `ETL complete. Export produces ${parsedDocuments.length} separate ${
-        parsedDocuments.length === 1 ? "PDF" : "PDFs"
-      }.`,
+      `ETL complete. Export merges ${parsedDocuments.length} ${
+        parsedDocuments.length === 1 ? "document" : "documents"
+      } into one PDF.`,
       true,
     );
   } catch (error) {
@@ -374,6 +386,9 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
     // report is served unchanged rather than exporting nothing at all.
     if (models.has(report.group)) document.renderer = "report";
     else document.assetPath = REPORT_ASSET_PATH;
+    // Carried on the plan so the merged export's chronological order is fixed
+    // when the workbook is parsed, not re-derived from module state later.
+    document.samplingDate = models.get(report.group)?.cover?.samplingDate ?? "";
     documents.push(document);
 
     // Each supporting datasheet is exported as its own separate document.
@@ -538,7 +553,7 @@ function logDocumentFailure(plan, error) {
     error,
     {
       feature: isReport ? "PdfTemplate" : "SummaryPdf",
-      function: "buildExportArchive",
+      function: "buildExportPdf",
       operation: isReport ? "pdf.copyAndOverlay" : "pdf.copyAndOverlaySummary",
       category: "LocalPdfGeneration",
       documentSlug: plan.slug,
@@ -547,54 +562,102 @@ function logDocumentFailure(plan, error) {
 }
 
 /**
- * Render every planned document and pack them into one archive.
+ * Convert a cover sheet's sampling date into a sortable number.
+ *
+ * The workbook writes it day-first (`08/04/2026`); ISO (`2026-04-08`) is
+ * accepted too. Anything else -- an empty cell, a report served from the
+ * reference asset, a format neither pattern matches -- sorts last rather than
+ * being guessed at, and keeps the workbook's own order among its peers.
+ * @param {string} value - The cover sheet's sampling date.
+ * @returns {number} A comparable `yyyymmdd` number, or Infinity when unparsed.
+ */
+function samplingOrder(value) {
+  const text = String(value ?? "").trim();
+  const dayFirst = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(text);
+  if (dayFirst) {
+    const [, day, month, year] = dayFirst;
+    return Number(year) * 10000 + Number(month) * 100 + Number(day);
+  }
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+  if (iso) {
+    const [, year, month, day] = iso;
+    return Number(year) * 10000 + Number(month) * 100 + Number(day);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Order the planned documents for the merged export: the Summary first, then
+ * every test report by sampling date.
+ *
+ * `Array.prototype.sort` is stable, so reports sharing a sampling date -- the
+ * usual case, one vessel sampled across a single day -- keep the workbook's
+ * own order, which is the order the Summary table lists them in.
+ * @param {Array<Object>} documents - Planned documents.
+ * @returns {Array<Object>} A new list in export order.
+ */
+function exportOrder(documents) {
+  return [...documents].sort((left, right) => {
+    const byKind = DOCUMENT_KIND_ORDER.indexOf(left.kind)
+      - DOCUMENT_KIND_ORDER.indexOf(right.kind);
+    if (byKind !== 0) return byKind;
+    const leftDate = samplingOrder(left.samplingDate);
+    const rightDate = samplingOrder(right.samplingDate);
+    // Compared rather than subtracted: two undated documents are both
+    // Infinity, and Infinity - Infinity is NaN, which sorts unpredictably.
+    if (leftDate === rightDate) return 0;
+    return leftDate < rightDate ? -1 : 1;
+  });
+}
+
+/**
+ * Render every planned document and merge them into one PDF.
  *
  * A document that fails to render is left out rather than failing the whole
  * export: the rest are still worth having, and the caller reports what was
- * dropped. Entries are named into a folder so the archive unpacks tidily.
+ * dropped.
  *
  * Takes the plan list explicitly, rather than reading it off module state,
  * so a reset that runs while this is in flight can never change which
  * documents it renders midway through.
  * @param {Array<Object>} documents - Planned documents, as captured at click time.
- * @param {string} baseName - Sanitized workbook name.
- * @returns {Promise<{archive: Uint8Array, included: number, failed: string[]}>} The archive.
+ * @returns {Promise<{bytes: Uint8Array, included: number, failed: string[]}>} The merged PDF.
  */
-async function buildExportArchive(documents, baseName) {
-  const entries = [];
-  const failed = [];
+async function buildExportPdf(documents) {
+  const pdfLib = globalThis.PDFLib;
+  if (!pdfLib) throw new Error("The PDF library is unavailable.");
 
-  for (const plan of documents) {
+  const merged = await pdfLib.PDFDocument.create();
+  const failed = [];
+  let included = 0;
+
+  for (const plan of exportOrder(documents)) {
     try {
-      entries.push({
-        name: `${baseName}/${baseName}-${plan.slug}.pdf`,
-        data: await documentBytes(plan),
-      });
+      const source = await pdfLib.PDFDocument.load(await documentBytes(plan));
+      const pages = await merged.copyPages(source, source.getPageIndices());
+      pages.forEach((page) => merged.addPage(page));
+      included += 1;
     } catch (error) {
       logDocumentFailure(plan, error);
       failed.push(plan.title);
     }
   }
 
-  if (entries.length === 0) throw new Error("No document could be generated.");
-  return {
-    archive: globalThis.docuAlignZip.createArchive(entries),
-    included: entries.length,
-    failed,
-  };
+  if (included === 0) throw new Error("No document could be generated.");
+  return { bytes: await merged.save(), included, failed };
 }
 
 /**
- * Download the finished archive as a single file.
- * @param {Uint8Array} archive - Archive bytes.
+ * Download the merged export as a single file.
+ * @param {Uint8Array} bytes - Merged PDF bytes.
  * @param {string} baseName - Sanitized workbook name.
  * @returns {void}
  */
-function downloadArchive(archive, baseName) {
-  const url = URL.createObjectURL(new Blob([archive], { type: "application/zip" }));
+function downloadPdf(bytes, baseName) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
   const download = document.createElement("a");
   download.href = url;
-  download.download = `${baseName}.zip`;
+  download.download = `${baseName}.pdf`;
   download.rel = "noopener";
   document.body.appendChild(download);
   download.click();
@@ -633,21 +696,21 @@ pdfExport.addEventListener("click", async () => {
   // the button below (per the HTML click() algorithm) stops a disabled
   // button from dispatching further click events at all.
 
-  // One archive rather than a burst of downloads: browsers throttle multiple
-  // programmatic downloads and prompt before allowing them. The plan list is
-  // captured now so a reset mid-build can be detected below rather than
-  // silently changing which documents this call renders.
+  // One merged PDF rather than a burst of downloads: browsers throttle
+  // multiple programmatic downloads and prompt before allowing them. The plan
+  // list is captured now so a reset mid-build can be detected below rather
+  // than silently changing which documents this call renders.
   const documents = parsedDocuments;
   const baseName = reportBaseName();
   pdfExport.disabled = true;
   setFeedback("Generating documents\u2026", true);
 
   try {
-    const { archive, included, failed } = await buildExportArchive(documents, baseName);
-    // The workbook was cleared or replaced while this was building; the
-    // archive describes a workbook that is no longer selected; drop it.
+    const { bytes, included, failed } = await buildExportPdf(documents);
+    // The workbook was cleared or replaced while this was building; the merged
+    // PDF describes a workbook that is no longer selected; drop it.
     if (parsedDocuments !== documents) return;
-    downloadArchive(archive, baseName);
+    downloadPdf(bytes, baseName);
 
     exportStep.classList.add("is-complete");
     saveStep.classList.add("is-active");
@@ -655,8 +718,8 @@ pdfExport.addEventListener("click", async () => {
     const documentCount = `${included} ${included === 1 ? "document" : "documents"}`;
     setFeedback(
       failed.length === 0
-        ? `Downloaded ${baseName}.zip with ${documentCount}. Cloud save is now available.`
-        : `Downloaded ${baseName}.zip with ${documentCount}; could not generate ${failed.join(", ")}.`,
+        ? `Downloaded ${baseName}.pdf with ${documentCount}. Cloud save is now available.`
+        : `Downloaded ${baseName}.pdf with ${documentCount}; could not generate ${failed.join(", ")}.`,
       true,
     );
   } catch (error) {
@@ -697,6 +760,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   advancePipeline,
   applyRuntimeNotice,
   clearFile,
+  exportOrder,
   formatFileSize,
   getExportDocuments,
   isExcelFile,
