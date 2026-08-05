@@ -398,8 +398,8 @@ Three details that matter:
 Rebuilding is split so both paths reuse it: `rebuildDocument()` returns bytes
 or `null`, `resolveDocumentUrl()` wraps that into a blob URL for one card, and
 `sharedDocumentBytes()` fetches the static asset when there is nothing to
-rebuild — so an older asset-backed share still contributes its file to the
-archive instead of dropping out of it.
+rebuild — so an older asset-backed share still contributes its own file to the
+download (or the print job) instead of dropping out of it.
 
 One consequence of that split: `resolveDocumentUrl()` now returns a promise
 for every rebuilt document, where the generic worksheet path used to return a
@@ -412,7 +412,7 @@ Every delivered file is a real PDF, so a test tells them apart by giving each
 stubbed renderer a unique page **width** and reading the widths back. In the
 export they come off the unpacked archive entries; on the share page they come
 off the blobs `URL.createObjectURL` was handed, paired with each anchor's
-`download` name. Three things this forced:
+`download` name. Four things this forced:
 
 - Renderer stubs must return **real** PDFs. Older stubs returned the four
   bytes `%PDF`, which a ZIP happily stores but pdf-lib rightly refuses.
