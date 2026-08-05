@@ -96,6 +96,7 @@ async function loadWorkspace() {
   await import("./xlsx-reader.js");
   await import("./pdf-writer.js");
   await import("./summary-pdf.js");
+  await import("./pdf-merge.js");
   // The export merges real PDFs, so the renderers must produce real ones.
   globalThis.PDFLib = PDFLib;
   globalThis.docuAlignSummaryPdf = {
@@ -142,6 +143,7 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
     delete globalThis.PDFLib;
+    delete globalThis.docuAlignPdfMerge;
     vi.stubGlobal("URL", Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => "blob:generated"),
       revokeObjectURL: vi.fn(),
@@ -167,6 +169,7 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
     delete globalThis.PDFLib;
+    delete globalThis.docuAlignPdfMerge;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });

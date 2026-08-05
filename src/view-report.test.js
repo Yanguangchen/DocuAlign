@@ -1,4 +1,18 @@
+import * as PDFLib from "pdf-lib";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+/**
+ * A one-page PDF whose page width identifies which document produced it.
+ * A merged PDF is only assertable if each source page stays recognisable in
+ * the finished file, and widths survive a page copy exactly.
+ * @param {number} width - The marker width, unique per document.
+ * @returns {Promise<Uint8Array>} A valid single-page PDF.
+ */
+async function markerPdf(width) {
+  const pdf = await PDFLib.PDFDocument.create();
+  pdf.addPage([width, 100]);
+  return pdf.save();
+}
 
 vi.mock("./lib/firebase.js", () => ({
   db: {},
@@ -68,12 +82,6 @@ describe("view-report module", () => {
         <iframe id="share-preview-frame" src="about:blank"></iframe>
         <a id="share-preview-overlay" href="#"></a>
         <p id="share-preview-caption">First page preview</p>
-      </article>
-      <article id="share-bundle" hidden>
-        <strong id="share-bundle-name"></strong>
-        <span id="share-bundle-count"></span>
-        <span id="share-bundle-published"></span>
-        <ul id="share-bundle-list"></ul>
       </article>
     `;
   });
@@ -155,7 +163,7 @@ describe("view-report module", () => {
     it("rebuilds a generated document into a real PDF blob", async () => {
       const { resolveDocumentUrl } = await import("./view-report.js");
 
-      const url = resolveDocumentUrl(
+      const url = await resolveDocumentUrl(
         share({ reportName: "DS1 Datasheet", documentData: JSON.stringify(sections) }),
       );
 
@@ -303,15 +311,71 @@ describe("view-report module", () => {
 
     it("tolerates published data that is not a list of sections", async () => {
       const { resolveDocumentUrl } = await import("./view-report.js");
-      expect(resolveDocumentUrl(share({ documentData: '{"rows":[]}' }))).toBe("blob:rebuilt");
+      expect(await resolveDocumentUrl(share({ documentData: '{"rows":[]}' })))
+        .toBe("blob:rebuilt");
     });
 
     it("titles a rebuilt document generically when the share has no name", async () => {
       const { resolveDocumentUrl } = await import("./view-report.js");
-      resolveDocumentUrl(share({ reportName: "", documentData: JSON.stringify(sections) }));
+      await resolveDocumentUrl(share({ reportName: "", documentData: JSON.stringify(sections) }));
 
       const [blob] = URL.createObjectURL.mock.calls[0];
       expect(await blob.text()).toContain("(RAK Concrete Test Report)");
+    });
+  });
+
+  describe("samplingOrder", () => {
+    it("parses both date shapes and sorts everything else last", async () => {
+      const { samplingOrder } = await import("./view-report.js");
+
+      expect(samplingOrder("08/04/2026")).toBe(20260408);
+      expect(samplingOrder("1-5-2026")).toBe(20260501);
+      expect(samplingOrder("2026-04-09")).toBe(20260409);
+      // Day-first, not month-first: the workbook writes 12/06 as 12 June.
+      expect(samplingOrder("12/06/2026")).toBeGreaterThan(samplingOrder("06/12/2025"));
+      for (const unparsed of ["", "   ", "April 8th", "08/04/26", null, undefined]) {
+        expect(samplingOrder(unparsed)).toBe(Number.POSITIVE_INFINITY);
+      }
+    });
+  });
+
+  describe("bundleOrder", () => {
+    it("puts the Summary first and orders reports oldest sampling date first", async () => {
+      const { bundleOrder } = await import("./view-report.js");
+      const report = (name, samplingDate) => ({
+        reportName: name,
+        documentData: JSON.stringify({
+          renderer: "report",
+          report: { cover: { samplingDate } },
+        }),
+      });
+
+      const ordered = bundleOrder([
+        report("june", "12/06/2026"),
+        // ISO dates compare correctly against the workbook's day-first ones.
+        report("iso-april", "2026-04-09"),
+        report("undated", ""),
+        { reportName: "Summary", documentSlug: "Summary", documentData: null },
+        report("april", "08/04/2026"),
+      ]);
+
+      expect(ordered.map((entry) => entry.reportName)).toEqual([
+        "Summary",
+        "april",
+        "iso-april",
+        "june",
+        "undated",
+      ]);
+    });
+
+    it("keeps a share whose payload cannot be read, ordering it last", async () => {
+      const { bundleOrder } = await import("./view-report.js");
+      const ordered = bundleOrder([
+        { reportName: "broken", documentData: "{not json" },
+        { reportName: "summary", documentData: JSON.stringify({ renderer: "summary", cells: [] }) },
+      ]);
+
+      expect(ordered.map((entry) => entry.reportName)).toEqual(["summary", "broken"]);
     });
   });
 
@@ -556,35 +620,101 @@ describe("view-report module", () => {
       );
     });
 
-    it("renders every grouped report in a bundle link with safe PDF links", async () => {
-      mockFetchSharedBundle.mockResolvedValueOnce(bundle());
+    /**
+     * Prepare a bundle test: the merge runtime, a capturing createObjectURL,
+     * and a `fetch` that answers with a real PDF for asset-backed shares.
+     * @returns {Promise<{blobs: Blob[]}>} Blobs handed to createObjectURL.
+     */
+    async function stubMergeRuntime() {
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      const blobs = [];
+      vi.stubGlobal("URL", Object.assign(globalThis.URL, {
+        createObjectURL: vi.fn((blob) => {
+          blobs.push(blob);
+          return "blob:merged";
+        }),
+      }));
+      const assetPdf = await markerPdf(ASSET_MARKER);
+      fetch.mockReset().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () =>
+          assetPdf.buffer.slice(assetPdf.byteOffset, assetPdf.byteOffset + assetPdf.byteLength),
+      });
+      return { blobs };
+    }
+
+    /** Page widths of the merged PDF, in page order. */
+    async function mergedPageMarkers(blobs) {
+      const merged = await PDFLib.PDFDocument.load(await blobs.at(-1).arrayBuffer());
+      return merged.getPages().map((page) => Math.round(page.getWidth()));
+    }
+
+    const ASSET_MARKER = 700;
+
+    it("merges a package link into one PDF, Summary first then reports by date", async () => {
+      const { blobs } = await stubMergeRuntime();
+      const SUMMARY_MARKER = 500;
+      globalThis.docuAlignSummaryPdf = {
+        createDocument: vi.fn(async () => markerPdf(SUMMARY_MARKER)),
+      };
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async ([report]) => new Blob(
+          [await markerPdf(Number(report.marker))],
+          { type: "application/pdf" },
+        )),
+      };
+      const reportShare = (marker, samplingDate) => ({
+        reportId: `doc-${marker}`,
+        reportName: `Report ${marker}`,
+        status: "complete",
+        pdfUrl: null,
+        documentData: JSON.stringify({
+          renderer: "report",
+          report: { marker, cover: { samplingDate } },
+        }),
+      });
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          reportShare(602, "12/06/2026"),
+          reportShare(601, "08/04/2026"),
+          {
+            reportId: "doc-summary",
+            reportName: "Summary",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "summary", cells: [["U10", "X-1"]] }),
+          },
+          // An asset-backed share carries no data, so it is fetched instead of
+          // rebuilt; with no date of its own it sorts last.
+          { reportId: "doc-asset", reportName: "Legacy", status: "saved", pdfUrl: null },
+        ],
+      }));
       const { initViewer } = await import("./view-report.js");
 
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
       expect(mockFetchSharedBundle).toHaveBeenCalledWith({}, VALID_TOKEN);
       expect(mockFetchSharedReport).not.toHaveBeenCalled();
-      expect(document.querySelector("#share-bundle").hidden).toBe(false);
-      expect(document.querySelector("#share-report").hidden).toBe(true);
+      // One document in the ordinary report panel -- not a list of links.
+      expect(document.querySelector("#share-report").hidden).toBe(false);
       expect(document.querySelector("#share-status").hidden).toBe(true);
-      expect(document.querySelector("#share-bundle-name").textContent).toBe("Customer pack");
-      expect(document.querySelector("#share-bundle-count").textContent).toBe("2 documents");
+      expect(document.querySelector("#share-report-name").textContent).toBe("Customer pack");
+      expect(document.querySelector("#share-report-subtitle").textContent)
+        .toBe("4 documents in one PDF");
+      expect(document.querySelector("#share-pdf-link").getAttribute("href")).toBe("blob:merged");
+      expect(document.querySelector("#share-download-link").getAttribute("href"))
+        .toBe("blob:merged");
 
-      const items = document.querySelectorAll("#share-bundle-list li");
-      expect(items).toHaveLength(2);
-      expect(items[0].textContent).toContain("report-a");
-      expect(items[0].textContent).toContain("a.xlsx");
-      const links = document.querySelectorAll("#share-bundle-list a");
-      expect(links[0].getAttribute("href")).toBe("SampleDocuments/SampleOutput.pdf");
-      // The unsafe javascript: URL must fall back to the bundled PDF.
-      expect(links[1].getAttribute("href")).toBe("SampleDocuments/SampleOutput.pdf");
-      expect(links[1].getAttribute("rel")).toBe("noopener");
+      expect(await mergedPageMarkers(blobs)).toEqual([500, 601, 602, ASSET_MARKER]);
+      delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("renders a packaged legacy Summary with the fixed-format PDF renderer", async () => {
+    it("still merges a packaged legacy Summary through the fixed-format renderer", async () => {
+      const { blobs } = await stubMergeRuntime();
       globalThis.docuAlignSummaryPdf = {
         cellsFromDocumentData: vi.fn(() => new Map([["U10", "X-2026-522"]])),
-        createDocument: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
+        createDocument: vi.fn(async () => markerPdf(500)),
       };
       mockFetchSharedBundle.mockResolvedValueOnce(
         bundle({
@@ -604,12 +734,12 @@ describe("view-report module", () => {
 
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
-      const link = document.querySelector("#share-bundle-list a");
-      expect(link.getAttribute("href")).toBe("blob:rebuilt");
       expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
+      expect(await mergedPageMarkers(blobs)).toEqual([500]);
     });
 
-    it("renders bundle fallbacks for missing name, date, and single report", async () => {
+    it("renders package fallbacks for a missing name and date", async () => {
+      await stubMergeRuntime();
       mockFetchSharedBundle.mockResolvedValueOnce(
         bundle({
           bundleName: null,
@@ -621,14 +751,56 @@ describe("view-report module", () => {
 
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
-      expect(document.querySelector("#share-bundle-name").textContent).toBe("Shared reports");
-      expect(document.querySelector("#share-bundle-count").textContent).toBe("1 document");
-      expect(document.querySelector("#share-bundle-published").textContent).toBe(
-        "Date unavailable",
+      expect(document.querySelector("#share-report-name").textContent).toBe("Shared reports");
+      expect(document.querySelector("#share-report-subtitle").textContent)
+        .toBe("1 document in one PDF");
+      expect(document.querySelector("#share-reference").textContent)
+        .toBe("1 document in one PDF");
+      expect(document.querySelector("#share-published").textContent).toBe("Date unavailable");
+      expect(document.querySelector("#share-source-details").hidden).toBe(true);
+    });
+
+    it("explains a package link whose documents cannot be rebuilt at all", async () => {
+      await stubMergeRuntime();
+      // Every share is asset-backed, and the asset itself is unreachable.
+      fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
+      mockFetchSharedBundle.mockResolvedValueOnce(
+        bundle({ reports: [{ reportId: "doc-1", reportName: "a", status: null, pdfUrl: null }] }),
       );
-      const item = document.querySelector("#share-bundle-list li");
-      expect(item.textContent).toContain("Untitled report");
-      expect(item.textContent).toContain("Report complete");
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      expect(document.querySelector("#share-report").hidden).toBe(true);
+      expect(document.querySelector("#share-status").textContent).toContain(
+        "This package link could not be rebuilt. Ask the sender for a new link.",
+      );
+    });
+
+    it("falls back to the stored asset when a packaged document cannot be rebuilt", async () => {
+      const { blobs } = await stubMergeRuntime();
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async () => {
+          throw new Error("Template unavailable");
+        }),
+      };
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          // Malformed data: unreadable for both the rebuild and the ordering.
+          { reportId: "doc-1", reportName: "broken", status: null, pdfUrl: null,
+            documentData: "{not json" },
+          { reportId: "doc-2", reportName: "failing", status: null, pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "report", report: { jobRef: "X-1" } }) },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      // Neither share drops out of the package; both contribute the asset's
+      // pages rather than leaving a gap in the merged document.
+      expect(await mergedPageMarkers(blobs)).toEqual([ASSET_MARKER, ASSET_MARKER]);
+      delete globalThis.docuAlignRakReportPdf;
     });
 
     it("shows the revoked message when a bundle no longer exists", async () => {
@@ -637,7 +809,7 @@ describe("view-report module", () => {
 
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
-      expect(document.querySelector("#share-bundle").hidden).toBe(true);
+      expect(document.querySelector("#share-report").hidden).toBe(true);
       expect(document.querySelector("#share-status").textContent).toContain(
         "This share link is no longer available. Ask the report owner for a new link.",
       );
