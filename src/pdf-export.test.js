@@ -15,6 +15,7 @@ const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "
 const rakReportSource = readFileSync(resolve(projectRoot, "src/rak-report-pdf.js"), "utf8");
 const mappingSource = readFileSync(resolve(projectRoot, "src/report-mapping.js"), "utf8");
 const zipWriterSource = readFileSync(resolve(projectRoot, "src/zip-writer.js"), "utf8");
+const pdfMergeSource = readFileSync(resolve(projectRoot, "src/pdf-merge.js"), "utf8");
 const viewReportSource = readFileSync(resolve(projectRoot, "src/view-report.js"), "utf8");
 const indexSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
 const viewSource = readFileSync(resolve(projectRoot, "view.html"), "utf8");
@@ -82,10 +83,27 @@ describe("PDF export", () => {
     expect(viewReportSource).toContain("downloadEveryDocument");
     expect(viewReportSource).not.toContain("docuAlignZip");
     expect(viewSource).not.toContain("zip-writer.js");
-    // Nothing merges documents into a single PDF any more.
-    expect(existsSync(resolve(projectRoot, "src/pdf-merge.js"))).toBe(false);
+    // No delivered file is ever a merge of several documents.
     expect(workspaceSource).not.toContain("docuAlignPdfMerge");
-    expect(viewReportSource).not.toContain("docuAlignPdfMerge");
+  });
+
+  it("merges only for printing, never for a delivered file", () => {
+    // A print job is one document by definition, so "print all" merges. The
+    // merged PDF goes to an iframe for print(), and is never offered as a
+    // download: no <a download> is ever handed the merged bytes.
+    expect(viewReportSource).toContain("docuAlignPdfMerge.mergePdfs");
+    expect(viewReportSource).toContain("function buildPrintJob");
+    expect(viewReportSource).toContain("contentWindow.print()");
+    expect(pdfMergeSource).toContain("copyPages");
+    expect(pdfMergeSource).not.toMatch(/^\s*(import|export)\s/m);
+    expect(viewSource).toContain('src="./src/pdf-merge.js"');
+    expect(viteConfigSource).toContain('"pdf-merge.js"');
+    // The download path never touches the merger.
+    const downloadSection = viewReportSource.slice(
+      viewReportSource.indexOf("async function downloadEveryDocument"),
+      viewReportSource.indexOf("async function buildPrintJob"),
+    );
+    expect(downloadSection).not.toContain("mergePdfs");
   });
 
   it.each([...REFERENCE_ASSETS.keys()])(

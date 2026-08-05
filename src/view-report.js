@@ -43,6 +43,7 @@ const bundleCount = document.querySelector("#share-bundle-count");
 const bundlePublished = document.querySelector("#share-bundle-published");
 const bundleList = document.querySelector("#share-bundle-list");
 const bundleDownload = document.querySelector("#share-bundle-download");
+const bundlePrint = document.querySelector("#share-bundle-print");
 const bundleDownloadNote = document.querySelector("#share-bundle-download-note");
 
 /** Grace period before a download's object URL is released. */
@@ -475,6 +476,66 @@ function pause(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Rebuild every document in the package for one print job.
+ *
+ * Unlike the download button, this merges: a print job is one document by
+ * definition, so printing six reports separately would mean six print
+ * dialogs. The merged document is sent to the printer and never saved.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<{bytes: Uint8Array, printed: number, failed: string[]}>} The print job.
+ */
+async function buildPrintJob(sharedBundle) {
+  const rendered = [];
+  const failed = [];
+
+  for (const share of bundleOrder(sharedBundle.reports)) {
+    try {
+      rendered.push(await sharedDocumentBytes(share));
+    } catch (error) {
+      logDocumentRebuildFailure(error);
+      failed.push(share?.reportName || "Untitled report");
+    }
+  }
+
+  if (rendered.length === 0) throw new Error("No document in this package could be rebuilt.");
+  return {
+    bytes: await globalThis.docuAlignPdfMerge.mergePdfs(rendered),
+    printed: rendered.length,
+    failed,
+  };
+}
+
+/**
+ * Hand a PDF to the browser's print dialog without navigating away.
+ *
+ * The frame stays in the document while the dialog is open -- removing it
+ * cancels the job in some browsers -- and is cleared on the same grace period
+ * a download's object URL gets.
+ * @param {Uint8Array} bytes - The PDF to print.
+ * @returns {void}
+ */
+function printDocument(bytes) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.className = "print-frame";
+  frame.addEventListener("load", () => {
+    // Absent when the browser refuses to expose the frame's document, or when
+    // it renders PDFs without an embedded viewer. Nothing to do then -- the
+    // recipient still has the per-document links to print from.
+    if (typeof frame.contentWindow?.print !== "function") return;
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  });
+  document.body.appendChild(frame);
+  frame.src = url;
+  setTimeout(() => {
+    frame.remove();
+    URL.revokeObjectURL(url);
+  }, REVOKE_DELAY_MS);
+}
+
 // Build each grouped report entry with DOM APIs (not innerHTML) so report
 // names and file names from the share document can never inject markup.
 async function bundleReportItem(report) {
@@ -511,7 +572,7 @@ async function bundleReportItem(report) {
 
 /**
  * Render a package link: every document listed separately, plus one button
- * that downloads all of them, each as its own file.
+ * that downloads all of them as their own files and one that prints them all.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<void>} Settles once the panel has rendered.
  */
@@ -532,9 +593,42 @@ async function renderSharedBundle(sharedBundle) {
   bundleDownload.disabled = false;
   bundleDownload.textContent = `Download all ${ordered.length} documents`;
   bundleDownload.onclick = () => downloadAllDocuments(sharedBundle);
+  bundlePrint.disabled = false;
+  bundlePrint.textContent = `Print all ${ordered.length} documents`;
+  bundlePrint.onclick = () => printAllDocuments(sharedBundle);
 
   setStatus("");
   bundlePanel.hidden = false;
+}
+
+/**
+ * Drive the print-all button: disable it while the print job is assembled,
+ * then report what reached the printer and anything that could not.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<void>} Settles once the print dialog has been opened.
+ */
+async function printAllDocuments(sharedBundle) {
+  const label = bundlePrint.textContent;
+  bundlePrint.disabled = true;
+  bundlePrint.textContent = "Preparing print…";
+  bundleDownloadNote.hidden = true;
+
+  try {
+    const { bytes, printed, failed } = await buildPrintJob(sharedBundle);
+    printDocument(bytes);
+    const printedCount = `${printed} ${printed === 1 ? "document" : "documents"}`;
+    bundleDownloadNote.textContent = failed.length === 0
+      ? `Sent ${printedCount} to your printer as one job.`
+      : `Sent ${printedCount} to your printer; could not prepare ${failed.join(", ")}.`;
+  } catch (error) {
+    logDocumentRebuildFailure(error);
+    bundleDownloadNote.textContent =
+      "These documents could not be prepared. Ask the sender for a new link.";
+  } finally {
+    bundleDownloadNote.hidden = false;
+    bundlePrint.textContent = label;
+    bundlePrint.disabled = false;
+  }
 }
 
 /**

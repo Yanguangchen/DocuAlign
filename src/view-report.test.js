@@ -87,6 +87,7 @@ describe("view-report module", () => {
         <span id="share-bundle-count"></span>
         <span id="share-bundle-published"></span>
         <button id="share-bundle-download" type="button"></button>
+        <button id="share-bundle-print" type="button"></button>
         <p id="share-bundle-download-note" hidden></p>
         <ul id="share-bundle-list"></ul>
       </article>
@@ -902,6 +903,191 @@ describe("view-report module", () => {
 
         // Held long enough for the browser to take the download, then released.
         await vi.advanceTimersByTimeAsync(60000);
+        expect(URL.revokeObjectURL).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("prints every packaged document as one job from a single button", async () => {
+      const { blobs } = await stubPackageRuntime();
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async ([report]) => new Blob(
+          [await markerPdf(Number(report.marker))],
+          { type: "application/pdf" },
+        )),
+      };
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          {
+            reportId: "doc-r",
+            reportName: "Test Report X-1",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({
+              renderer: "report",
+              report: { marker: 601, cover: { samplingDate: "08/04/2026" } },
+            }),
+          },
+          {
+            reportId: "doc-s",
+            reportName: "Summary",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "summary", cells: [] }),
+          },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      const button = document.querySelector("#share-bundle-print");
+      expect(button.textContent).toBe("Print all 2 documents");
+
+      button.click();
+      await vi.waitFor(() => expect(document.querySelector("iframe.print-frame")).not.toBeNull());
+
+      // A print job is one document by definition, so the two are merged --
+      // but only for the printer: nothing is downloaded.
+      const printed = await PDFLib.PDFDocument.load(await blobs.at(-1).arrayBuffer());
+      expect(printed.getPages().map((page) => Math.round(page.getWidth())))
+        .toEqual([500, 601]);
+
+      // The frame is handed the merged PDF and asked to print it.
+      const frame = document.querySelector("iframe.print-frame");
+      const print = vi.fn();
+      Object.defineProperty(frame, "contentWindow", {
+        configurable: true,
+        value: { focus: vi.fn(), print },
+      });
+      frame.dispatchEvent(new Event("load"));
+      expect(print).toHaveBeenCalledOnce();
+
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "Sent 2 documents to your printer as one job.",
+        ),
+      );
+      expect(button.disabled).toBe(false);
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("prints what it can and names what it could not prepare", async () => {
+      await stubPackageRuntime();
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async () => {
+          throw new Error("Template unavailable");
+        }),
+      };
+      fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          {
+            reportId: "doc-r",
+            reportName: "Broken report",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "report", report: { jobRef: "X-1" } }),
+          },
+          // Nameless and also unrebuildable: it still has to be named to the
+          // recipient somehow.
+          { reportId: "doc-n", reportName: null, status: "complete", pdfUrl: null },
+          {
+            reportId: "doc-s",
+            reportName: "Summary",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "summary", cells: [] }),
+          },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-print").click();
+
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "Sent 1 document to your printer; could not prepare Broken report, Untitled report.",
+        ),
+      );
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("explains a package that cannot be prepared for printing at all", async () => {
+      await stubPackageRuntime();
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
+      mockFetchSharedBundle.mockResolvedValueOnce(
+        bundle({ reports: [{ reportId: "doc-1", reportName: "a", status: null, pdfUrl: null }] }),
+      );
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      const button = document.querySelector("#share-bundle-print");
+      button.click();
+
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "These documents could not be prepared. Ask the sender for a new link.",
+        ),
+      );
+      expect(document.querySelector("iframe.print-frame")).toBeNull();
+      // Usable again, so a transient failure can be retried.
+      expect(button.disabled).toBe(false);
+    });
+
+    it("survives a browser that will not expose the print frame's window", async () => {
+      await stubPackageRuntime();
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [{ reportId: "doc-1", reportName: "a", status: null, pdfUrl: null }],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-print").click();
+      await vi.waitFor(() => expect(document.querySelector("iframe.print-frame")).not.toBeNull());
+
+      // contentWindow is null for a cross-origin or blocked frame, and has no
+      // print() where PDFs render without an embedded viewer. Neither may
+      // throw, so the per-document links still work.
+      const frame = document.querySelector("iframe.print-frame");
+      Object.defineProperty(frame, "contentWindow", { configurable: true, value: null });
+      expect(() => frame.dispatchEvent(new Event("load"))).not.toThrow();
+
+      Object.defineProperty(frame, "contentWindow", { configurable: true, value: {} });
+      expect(() => frame.dispatchEvent(new Event("load"))).not.toThrow();
+    });
+
+    it("clears the print frame and its object URL after the grace period", async () => {
+      await stubPackageRuntime();
+      await import("./pdf-merge.js");
+      globalThis.PDFLib = PDFLib;
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [{ reportId: "doc-1", reportName: "a", status: null, pdfUrl: null }],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      vi.useFakeTimers();
+      try {
+        document.querySelector("#share-bundle-print").click();
+        await vi.advanceTimersByTimeAsync(0);
+        // Held while the dialog is open: removing it cancels the job.
+        expect(document.querySelector("iframe.print-frame")).not.toBeNull();
+        expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(document.querySelector("iframe.print-frame")).toBeNull();
         expect(URL.revokeObjectURL).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
