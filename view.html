@@ -21,6 +21,7 @@
     <script vite-ignore src="./vendor/sample-summary-template.js"></script>
     <script vite-ignore src="./src/summary-pdf.js"></script>
     <script vite-ignore src="./src/rak-report-pdf.js"></script>
+    <script vite-ignore src="./src/pdf-merge.js"></script>
     <script type="importmap">
       {
         "imports": {
@@ -180,13 +181,22 @@
               <span class="report-meta-item" id="share-bundle-published"></span>
             </div>
             <div class="share-bundle-actions">
-              <button
-                class="google-button share-pdf-button"
-                id="share-bundle-download"
-                type="button"
-              >
-                Download all documents
-              </button>
+              <div class="share-bundle-buttons">
+                <button
+                  class="google-button share-pdf-button"
+                  id="share-bundle-download"
+                  type="button"
+                >
+                  Download all documents
+                </button>
+                <button
+                  class="google-button share-pdf-button share-print-button"
+                  id="share-bundle-print"
+                  type="button"
+                >
+                  Print all documents
+                </button>
+              </div>
               <p class="report-source" id="share-bundle-download-note" hidden></p>
             </div>
             <ul class="share-bundle-list" id="share-bundle-list"></ul>

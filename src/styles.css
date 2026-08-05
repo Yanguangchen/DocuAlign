@@ -1342,9 +1342,33 @@ a:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+.share-bundle-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .share-bundle-actions button[disabled] {
   opacity: 0.6;
   cursor: progress;
+}
+
+/* Printing is the secondary action of the two, so it reads as an outline. */
+.share-print-button {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+/* Holds the PDF handed to the print dialog; never meant to be seen. */
+.print-frame {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border: 0;
+  visibility: hidden;
 }
 
 .share-bundle-list {

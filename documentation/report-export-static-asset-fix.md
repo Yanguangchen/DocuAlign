@@ -327,8 +327,10 @@ single download. A public package link goes further and keeps the files
 genuinely separate: one button saves every document individually, with no
 container at all. A merged single-PDF version of this was built and then
 reverted (`Merge every exported document into one PDF`, `Serve a public
-package link as one merged PDF`) — if it is ever wanted again, `src/pdf-merge.js`
-and its tests are recoverable from those commits.
+package link as one merged PDF`).
+
+`src/pdf-merge.js` survives that revert, but only for **printing** — see
+"Print all" below. Nothing it produces is ever delivered as a file.
 
 ### Ordering
 
@@ -369,6 +371,30 @@ success line tells the recipient to allow multiple downloads if asked. That
 prompt is the accepted cost of keeping the files separate; wrapping them in a
 ZIP would avoid it, and was tried and rejected.
 
+### Print all — the one place a merge is right
+
+Beside it sits **Print all N documents**, and this one *does* merge. That is
+not a contradiction: a print job is one document by definition, so printing
+six reports separately would mean six print dialogs. `buildPrintJob()` rebuilds
+every share and merges them through `src/pdf-merge.js`; `printDocument()` puts
+the result in a hidden iframe and calls `contentWindow.print()`.
+
+The distinction to hold on to is **delivered vs printed**. Nothing merged is
+ever saved: no `<a download>` is handed the merged bytes, and
+`pdf-export.test.js` asserts that the download path never reaches `mergePdfs`.
+The merged document exists only long enough to reach the printer.
+
+Three details that matter:
+
+- The iframe **stays in the document while the dialog is open** — removing it
+  cancels the job in some browsers — and is cleared with its object URL on the
+  same `REVOKE_DELAY_MS` grace period a download gets.
+- `contentWindow` can be null (a blocked frame) or lack `print` (a browser
+  rendering PDFs without an embedded viewer). Both are checked; when printing
+  is unavailable nothing throws, and the per-document links remain.
+- The merge preserves each page's own size, so the landscape Summary and the
+  portrait reports each print at their intended orientation.
+
 Rebuilding is split so both paths reuse it: `rebuildDocument()` returns bytes
 or `null`, `resolveDocumentUrl()` wraps that into a blob URL for one card, and
 `sharedDocumentBytes()` fetches the static asset when there is nothing to
@@ -397,3 +423,6 @@ off the blobs `URL.createObjectURL` was handed, paired with each anchor's
 - The share page's listing creates one blob per card before any download
   starts, so a test must take the *trailing* blobs — one per anchor click — as
   the saved files.
+- Printing is asserted by finding the `iframe.print-frame`, defining a
+  `contentWindow` on it, and dispatching `load`; the merged bytes are read off
+  the last blob `createObjectURL` was handed.
