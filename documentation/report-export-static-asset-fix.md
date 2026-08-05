@@ -356,6 +356,37 @@ whole export, and the feedback line names it.
 PDF was its only caller. It is recoverable from git history if a ZIP is ever
 wanted again.
 
+### The public link is one document too
+
+A package link used to render a list of "View document" buttons, one per
+share. It now merges the same way the export does and shows the result in the
+ordinary report panel — one preview, one download. `src/pdf-merge.js` is a
+classic script precisely so both callers share it: `workspace.js` is a classic
+script and `view-report.js` is an ES module, and neither can import the
+other's format.
+
+The viewer orders the merge from the published payload rather than from the
+bundle's own list order, so a link's pages come out in the same order the
+downloaded export would produce. `shareSortKey()` reads each share's
+`documentData`: `renderer: "summary"` (or the legacy `documentSlug` of
+`"Summary"`) puts it first, and a report contributes
+`report.cover.samplingDate`. `samplingOrder()` is the workspace's own rule,
+duplicated deliberately — `view-report.js` cannot import from a classic
+script, and moving it into `pdf-merge.js` would mix an ordering policy into a
+byte-level utility. The two are kept in step by tests on both sides.
+
+Rebuilding is split so both callers can reuse it: `rebuildDocument()` returns
+bytes or `null`, `resolveDocumentUrl()` wraps that into a blob URL for a
+single share, and `sharedDocumentBytes()` fetches the static asset when there
+is nothing to rebuild — so an older asset-backed share still contributes its
+pages to a package instead of dropping out of it. Only when *every* document
+fails does the viewer show a status message.
+
+One consequence: `resolveDocumentUrl()` now returns a promise for every
+rebuilt document, where the generic worksheet path used to return a string
+synchronously. Both call sites already wrapped it in `Promise.resolve`, so
+this was invisible at runtime, but tests calling it directly must await it.
+
 ### Testing a merge
 
 Asserting a merge needs the output to say which document produced each page.

@@ -14,6 +14,8 @@ const projectRoot = resolve(".");
 const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "utf8");
 const rakReportSource = readFileSync(resolve(projectRoot, "src/rak-report-pdf.js"), "utf8");
 const mappingSource = readFileSync(resolve(projectRoot, "src/report-mapping.js"), "utf8");
+const pdfMergeSource = readFileSync(resolve(projectRoot, "src/pdf-merge.js"), "utf8");
+const viewReportSource = readFileSync(resolve(projectRoot, "src/view-report.js"), "utf8");
 const indexSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
 const viewSource = readFileSync(resolve(projectRoot, "view.html"), "utf8");
 const viteConfigSource = readFileSync(resolve(projectRoot, "vite.config.js"), "utf8");
@@ -68,9 +70,16 @@ describe("PDF export", () => {
     // The export delivers a single PDF: the Summary first, then the test
     // reports in sampling-date order. Pages are copied from each rendered
     // document rather than re-laid-out, so every approved layout survives.
-    expect(workspaceSource).toContain("merged.copyPages");
+    expect(workspaceSource).toContain("docuAlignPdfMerge.mergePdfs");
     expect(workspaceSource).toContain('download.download = `${baseName}.pdf`');
     expect(workspaceSource).toContain("DOCUMENT_KIND_ORDER");
+    // The share viewer delivers one document too, and merges it the same way.
+    expect(viewReportSource).toContain("docuAlignPdfMerge.mergePdfs");
+    expect(pdfMergeSource).toContain("copyPages");
+    expect(pdfMergeSource).not.toMatch(/^\s*(import|export)\s/m);
+    expect(indexSource).toContain('src="./src/pdf-merge.js"');
+    expect(viewSource).toContain('src="./src/pdf-merge.js"');
+    expect(viteConfigSource).toContain('"pdf-merge.js"');
     // The ZIP writer the export used before has no caller left.
     expect(existsSync(resolve(projectRoot, "src/zip-writer.js"))).toBe(false);
     expect(workspaceSource).not.toContain("docuAlignZip");

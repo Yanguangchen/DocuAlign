@@ -37,12 +37,6 @@ const previewCaption = document.querySelector("#share-preview-caption");
 
 // Shown when the share document carries no extracted title of its own.
 const FALLBACK_REPORT_TITLE = "RAK Concrete Test Report";
-const bundlePanel = document.querySelector("#share-bundle");
-const bundleName = document.querySelector("#share-bundle-name");
-const bundleCount = document.querySelector("#share-bundle-count");
-const bundlePublished = document.querySelector("#share-bundle-published");
-const bundleList = document.querySelector("#share-bundle-list");
-
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -88,46 +82,82 @@ export function getBundleTokenFromUrl(search) {
  * @returns {string|Promise<string>} A URL safe to hand to the viewer and download link.
  */
 export function resolveDocumentUrl(share) {
-  if (typeof share?.documentData !== "string" || share.documentData === "") {
-    return safePdfUrl(share?.pdfUrl);
-  }
+  const rebuilt = rebuildDocument(share);
+  if (!rebuilt) return safePdfUrl(share?.pdfUrl);
 
-  try {
-    const document = JSON.parse(share.documentData);
-    if (document?.renderer === "report" && document.report) {
-      return Promise.resolve(globalThis.docuAlignRakReportPdf.createRakReportPdf([document.report]))
-        .then((blob) => URL.createObjectURL(blob))
-        .catch((error) => {
-          logDocumentRebuildFailure(error);
-          return safePdfUrl(share?.pdfUrl);
-        });
-    }
-
-    const isCurrentSummary = document?.renderer === "summary" && Array.isArray(document.cells);
-    const isLegacySummary = share?.documentSlug === "Summary" && Array.isArray(document);
-    if (isCurrentSummary || isLegacySummary) {
-      const cells = isCurrentSummary
-        ? new Map(document.cells)
-        : globalThis.docuAlignSummaryPdf.cellsFromDocumentData(document);
-      const render = globalThis.docuAlignSummaryPdf.createDocument(cells);
-      return Promise.resolve(render)
-        .then((bytes) => URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })))
-        .catch((error) => {
-          logDocumentRebuildFailure(error);
-          return safePdfUrl(share?.pdfUrl);
-        });
-    }
-
-    const bytes = globalThis.docuAlignPdf.createDocument({
-      title: share.reportName || FALLBACK_REPORT_TITLE,
-      subtitle: share.clientName ?? "",
-      sections: Array.isArray(document) ? document : [],
+  return rebuilt
+    .then((bytes) => URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })))
+    .catch((error) => {
+      logDocumentRebuildFailure(error);
+      return safePdfUrl(share?.pdfUrl);
     });
-    return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+}
+
+/**
+ * Rebuild one shared document into PDF bytes.
+ *
+ * Returns null -- rather than throwing or resolving to a fallback -- when the
+ * share carries nothing to rebuild from, so the caller can choose between
+ * linking to the static asset and fetching it.
+ * @param {Object} share - A public share document.
+ * @returns {Promise<Uint8Array>|null} The rebuilt PDF, or null when there is no data.
+ */
+function rebuildDocument(share) {
+  if (typeof share?.documentData !== "string" || share.documentData === "") return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(share.documentData);
   } catch (error) {
     logDocumentRebuildFailure(error);
-    return safePdfUrl(share?.pdfUrl);
+    return null;
   }
+
+  if (payload?.renderer === "report" && payload.report) {
+    return Promise.resolve(globalThis.docuAlignRakReportPdf.createRakReportPdf([payload.report]))
+      .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  const isCurrentSummary = payload?.renderer === "summary" && Array.isArray(payload.cells);
+  const isLegacySummary = share?.documentSlug === "Summary" && Array.isArray(payload);
+  if (isCurrentSummary || isLegacySummary) {
+    const cells = isCurrentSummary
+      ? new Map(payload.cells)
+      : globalThis.docuAlignSummaryPdf.cellsFromDocumentData(payload);
+    return Promise.resolve(globalThis.docuAlignSummaryPdf.createDocument(cells));
+  }
+
+  return Promise.resolve().then(() => globalThis.docuAlignPdf.createDocument({
+    title: share.reportName || FALLBACK_REPORT_TITLE,
+    subtitle: share.clientName ?? "",
+    sections: Array.isArray(payload) ? payload : [],
+  }));
+}
+
+/**
+ * Rebuild one shared document into PDF bytes for the merged bundle.
+ *
+ * A share with nothing to rebuild from -- or one whose rebuild fails -- falls
+ * back to fetching the static asset it points at, so an older share still
+ * contributes its pages to the merge instead of dropping out of it.
+ * @param {Object} share - A public share document.
+ * @returns {Promise<Uint8Array>} The document's PDF bytes.
+ */
+async function sharedDocumentBytes(share) {
+  const rebuilt = rebuildDocument(share);
+  if (rebuilt) {
+    try {
+      return await rebuilt;
+    } catch (error) {
+      logDocumentRebuildFailure(error);
+    }
+  }
+
+  const response = await fetch(safePdfUrl(share?.pdfUrl));
+  if (!response.ok) {
+    throw new Error(`Could not read the shared document (${response.status}).`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 /**
@@ -259,7 +289,6 @@ function setStatus(message, title) {
   }
   status.hidden = !message;
   reportPanel.hidden = true;
-  bundlePanel.hidden = true;
 }
 
 async function renderSharedReport(share) {
@@ -289,52 +318,124 @@ async function renderSharedReport(share) {
   reportPanel.hidden = false;
 }
 
-// Build each grouped report entry with DOM APIs (not innerHTML) so report
-// names and file names from the share document can never inject markup.
-async function bundleReportItem(report) {
-  const item = document.createElement("li");
-  item.className = "bundle-report";
-
-  const head = document.createElement("div");
-  head.className = "report-card-head";
-  const title = document.createElement("strong");
-  title.textContent = report.reportName || "Untitled report";
-  const statusLabel = document.createElement("span");
-  statusLabel.className = "report-status";
-  statusLabel.textContent = formatShareStatus(report.status).label;
-  head.append(title, statusLabel);
-  item.append(head);
-
-  if (report.sourceFileName) {
-    const source = document.createElement("p");
-    source.className = "report-source";
-    source.textContent = `Source: ${report.sourceFileName}`;
-    item.append(source);
+/**
+ * The document kind and sampling date a share carries, for ordering.
+ *
+ * Read back off the published payload, which is the same data the workspace
+ * planned the export from, so a link orders its pages exactly as the
+ * downloaded export does.
+ * @param {Object} share - A public share document.
+ * @returns {{kind: string, samplingDate: string}} Sort inputs for one share.
+ */
+function shareSortKey(share) {
+  try {
+    const payload = JSON.parse(share?.documentData ?? "null");
+    if (payload?.renderer === "summary" || share?.documentSlug === "Summary") {
+      return { kind: "summary", samplingDate: "" };
+    }
+    return {
+      kind: "report",
+      samplingDate: payload?.report?.cover?.samplingDate ?? "",
+    };
+  } catch {
+    // An unreadable payload still belongs in the merge; it just cannot say
+    // where, so it takes a report's place with no date and sorts last.
+    return { kind: "report", samplingDate: "" };
   }
-
-  const anchor = document.createElement("a");
-  anchor.className = "google-button share-pdf-button";
-  anchor.href = await Promise.resolve(resolveDocumentUrl(report));
-  anchor.target = "_blank";
-  anchor.rel = "noopener";
-  anchor.textContent = "View document";
-  item.append(anchor);
-
-  return item;
 }
 
+/**
+ * Order a bundle's shares the way the workspace orders its export: the
+ * Summary first, then the test reports oldest sampling date first.
+ * @param {Array<Object>} shares - The bundle's resolved share documents.
+ * @returns {Array<Object>} A new list in merge order.
+ */
+export function bundleOrder(shares) {
+  const keyed = shares.map((share) => ({ share, ...shareSortKey(share) }));
+  return keyed
+    .sort((left, right) => {
+      if (left.kind !== right.kind) return left.kind === "summary" ? -1 : 1;
+      const leftDate = samplingOrder(left.samplingDate);
+      const rightDate = samplingOrder(right.samplingDate);
+      if (leftDate === rightDate) return 0;
+      return leftDate < rightDate ? -1 : 1;
+    })
+    .map((entry) => entry.share);
+}
+
+/**
+ * Convert a cover sheet's sampling date into a sortable number.
+ *
+ * Mirrors the workspace's own rule: day-first `dd/mm/yyyy` and ISO
+ * `yyyy-mm-dd` parse; anything else sorts last rather than being guessed at.
+ * @param {string} value - The sampling date.
+ * @returns {number} A comparable `yyyymmdd` number, or Infinity when unparsed.
+ */
+export function samplingOrder(value) {
+  const text = String(value ?? "").trim();
+  const dayFirst = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(text);
+  if (dayFirst) {
+    const [, day, month, year] = dayFirst;
+    return Number(year) * 10000 + Number(month) * 100 + Number(day);
+  }
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+  if (iso) {
+    const [, year, month, day] = iso;
+    return Number(year) * 10000 + Number(month) * 100 + Number(day);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Render a package link as one merged PDF rather than a list of links.
+ *
+ * A recipient asked for one document, so every share in the bundle is rebuilt
+ * and merged into a single PDF shown in the ordinary report panel. A share
+ * that cannot be rebuilt at all is left out rather than failing the link.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<void>} Settles once the panel has rendered.
+ */
 async function renderSharedBundle(sharedBundle) {
-  bundleName.textContent = sharedBundle.bundleName || "Shared reports";
-  bundleCount.textContent = `${sharedBundle.reports.length} ${
-    sharedBundle.reports.length === 1 ? "document" : "documents"
-  }`;
-  bundlePublished.textContent = sharedBundle.publishedAt
+  const ordered = bundleOrder(sharedBundle.reports);
+  const rendered = [];
+  for (const share of ordered) {
+    try {
+      rendered.push(await sharedDocumentBytes(share));
+    } catch (error) {
+      logDocumentRebuildFailure(error);
+    }
+  }
+
+  if (rendered.length === 0) {
+    setStatus(
+      "This package link could not be rebuilt. Ask the sender for a new link.",
+      "Package unavailable",
+    );
+    return;
+  }
+
+  const merged = await globalThis.docuAlignPdfMerge.mergePdfs(rendered);
+  const pdfUrl = URL.createObjectURL(new Blob([merged], { type: "application/pdf" }));
+
+  reportTitle.textContent = sharedBundle.bundleName || "Shared reports";
+  const documentCount = `${rendered.length} ${
+    rendered.length === 1 ? "document" : "documents"
+  } in one PDF`;
+  reportSubtitle.textContent = documentCount;
+  reportSubtitle.hidden = false;
+  reportReference.textContent = documentCount;
+  renderStatusLine(reportStatus, "complete");
+  reportSourceDetails.hidden = true;
+  reportPublished.textContent = sharedBundle.publishedAt
     ? dateFormatter.format(sharedBundle.publishedAt)
     : "Date unavailable";
-  const reportItems = await Promise.all(sharedBundle.reports.map(bundleReportItem));
-  bundleList.replaceChildren(...reportItems);
+  pdfLink.setAttribute("href", pdfUrl);
+  downloadLink.setAttribute("href", pdfUrl);
+  previewOverlay.setAttribute("href", pdfUrl);
+  previewFrame.setAttribute("src", `${pdfUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`);
+  loadPdfDetails(pdfUrl);
   setStatus("");
-  bundlePanel.hidden = false;
+  reportPanel.hidden = false;
 }
 
 /**

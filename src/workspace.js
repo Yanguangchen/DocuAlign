@@ -624,27 +624,24 @@ function exportOrder(documents) {
  * @returns {Promise<{bytes: Uint8Array, included: number, failed: string[]}>} The merged PDF.
  */
 async function buildExportPdf(documents) {
-  const pdfLib = globalThis.PDFLib;
-  if (!pdfLib) throw new Error("The PDF library is unavailable.");
-
-  const merged = await pdfLib.PDFDocument.create();
+  const rendered = [];
   const failed = [];
-  let included = 0;
 
   for (const plan of exportOrder(documents)) {
     try {
-      const source = await pdfLib.PDFDocument.load(await documentBytes(plan));
-      const pages = await merged.copyPages(source, source.getPageIndices());
-      pages.forEach((page) => merged.addPage(page));
-      included += 1;
+      rendered.push(await documentBytes(plan));
     } catch (error) {
       logDocumentFailure(plan, error);
       failed.push(plan.title);
     }
   }
 
-  if (included === 0) throw new Error("No document could be generated.");
-  return { bytes: await merged.save(), included, failed };
+  if (rendered.length === 0) throw new Error("No document could be generated.");
+  return {
+    bytes: await globalThis.docuAlignPdfMerge.mergePdfs(rendered),
+    included: rendered.length,
+    failed,
+  };
 }
 
 /**
