@@ -15,7 +15,7 @@ const classicScripts = [
   "summary-pdf.js",
   "report-mapping.js",
   "rak-report-pdf.js",
-  "pdf-merge.js",
+  "zip-writer.js",
   "workspace.js",
 ];
 
