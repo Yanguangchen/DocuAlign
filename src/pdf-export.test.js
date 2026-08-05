@@ -74,13 +74,14 @@ describe("PDF export", () => {
     expect(workspaceSource).toContain('download.download = `${baseName}.zip`');
     expect(workspaceSource).toContain("DOCUMENT_KIND_ORDER");
     expect(workspaceSource).toContain("exportOrder(documents)");
-    // The public share viewer offers the same one-action download.
-    expect(viewReportSource).toContain("docuAlignZip.createArchive");
-    expect(viewReportSource).toContain('download.download = `${folderName}.zip`');
     expect(indexSource).toContain('src="./src/zip-writer.js"');
-    expect(viewSource).toContain('src="./src/zip-writer.js"');
     expect(viteConfigSource).toContain('"zip-writer.js"');
     expect(zipWriterSource).not.toMatch(/^\s*(import|export)\s/m);
+    // The public share viewer's one button saves each document as its own
+    // file, so it bundles nothing at all -- not even into an archive.
+    expect(viewReportSource).toContain("downloadEveryDocument");
+    expect(viewReportSource).not.toContain("docuAlignZip");
+    expect(viewSource).not.toContain("zip-writer.js");
     // Nothing merges documents into a single PDF any more.
     expect(existsSync(resolve(projectRoot, "src/pdf-merge.js"))).toBe(false);
     expect(workspaceSource).not.toContain("docuAlignPdfMerge");

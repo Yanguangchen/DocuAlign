@@ -47,6 +47,12 @@ const bundleDownloadNote = document.querySelector("#share-bundle-download-note")
 
 /** Grace period before a download's object URL is released. */
 const REVOKE_DELAY_MS = 60000;
+
+/**
+ * Gap between the downloads the "download all" button starts. Browsers
+ * throttle a burst of programmatic downloads, so they are spaced out.
+ */
+const DOWNLOAD_INTERVAL_MS = 350;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -398,11 +404,10 @@ export function samplingOrder(value) {
 }
 
 /**
- * A file name for one document inside the package archive.
+ * The file name one document downloads as.
  *
- * Numbered by position so the archive unpacks in the order the package lists
- * its documents, and sanitised because the name comes from staff-entered
- * report titles.
+ * Numbered by position so the saved files sort in the order the package lists
+ * them, and sanitised because the name comes from staff-entered report titles.
  * @param {Object} share - A public share document.
  * @param {number} index - Zero-based position in the package.
  * @returns {string} A safe `NN-name.pdf` file name.
@@ -414,46 +419,60 @@ function packageEntryName(share, index) {
 }
 
 /**
- * Download every document in the package as one archive.
- *
- * The documents stay separate files -- the archive is only a wrapper so the
- * recipient takes one action instead of clicking through every card, and so
- * the browser prompts at most once rather than throttling a burst of
- * downloads. A document that cannot be rebuilt is left out and named in the
- * button's status line rather than failing the whole download.
- * @param {Object} sharedBundle - The resolved bundle.
- * @param {string} folderName - Archive folder the entries are named into.
- * @returns {Promise<{failed: string[]}>} Which documents were left out.
+ * Save one rebuilt document as its own file.
+ * @param {Uint8Array} bytes - The document's PDF bytes.
+ * @param {string} name - File name to save it under.
+ * @returns {void}
  */
-async function downloadPackageArchive(sharedBundle, folderName) {
-  const entries = [];
+function saveDocument(bytes, name) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const download = document.createElement("a");
+  download.href = url;
+  download.download = name;
+  download.rel = "noopener";
+  document.body.appendChild(download);
+  download.click();
+  download.remove();
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+}
+
+/**
+ * Download every document in the package, each as its own PDF.
+ *
+ * One button, one file per document -- nothing is bundled or merged. The
+ * downloads are spaced out because browsers throttle a burst of programmatic
+ * downloads, and a document that cannot be rebuilt is skipped and named in
+ * the button's status line rather than failing the rest.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<{saved: number, failed: string[]}>} What was downloaded.
+ */
+async function downloadEveryDocument(sharedBundle) {
   const failed = [];
+  let saved = 0;
 
   for (const [index, share] of bundleOrder(sharedBundle.reports).entries()) {
     try {
-      entries.push({
-        name: `${folderName}/${packageEntryName(share, index)}`,
-        data: await sharedDocumentBytes(share),
-      });
+      const bytes = await sharedDocumentBytes(share);
+      if (saved > 0) await pause(DOWNLOAD_INTERVAL_MS);
+      saveDocument(bytes, packageEntryName(share, index));
+      saved += 1;
     } catch (error) {
       logDocumentRebuildFailure(error);
       failed.push(share?.reportName || "Untitled report");
     }
   }
 
-  if (entries.length === 0) throw new Error("No document in this package could be rebuilt.");
+  if (saved === 0) throw new Error("No document in this package could be rebuilt.");
+  return { saved, failed };
+}
 
-  const archive = globalThis.docuAlignZip.createArchive(entries);
-  const url = URL.createObjectURL(new Blob([archive], { type: "application/zip" }));
-  const download = document.createElement("a");
-  download.href = url;
-  download.download = `${folderName}.zip`;
-  download.rel = "noopener";
-  document.body.appendChild(download);
-  download.click();
-  download.remove();
-  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
-  return { failed };
+/**
+ * Wait before starting the next download.
+ * @param {number} ms - Delay in milliseconds.
+ * @returns {Promise<void>} Settles once the delay has elapsed.
+ */
+function pause(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Build each grouped report entry with DOM APIs (not innerHTML) so report
@@ -492,7 +511,7 @@ async function bundleReportItem(report) {
 
 /**
  * Render a package link: every document listed separately, plus one button
- * that downloads all of them together.
+ * that downloads all of them, each as its own file.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<void>} Settles once the panel has rendered.
  */
@@ -508,49 +527,34 @@ async function renderSharedBundle(sharedBundle) {
   const reportItems = await Promise.all(ordered.map(bundleReportItem));
   bundleList.replaceChildren(...reportItems);
 
-  const folderName = packageFolderName(sharedBundle);
   bundleDownloadNote.textContent = "";
   bundleDownloadNote.hidden = true;
   bundleDownload.disabled = false;
   bundleDownload.textContent = `Download all ${ordered.length} documents`;
-  bundleDownload.onclick = () => downloadAllDocuments(sharedBundle, folderName);
+  bundleDownload.onclick = () => downloadAllDocuments(sharedBundle);
 
   setStatus("");
   bundlePanel.hidden = false;
 }
 
 /**
- * A safe archive folder name derived from the package's own title.
+ * Drive the download-all button: disable it while the documents are prepared,
+ * then report how many were saved and anything that could not be.
  * @param {Object} sharedBundle - The resolved bundle.
- * @returns {string} A file-safe folder name.
+ * @returns {Promise<void>} Settles once every download has been offered.
  */
-function packageFolderName(sharedBundle) {
-  const safe = String(sharedBundle?.bundleName ?? "")
-    .trim()
-    .replace(/[^\w.-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-  return safe || "shared-reports";
-}
-
-/**
- * Drive the download-all button: disable it for the build's duration, then
- * report anything that could not be included.
- * @param {Object} sharedBundle - The resolved bundle.
- * @param {string} folderName - Archive folder the entries are named into.
- * @returns {Promise<void>} Settles once the download has been offered.
- */
-async function downloadAllDocuments(sharedBundle, folderName) {
+async function downloadAllDocuments(sharedBundle) {
   const label = bundleDownload.textContent;
   bundleDownload.disabled = true;
-  bundleDownload.textContent = "Preparing download…";
+  bundleDownload.textContent = "Preparing downloads…";
   bundleDownloadNote.hidden = true;
 
   try {
-    const { failed } = await downloadPackageArchive(sharedBundle, folderName);
+    const { saved, failed } = await downloadEveryDocument(sharedBundle);
+    const savedCount = `${saved} ${saved === 1 ? "document" : "documents"}`;
     bundleDownloadNote.textContent = failed.length === 0
-      ? `Downloaded ${folderName}.zip.`
-      : `Downloaded ${folderName}.zip; could not include ${failed.join(", ")}.`;
+      ? `Downloaded ${savedCount}. Allow multiple downloads if your browser asks.`
+      : `Downloaded ${savedCount}; could not prepare ${failed.join(", ")}.`;
   } catch (error) {
     logDocumentRebuildFailure(error);
     bundleDownloadNote.textContent =

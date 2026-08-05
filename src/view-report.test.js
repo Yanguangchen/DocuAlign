@@ -649,18 +649,16 @@ describe("view-report module", () => {
     });
 
     /**
-     * Prepare a package test: the archive runtime, a capturing
-     * createObjectURL, and a `fetch` that answers with a real PDF for
-     * asset-backed shares.
+     * Prepare a package test: a capturing createObjectURL and a `fetch` that
+     * answers with a real PDF for asset-backed shares.
      * @returns {Promise<{blobs: Blob[]}>} Blobs handed to createObjectURL.
      */
     async function stubPackageRuntime() {
-      await import("./zip-writer.js");
       const blobs = [];
       vi.stubGlobal("URL", Object.assign(globalThis.URL, {
         createObjectURL: vi.fn((blob) => {
           blobs.push(blob);
-          return "blob:packaged";
+          return `blob:doc-${blobs.length}`;
         }),
         revokeObjectURL: vi.fn(),
       }));
@@ -674,32 +672,23 @@ describe("view-report module", () => {
     }
 
     /**
-     * Read back the stored entries of the archive the download-all button
-     * produced, each still its own PDF.
+     * What the download-all button actually saved: one entry per download,
+     * each its own PDF, in the order the downloads were started.
      * @param {Blob[]} blobs - Blobs captured from createObjectURL.
-     * @returns {Promise<Array<{name: string, marker: number}>>} Entries in order.
+     * @param {Object} anchorClick - The anchor click spy.
+     * @returns {Promise<Array<{name: string, marker: number}>>} Saved files.
      */
-    async function packagedEntries(blobs) {
-      const bytes = new Uint8Array(await blobs.at(-1).arrayBuffer());
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      const decoder = new TextDecoder();
-      const entries = [];
-      let offset = 0;
-      while (view.getUint32(offset, true) === 0x04034b50) {
-        const nameLength = view.getUint16(offset + 26, true);
-        const dataLength = view.getUint32(offset + 22, true);
-        const nameStart = offset + 30;
-        const dataStart = nameStart + nameLength;
-        const pdf = await PDFLib.PDFDocument.load(
-          bytes.subarray(dataStart, dataStart + dataLength),
-        );
-        entries.push({
-          name: decoder.decode(bytes.subarray(nameStart, dataStart)),
+    async function savedDocuments(blobs, anchorClick) {
+      // The listing renders one blob per card before any download starts, so
+      // only the trailing blobs -- one per click -- are the saved files.
+      const saved = blobs.slice(blobs.length - anchorClick.mock.contexts.length);
+      return Promise.all(saved.map(async (blob, index) => {
+        const pdf = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+        return {
+          name: anchorClick.mock.contexts.at(index).download,
           marker: Math.round(pdf.getPage(0).getWidth()),
-        });
-        offset = dataStart + dataLength;
-      }
-      return entries;
+        };
+      }));
     }
 
     const ASSET_MARKER = 700;
@@ -757,13 +746,12 @@ describe("view-report module", () => {
         "Report 602",
       ]);
       expect(items[1].textContent).toContain("601.xlsx");
-      const links = document.querySelectorAll("#share-bundle-list a");
-      expect(links[0].getAttribute("href")).toBe("blob:packaged");
-      expect(links[0].getAttribute("rel")).toBe("noopener");
+      expect(document.querySelectorAll("#share-bundle-list a")[0].getAttribute("rel"))
+        .toBe("noopener");
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("downloads every packaged document as one archive from a single button", async () => {
+    it("downloads every packaged document as its own file from a single button", async () => {
       const { blobs } = await stubPackageRuntime();
       globalThis.docuAlignRakReportPdf = {
         createRakReportPdf: vi.fn(async ([report]) => new Blob(
@@ -805,22 +793,24 @@ describe("view-report module", () => {
       expect(button.disabled).toBe(false);
 
       button.click();
-      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(3), { timeout: 5000 });
 
-      // One download, and every document still its own file inside it.
-      expect(anchorClick.mock.contexts[0].download).toBe("Customer-pack.zip");
-      expect(await packagedEntries(blobs)).toEqual([
-        { name: "Customer-pack/01-Summary.pdf", marker: 500 },
-        { name: "Customer-pack/02-Test-Report-X-1.pdf", marker: 601 },
-        { name: "Customer-pack/03-Legacy-report.pdf", marker: ASSET_MARKER },
+      // Three downloads, each its own PDF -- nothing bundled or merged.
+      expect(await savedDocuments(blobs, anchorClick)).toEqual([
+        { name: "01-Summary.pdf", marker: 500 },
+        { name: "02-Test-Report-X-1.pdf", marker: 601 },
+        { name: "03-Legacy-report.pdf", marker: ASSET_MARKER },
       ]);
-      expect(document.querySelector("#share-bundle-download-note").textContent)
-        .toBe("Downloaded Customer-pack.zip.");
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "Downloaded 3 documents. Allow multiple downloads if your browser asks.",
+        ),
+      );
       expect(button.disabled).toBe(false);
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("names what it could not include rather than failing the whole download", async () => {
+    it("names what it could not prepare rather than failing the other downloads", async () => {
       const { blobs } = await stubPackageRuntime();
       globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
       globalThis.docuAlignRakReportPdf = {
@@ -833,7 +823,6 @@ describe("view-report module", () => {
       // The failing report has no asset to fall back to either.
       fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
-        bundleName: null,
         reports: [
           {
             reportId: "doc-r",
@@ -858,12 +847,14 @@ describe("view-report module", () => {
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
 
       // The Summary is still delivered; the failure is named, not swallowed.
-      expect(anchorClick.mock.contexts[0].download).toBe("shared-reports.zip");
-      expect(await packagedEntries(blobs)).toEqual([
-        { name: "shared-reports/01-Summary.pdf", marker: 500 },
+      expect(await savedDocuments(blobs, anchorClick)).toEqual([
+        { name: "01-Summary.pdf", marker: 500 },
       ]);
-      expect(document.querySelector("#share-bundle-download-note").textContent)
-        .toBe("Downloaded shared-reports.zip; could not include Broken report.");
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "Downloaded 1 document; could not prepare Broken report.",
+        ),
+      );
       delete globalThis.docuAlignRakReportPdf;
     });
 
@@ -872,7 +863,6 @@ describe("view-report module", () => {
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
-        bundleName: "***",
         reports: [
           { reportId: "doc-1", reportName: "***", status: null, pdfUrl: null },
           { reportId: "doc-2", reportName: null, status: null, pdfUrl: null },
@@ -882,17 +872,16 @@ describe("view-report module", () => {
       await initViewer(`?bundle=${VALID_TOKEN}`);
 
       document.querySelector("#share-bundle-download").click();
-      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(2), { timeout: 5000 });
 
-      // Numbered, so two unnameable documents still land as separate files.
-      expect(anchorClick.mock.contexts[0].download).toBe("shared-reports.zip");
-      expect((await packagedEntries(blobs)).map((entry) => entry.name)).toEqual([
-        "shared-reports/01-document.pdf",
-        "shared-reports/02-document.pdf",
+      // Numbered, so two unnameable documents still save as separate files.
+      expect((await savedDocuments(blobs, anchorClick)).map((entry) => entry.name)).toEqual([
+        "01-document.pdf",
+        "02-document.pdf",
       ]);
     });
 
-    it("releases the package archive's object URL after the grace period", async () => {
+    it("releases each download's object URL after the grace period", async () => {
       await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
@@ -913,7 +902,7 @@ describe("view-report module", () => {
 
         // Held long enough for the browser to take the download, then released.
         await vi.advanceTimersByTimeAsync(60000);
-        expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:packaged");
+        expect(URL.revokeObjectURL).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
@@ -995,8 +984,8 @@ describe("view-report module", () => {
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce());
 
       expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalled();
-      expect(await packagedEntries(blobs)).toEqual([
-        { name: "Customer-pack/01-Summary.pdf", marker: 500 },
+      expect(await savedDocuments(blobs, anchorClick)).toEqual([
+        { name: "01-Summary.pdf", marker: 500 },
       ]);
     });
 

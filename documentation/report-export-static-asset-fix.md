@@ -321,9 +321,11 @@ which will approach that 25-document ceiling.
 
 ## 12. One download, documents kept separate
 
-The client wants one action, not one file: the export delivers a ZIP holding
-each document as its own PDF, and a public package link offers the same thing
-behind a single button. A merged single-PDF version of this was built and then
+The client wants one action, not one file. The export delivers a ZIP holding
+each document as its own PDF — the archive is only a wrapper so there is a
+single download. A public package link goes further and keeps the files
+genuinely separate: one button saves every document individually, with no
+container at all. A merged single-PDF version of this was built and then
 reverted (`Merge every exported document into one PDF`, `Serve a public
 package link as one merged PDF`) — if it is ever wanted again, `src/pdf-merge.js`
 and its tests are recoverable from those commits.
@@ -352,12 +354,20 @@ export, and the feedback line names it.
 
 A package link lists every document as its own card, in that same order, and
 adds one **Download all N documents** button above the list.
-`downloadPackageArchive()` rebuilds each share and packs them into a single
-ZIP; entries are numbered (`01-Summary.pdf`, `02-Test-Report-X-1.pdf`) so the
-archive unpacks in package order, and names are sanitised because they come
-from staff-entered report titles. A document that cannot be rebuilt is left
-out and named in the button's status line; only when every document fails does
-the button report that nothing could be prepared.
+
+`downloadEveryDocument()` rebuilds each share and saves it as its own file —
+nothing is bundled, not even into an archive. The saved names are numbered
+(`01-Summary.pdf`, `02-Test-Report-X-1.pdf`) so the files sort in package
+order, and sanitised because they come from staff-entered report titles. A
+document that cannot be rebuilt is skipped and named in the button's status
+line; only when every document fails does the button report that nothing could
+be prepared.
+
+Browsers throttle a burst of programmatic downloads and prompt before allowing
+several, so the downloads are spaced by `DOWNLOAD_INTERVAL_MS` (350ms) and the
+success line tells the recipient to allow multiple downloads if asked. That
+prompt is the accepted cost of keeping the files separate; wrapping them in a
+ZIP would avoid it, and was tried and rejected.
 
 Rebuilding is split so both paths reuse it: `rebuildDocument()` returns bytes
 or `null`, `resolveDocumentUrl()` wraps that into a blob URL for one card, and
@@ -370,15 +380,20 @@ for every rebuilt document, where the generic worksheet path used to return a
 string synchronously. Both call sites already wrapped it in `Promise.resolve`,
 so this is invisible at runtime, but tests calling it directly must await it.
 
-### Testing an archive
+### Testing separate documents
 
-Entries are real PDFs, so a test can tell them apart by giving each stubbed
-renderer a unique page **width** and reading the widths back off the unpacked
-entries. Two things this forced:
+Every delivered file is a real PDF, so a test tells them apart by giving each
+stubbed renderer a unique page **width** and reading the widths back. In the
+export they come off the unpacked archive entries; on the share page they come
+off the blobs `URL.createObjectURL` was handed, paired with each anchor's
+`download` name. Three things this forced:
 
 - Renderer stubs must return **real** PDFs. Older stubs returned the four
   bytes `%PDF`, which a ZIP happily stores but pdf-lib rightly refuses.
-- A test that waits for a build to finish should wait on the archive being
+- A test that waits for the export to finish should wait on the archive being
   packed (`docuAlignZip.createArchive`), not on the `fetch` that starts it —
   the rendering in between is several microtasks long. The zip writer's API is
   frozen, so wrap it rather than spying on it in place.
+- The share page's listing creates one blob per card before any download
+  starts, so a test must take the *trailing* blobs — one per anchor click — as
+  the saved files.
