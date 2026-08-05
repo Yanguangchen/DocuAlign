@@ -14,7 +14,7 @@ const projectRoot = resolve(".");
 const workspaceSource = readFileSync(resolve(projectRoot, "src/workspace.js"), "utf8");
 const rakReportSource = readFileSync(resolve(projectRoot, "src/rak-report-pdf.js"), "utf8");
 const mappingSource = readFileSync(resolve(projectRoot, "src/report-mapping.js"), "utf8");
-const pdfMergeSource = readFileSync(resolve(projectRoot, "src/pdf-merge.js"), "utf8");
+const zipWriterSource = readFileSync(resolve(projectRoot, "src/zip-writer.js"), "utf8");
 const viewReportSource = readFileSync(resolve(projectRoot, "src/view-report.js"), "utf8");
 const indexSource = readFileSync(resolve(projectRoot, "index.html"), "utf8");
 const viewSource = readFileSync(resolve(projectRoot, "view.html"), "utf8");
@@ -66,25 +66,26 @@ describe("PDF export", () => {
     });
   });
 
-  it("exports every document merged into one PDF, in the client's order", () => {
-    // The export delivers a single PDF: the Summary first, then the test
-    // reports in sampling-date order. Pages are copied from each rendered
-    // document rather than re-laid-out, so every approved layout survives.
-    expect(workspaceSource).toContain("docuAlignPdfMerge.mergePdfs");
-    expect(workspaceSource).toContain('download.download = `${baseName}.pdf`');
+  it("keeps every document its own PDF, bundled into one archive to download", () => {
+    // Documents stay separate files. The archive is only a wrapper so there is
+    // one download and one browser prompt, in the Summary-first, then
+    // sampling-date order DOCUMENT_KIND_ORDER and exportOrder decide.
+    expect(workspaceSource).toContain("docuAlignZip.createArchive");
+    expect(workspaceSource).toContain('download.download = `${baseName}.zip`');
     expect(workspaceSource).toContain("DOCUMENT_KIND_ORDER");
-    // The share viewer delivers one document too, and merges it the same way.
-    expect(viewReportSource).toContain("docuAlignPdfMerge.mergePdfs");
-    expect(pdfMergeSource).toContain("copyPages");
-    expect(pdfMergeSource).not.toMatch(/^\s*(import|export)\s/m);
-    expect(indexSource).toContain('src="./src/pdf-merge.js"');
-    expect(viewSource).toContain('src="./src/pdf-merge.js"');
-    expect(viteConfigSource).toContain('"pdf-merge.js"');
-    // The ZIP writer the export used before has no caller left.
-    expect(existsSync(resolve(projectRoot, "src/zip-writer.js"))).toBe(false);
-    expect(workspaceSource).not.toContain("docuAlignZip");
-    expect(indexSource).not.toContain("zip-writer.js");
-    expect(viteConfigSource).not.toContain("zip-writer.js");
+    expect(workspaceSource).toContain("exportOrder(documents)");
+    expect(indexSource).toContain('src="./src/zip-writer.js"');
+    expect(viteConfigSource).toContain('"zip-writer.js"');
+    expect(zipWriterSource).not.toMatch(/^\s*(import|export)\s/m);
+    // The public share viewer's one button saves each document as its own
+    // file, so it bundles nothing at all -- not even into an archive.
+    expect(viewReportSource).toContain("downloadEveryDocument");
+    expect(viewReportSource).not.toContain("docuAlignZip");
+    expect(viewSource).not.toContain("zip-writer.js");
+    // Nothing merges documents into a single PDF any more.
+    expect(existsSync(resolve(projectRoot, "src/pdf-merge.js"))).toBe(false);
+    expect(workspaceSource).not.toContain("docuAlignPdfMerge");
+    expect(viewReportSource).not.toContain("docuAlignPdfMerge");
   });
 
   it.each([...REFERENCE_ASSETS.keys()])(

@@ -37,6 +37,22 @@ const previewCaption = document.querySelector("#share-preview-caption");
 
 // Shown when the share document carries no extracted title of its own.
 const FALLBACK_REPORT_TITLE = "RAK Concrete Test Report";
+const bundlePanel = document.querySelector("#share-bundle");
+const bundleName = document.querySelector("#share-bundle-name");
+const bundleCount = document.querySelector("#share-bundle-count");
+const bundlePublished = document.querySelector("#share-bundle-published");
+const bundleList = document.querySelector("#share-bundle-list");
+const bundleDownload = document.querySelector("#share-bundle-download");
+const bundleDownloadNote = document.querySelector("#share-bundle-download-note");
+
+/** Grace period before a download's object URL is released. */
+const REVOKE_DELAY_MS = 60000;
+
+/**
+ * Gap between the downloads the "download all" button starts. Browsers
+ * throttle a burst of programmatic downloads, so they are spaced out.
+ */
+const DOWNLOAD_INTERVAL_MS = 350;
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -289,6 +305,7 @@ function setStatus(message, title) {
   }
   status.hidden = !message;
   reportPanel.hidden = true;
+  bundlePanel.hidden = true;
 }
 
 async function renderSharedReport(share) {
@@ -338,7 +355,7 @@ function shareSortKey(share) {
       samplingDate: payload?.report?.cover?.samplingDate ?? "",
     };
   } catch {
-    // An unreadable payload still belongs in the merge; it just cannot say
+    // An unreadable payload still belongs in the package; it just cannot say
     // where, so it takes a report's place with no date and sorts last.
     return { kind: "report", samplingDate: "" };
   }
@@ -348,7 +365,7 @@ function shareSortKey(share) {
  * Order a bundle's shares the way the workspace orders its export: the
  * Summary first, then the test reports oldest sampling date first.
  * @param {Array<Object>} shares - The bundle's resolved share documents.
- * @returns {Array<Object>} A new list in merge order.
+ * @returns {Array<Object>} A new list in the order the package lists them.
  */
 export function bundleOrder(shares) {
   const keyed = shares.map((share) => ({ share, ...shareSortKey(share) }));
@@ -387,55 +404,166 @@ export function samplingOrder(value) {
 }
 
 /**
- * Render a package link as one merged PDF rather than a list of links.
+ * The file name one document downloads as.
  *
- * A recipient asked for one document, so every share in the bundle is rebuilt
- * and merged into a single PDF shown in the ordinary report panel. A share
- * that cannot be rebuilt at all is left out rather than failing the link.
+ * Numbered by position so the saved files sort in the order the package lists
+ * them, and sanitised because the name comes from staff-entered report titles.
+ * @param {Object} share - A public share document.
+ * @param {number} index - Zero-based position in the package.
+ * @returns {string} A safe `NN-name.pdf` file name.
+ */
+function packageEntryName(share, index) {
+  const label = String(share?.reportName ?? "").trim() || "document";
+  const safe = label.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return `${String(index + 1).padStart(2, "0")}-${safe || "document"}.pdf`;
+}
+
+/**
+ * Save one rebuilt document as its own file.
+ * @param {Uint8Array} bytes - The document's PDF bytes.
+ * @param {string} name - File name to save it under.
+ * @returns {void}
+ */
+function saveDocument(bytes, name) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const download = document.createElement("a");
+  download.href = url;
+  download.download = name;
+  download.rel = "noopener";
+  document.body.appendChild(download);
+  download.click();
+  download.remove();
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+}
+
+/**
+ * Download every document in the package, each as its own PDF.
+ *
+ * One button, one file per document -- nothing is bundled or merged. The
+ * downloads are spaced out because browsers throttle a burst of programmatic
+ * downloads, and a document that cannot be rebuilt is skipped and named in
+ * the button's status line rather than failing the rest.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<{saved: number, failed: string[]}>} What was downloaded.
+ */
+async function downloadEveryDocument(sharedBundle) {
+  const failed = [];
+  let saved = 0;
+
+  for (const [index, share] of bundleOrder(sharedBundle.reports).entries()) {
+    try {
+      const bytes = await sharedDocumentBytes(share);
+      if (saved > 0) await pause(DOWNLOAD_INTERVAL_MS);
+      saveDocument(bytes, packageEntryName(share, index));
+      saved += 1;
+    } catch (error) {
+      logDocumentRebuildFailure(error);
+      failed.push(share?.reportName || "Untitled report");
+    }
+  }
+
+  if (saved === 0) throw new Error("No document in this package could be rebuilt.");
+  return { saved, failed };
+}
+
+/**
+ * Wait before starting the next download.
+ * @param {number} ms - Delay in milliseconds.
+ * @returns {Promise<void>} Settles once the delay has elapsed.
+ */
+function pause(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Build each grouped report entry with DOM APIs (not innerHTML) so report
+// names and file names from the share document can never inject markup.
+async function bundleReportItem(report) {
+  const item = document.createElement("li");
+  item.className = "bundle-report";
+
+  const head = document.createElement("div");
+  head.className = "report-card-head";
+  const title = document.createElement("strong");
+  title.textContent = report.reportName || "Untitled report";
+  const statusLabel = document.createElement("span");
+  statusLabel.className = "report-status";
+  statusLabel.textContent = formatShareStatus(report.status).label;
+  head.append(title, statusLabel);
+  item.append(head);
+
+  if (report.sourceFileName) {
+    const source = document.createElement("p");
+    source.className = "report-source";
+    source.textContent = `Source: ${report.sourceFileName}`;
+    item.append(source);
+  }
+
+  const anchor = document.createElement("a");
+  anchor.className = "google-button share-pdf-button";
+  anchor.href = await Promise.resolve(resolveDocumentUrl(report));
+  anchor.target = "_blank";
+  anchor.rel = "noopener";
+  anchor.textContent = "View document";
+  item.append(anchor);
+
+  return item;
+}
+
+/**
+ * Render a package link: every document listed separately, plus one button
+ * that downloads all of them, each as its own file.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<void>} Settles once the panel has rendered.
  */
 async function renderSharedBundle(sharedBundle) {
   const ordered = bundleOrder(sharedBundle.reports);
-  const rendered = [];
-  for (const share of ordered) {
-    try {
-      rendered.push(await sharedDocumentBytes(share));
-    } catch (error) {
-      logDocumentRebuildFailure(error);
-    }
-  }
-
-  if (rendered.length === 0) {
-    setStatus(
-      "This package link could not be rebuilt. Ask the sender for a new link.",
-      "Package unavailable",
-    );
-    return;
-  }
-
-  const merged = await globalThis.docuAlignPdfMerge.mergePdfs(rendered);
-  const pdfUrl = URL.createObjectURL(new Blob([merged], { type: "application/pdf" }));
-
-  reportTitle.textContent = sharedBundle.bundleName || "Shared reports";
-  const documentCount = `${rendered.length} ${
-    rendered.length === 1 ? "document" : "documents"
-  } in one PDF`;
-  reportSubtitle.textContent = documentCount;
-  reportSubtitle.hidden = false;
-  reportReference.textContent = documentCount;
-  renderStatusLine(reportStatus, "complete");
-  reportSourceDetails.hidden = true;
-  reportPublished.textContent = sharedBundle.publishedAt
+  bundleName.textContent = sharedBundle.bundleName || "Shared reports";
+  bundleCount.textContent = `${ordered.length} ${
+    ordered.length === 1 ? "document" : "documents"
+  }`;
+  bundlePublished.textContent = sharedBundle.publishedAt
     ? dateFormatter.format(sharedBundle.publishedAt)
     : "Date unavailable";
-  pdfLink.setAttribute("href", pdfUrl);
-  downloadLink.setAttribute("href", pdfUrl);
-  previewOverlay.setAttribute("href", pdfUrl);
-  previewFrame.setAttribute("src", `${pdfUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`);
-  loadPdfDetails(pdfUrl);
+  const reportItems = await Promise.all(ordered.map(bundleReportItem));
+  bundleList.replaceChildren(...reportItems);
+
+  bundleDownloadNote.textContent = "";
+  bundleDownloadNote.hidden = true;
+  bundleDownload.disabled = false;
+  bundleDownload.textContent = `Download all ${ordered.length} documents`;
+  bundleDownload.onclick = () => downloadAllDocuments(sharedBundle);
+
   setStatus("");
-  reportPanel.hidden = false;
+  bundlePanel.hidden = false;
+}
+
+/**
+ * Drive the download-all button: disable it while the documents are prepared,
+ * then report how many were saved and anything that could not be.
+ * @param {Object} sharedBundle - The resolved bundle.
+ * @returns {Promise<void>} Settles once every download has been offered.
+ */
+async function downloadAllDocuments(sharedBundle) {
+  const label = bundleDownload.textContent;
+  bundleDownload.disabled = true;
+  bundleDownload.textContent = "Preparing downloads…";
+  bundleDownloadNote.hidden = true;
+
+  try {
+    const { saved, failed } = await downloadEveryDocument(sharedBundle);
+    const savedCount = `${saved} ${saved === 1 ? "document" : "documents"}`;
+    bundleDownloadNote.textContent = failed.length === 0
+      ? `Downloaded ${savedCount}. Allow multiple downloads if your browser asks.`
+      : `Downloaded ${savedCount}; could not prepare ${failed.join(", ")}.`;
+  } catch (error) {
+    logDocumentRebuildFailure(error);
+    bundleDownloadNote.textContent =
+      "These documents could not be prepared. Ask the sender for a new link.";
+  } finally {
+    bundleDownloadNote.hidden = false;
+    bundleDownload.textContent = label;
+    bundleDownload.disabled = false;
+  }
 }
 
 /**

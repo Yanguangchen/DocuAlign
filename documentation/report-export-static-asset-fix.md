@@ -319,83 +319,81 @@ which will approach that 25-document ceiling.
   and loaded via `<script vite-ignore>` in both `index.html` and `view.html`
   — losing either is exactly how this regression happened the first time.
 
-## 12. One merged PDF instead of a ZIP
+## 12. One download, documents kept separate
 
-The client asked for a single deliverable: the Summary first, then the test
-reports in chronological order. The export no longer builds a ZIP of separate
-files; `buildExportPdf()` renders each planned document, loads it with
-pdf-lib, and copies its pages into one output document.
+The client wants one action, not one file. The export delivers a ZIP holding
+each document as its own PDF — the archive is only a wrapper so there is a
+single download. A public package link goes further and keeps the files
+genuinely separate: one button saves every document individually, with no
+container at all. A merged single-PDF version of this was built and then
+reverted (`Merge every exported document into one PDF`, `Serve a public
+package link as one merged PDF`) — if it is ever wanted again, `src/pdf-merge.js`
+and its tests are recoverable from those commits.
 
-Two decisions worth knowing about:
+### Ordering
 
-- **Pages are copied, never re-laid-out.** `copyPages` carries each source
-  page's own content stream, resources and size across unchanged, so every
-  layout this document spent so long getting right survives the merge intact.
-  The output mixes page sizes freely — the Summary is landscape A4 and the
-  reports are portrait — which is legal and what readers expect here.
-- **Ordering is fixed at parse time, not at click time.** Each report plan
-  carries the `samplingDate` its mapped model held, so `exportOrder()` sorts
-  the plan list the click handler captured rather than re-reading module
-  state that a reset could have changed mid-build.
+The ordering the merge introduced was kept, because it is worth having either
+way: `exportOrder()` sorts by document kind first (`DOCUMENT_KIND_ORDER`,
+which lists the two withheld kinds too so restoring them needs no change),
+then by sampling date. Each report plan carries the `samplingDate` its mapped
+model held, so the order is fixed when the workbook is parsed rather than
+re-derived from module state mid-build.
 
-`exportOrder()` sorts by document kind first (`DOCUMENT_KIND_ORDER`, which
-lists the two withheld kinds too so restoring them needs no change), then by
-sampling date. `samplingOrder()` accepts the workbook's day-first
-`dd/mm/yyyy` and ISO `yyyy-mm-dd`, and returns `Infinity` for anything else
-so an undated report sorts last rather than being guessed at. Two undated
-documents compare equal rather than being subtracted — `Infinity - Infinity`
-is `NaN`, which sorts unpredictably. Because `Array.prototype.sort` is
-stable, reports sharing a sampling date (the usual case: one vessel sampled
-across a day) keep the workbook's own order, which is the order the Summary
-table lists them in.
+`samplingOrder()` accepts the workbook's day-first `dd/mm/yyyy` and ISO
+`yyyy-mm-dd`, and returns `Infinity` for anything else so an undated document
+sorts last rather than being guessed at. Two undated documents compare equal
+rather than being subtracted — `Infinity - Infinity` is `NaN`, which sorts
+unpredictably. Because `Array.prototype.sort` is stable, reports sharing a
+sampling date (the usual case: one vessel sampled across a day) keep the
+workbook's own order, which is the order the Summary table lists them in.
 
-A document that fails to render is still skipped rather than failing the
-whole export, and the feedback line names it.
+A document that fails to render is skipped rather than failing the whole
+export, and the feedback line names it.
 
-`src/zip-writer.js` and its tests were removed with this change: the merged
-PDF was its only caller. It is recoverable from git history if a ZIP is ever
-wanted again.
+### The public link
 
-### The public link is one document too
+A package link lists every document as its own card, in that same order, and
+adds one **Download all N documents** button above the list.
 
-A package link used to render a list of "View document" buttons, one per
-share. It now merges the same way the export does and shows the result in the
-ordinary report panel — one preview, one download. `src/pdf-merge.js` is a
-classic script precisely so both callers share it: `workspace.js` is a classic
-script and `view-report.js` is an ES module, and neither can import the
-other's format.
+`downloadEveryDocument()` rebuilds each share and saves it as its own file —
+nothing is bundled, not even into an archive. The saved names are numbered
+(`01-Summary.pdf`, `02-Test-Report-X-1.pdf`) so the files sort in package
+order, and sanitised because they come from staff-entered report titles. A
+document that cannot be rebuilt is skipped and named in the button's status
+line; only when every document fails does the button report that nothing could
+be prepared.
 
-The viewer orders the merge from the published payload rather than from the
-bundle's own list order, so a link's pages come out in the same order the
-downloaded export would produce. `shareSortKey()` reads each share's
-`documentData`: `renderer: "summary"` (or the legacy `documentSlug` of
-`"Summary"`) puts it first, and a report contributes
-`report.cover.samplingDate`. `samplingOrder()` is the workspace's own rule,
-duplicated deliberately — `view-report.js` cannot import from a classic
-script, and moving it into `pdf-merge.js` would mix an ordering policy into a
-byte-level utility. The two are kept in step by tests on both sides.
+Browsers throttle a burst of programmatic downloads and prompt before allowing
+several, so the downloads are spaced by `DOWNLOAD_INTERVAL_MS` (350ms) and the
+success line tells the recipient to allow multiple downloads if asked. That
+prompt is the accepted cost of keeping the files separate; wrapping them in a
+ZIP would avoid it, and was tried and rejected.
 
-Rebuilding is split so both callers can reuse it: `rebuildDocument()` returns
-bytes or `null`, `resolveDocumentUrl()` wraps that into a blob URL for a
-single share, and `sharedDocumentBytes()` fetches the static asset when there
-is nothing to rebuild — so an older asset-backed share still contributes its
-pages to a package instead of dropping out of it. Only when *every* document
-fails does the viewer show a status message.
+Rebuilding is split so both paths reuse it: `rebuildDocument()` returns bytes
+or `null`, `resolveDocumentUrl()` wraps that into a blob URL for one card, and
+`sharedDocumentBytes()` fetches the static asset when there is nothing to
+rebuild — so an older asset-backed share still contributes its file to the
+archive instead of dropping out of it.
 
-One consequence: `resolveDocumentUrl()` now returns a promise for every
-rebuilt document, where the generic worksheet path used to return a string
-synchronously. Both call sites already wrapped it in `Promise.resolve`, so
-this was invisible at runtime, but tests calling it directly must await it.
+One consequence of that split: `resolveDocumentUrl()` now returns a promise
+for every rebuilt document, where the generic worksheet path used to return a
+string synchronously. Both call sites already wrapped it in `Promise.resolve`,
+so this is invisible at runtime, but tests calling it directly must await it.
 
-### Testing a merge
+### Testing separate documents
 
-Asserting a merge needs the output to say which document produced each page.
-`workspace.test.js` gives each stubbed renderer a unique page *width* —
-widths survive `copyPages` exactly — and reads them back off the downloaded
-blob. Two things this forced:
+Every delivered file is a real PDF, so a test tells them apart by giving each
+stubbed renderer a unique page **width** and reading the widths back. In the
+export they come off the unpacked archive entries; on the share page they come
+off the blobs `URL.createObjectURL` was handed, paired with each anchor's
+`download` name. Three things this forced:
 
-- Renderer stubs must return **real** PDFs. The old stubs returned the four
-  bytes `%PDF`, which the ZIP happily stored and pdf-lib rightly refuses.
-- A test that releases a deferred `fetch` must first wait for that fetch to
-  have been called. `buildExportPdf` awaits `PDFDocument.create()` before it
-  reaches the first document, so the old release-immediately timing raced.
+- Renderer stubs must return **real** PDFs. Older stubs returned the four
+  bytes `%PDF`, which a ZIP happily stores but pdf-lib rightly refuses.
+- A test that waits for the export to finish should wait on the archive being
+  packed (`docuAlignZip.createArchive`), not on the `fetch` that starts it —
+  the rendering in between is several microtasks long. The zip writer's API is
+  frozen, so wrap it rather than spying on it in place.
+- The share page's listing creates one blob per card before any download
+  starts, so a test must take the *trailing* blobs — one per anchor click — as
+  the saved files.

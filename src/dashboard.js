@@ -179,10 +179,8 @@ export function reportCard(report) {
   // Only saved documents can be shared: the public snapshot references the
   // Firestore id, so a report without one has nothing durable to point at.
   const documentCount = documentsFor(report.id).length;
-  // The recipient opens one merged PDF, so the label says so rather than
-  // implying they will have several files to collect.
   const shareLabel = documentCount > 1
-    ? `Create public link (${documentCount} documents in one PDF)`
+    ? `Create public link (${documentCount} documents)`
     : "Create public link";
   const share = report.id
     ? `

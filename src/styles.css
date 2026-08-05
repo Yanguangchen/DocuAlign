@@ -1331,6 +1331,22 @@ a:focus-visible {
   max-width: 720px;
 }
 
+/* The one action that saves every document at once, above the per-document
+   list so a recipient who only wants "all of it" never scrolls the cards. */
+.share-bundle-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-bundle-actions button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .share-bundle-list {
   display: flex;
   flex-direction: column;
