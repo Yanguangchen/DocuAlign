@@ -6,9 +6,36 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import * as PDFLib from "pdf-lib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const workbookBytes = readFileSync(resolve(".", "SampleDocuments/SampleInput.xlsx"));
+
+/**
+ * A one-page PDF whose page width identifies which document produced it.
+ *
+ * The export merges documents into one PDF, so the only way to assert what it
+ * put where is to make each source page recognisable in the finished file.
+ * Widths survive the page copy exactly, so they serve as the marker.
+ * @param {number} width - The marker width, unique per document.
+ * @returns {Promise<Uint8Array>} A valid single-page PDF.
+ */
+async function markerPdf(width) {
+  const pdf = await PDFLib.PDFDocument.create();
+  pdf.addPage([width, 100]);
+  return pdf.save();
+}
+
+/**
+ * The page-width markers of the merged PDF the export last downloaded, in
+ * page order. Reading them back proves both the merge and its ordering.
+ * @returns {Promise<number[]>} One marker per page of the merged PDF.
+ */
+async function downloadedPageMarkers() {
+  const [blob] = URL.createObjectURL.mock.calls.at(-1);
+  const merged = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+  return merged.getPages().map((page) => Math.round(page.getWidth()));
+}
 
 function renderWorkspace() {
   document.body.innerHTML = `
@@ -48,53 +75,34 @@ function workbook(name = "lab-data.xlsx", size) {
   return file;
 }
 
+/** Page-width marker each stubbed renderer stamps on its document. */
+const SUMMARY_MARKER = 500;
+const ASSET_MARKER = 700;
+/** The generic writer's own landscape A4 width, which needs no stubbing. */
+const GENERIC_MARKER = 842;
+const reportMarker = (groupIndex) => 600 + groupIndex;
+
+/**
+ * The marker PDF's bytes as a standalone ArrayBuffer, for a `fetch` stub.
+ * @param {number} width - The marker width.
+ * @returns {Promise<ArrayBuffer>} The PDF's own buffer.
+ */
+async function markerPdfBuffer(width) {
+  const bytes = await markerPdf(width);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
 async function loadWorkspace() {
   await import("./xlsx-reader.js");
   await import("./pdf-writer.js");
   await import("./summary-pdf.js");
-  await import("./zip-writer.js");
+  // The export merges real PDFs, so the renderers must produce real ones.
+  globalThis.PDFLib = PDFLib;
   globalThis.docuAlignSummaryPdf = {
-    createDocument: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
+    createDocument: vi.fn(async () => markerPdf(SUMMARY_MARKER)),
   };
   await import("./workspace.js");
   return globalThis.docuAlignWorkspace;
-}
-
-/**
- * Read back a ZIP archive's stored entries. Only the format the workspace
- * itself writes needs supporting: local headers holding uncompressed data,
- * scanned until the central directory begins.
- * @param {Uint8Array} bytes - Archive bytes.
- * @returns {Array<{name: string, data: Uint8Array}>} Stored entries, in order.
- */
-function readZipEntries(bytes) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const decoder = new TextDecoder();
-  const entries = [];
-  let offset = 0;
-
-  while (view.getUint32(offset, true) === 0x04034b50) {
-    const nameLength = view.getUint16(offset + 26, true);
-    const dataLength = view.getUint32(offset + 22, true);
-    const nameStart = offset + 30;
-    const dataStart = nameStart + nameLength;
-    entries.push({
-      name: decoder.decode(bytes.subarray(nameStart, dataStart)),
-      data: bytes.subarray(dataStart, dataStart + dataLength),
-    });
-    offset = dataStart + dataLength;
-  }
-  return entries;
-}
-
-/**
- * Read the archive most recently handed to `URL.createObjectURL` by the
- * export button, decoded into its stored entries.
- * @returns {Promise<Array<{name: string, data: Uint8Array}>>} Archive entries.
- */
-async function downloadedArchiveEntries() {
-  const [blob] = URL.createObjectURL.mock.calls.at(-1);
-  return readZipEntries(new Uint8Array(await blob.arrayBuffer()));
 }
 
 /**
@@ -106,9 +114,10 @@ async function downloadedArchiveEntries() {
 async function loadMappedWorkspace() {
   await import("./report-mapping.js");
   globalThis.docuAlignRakReportPdf = {
-    createRakReportPdf: vi.fn(async () => new Blob([new Uint8Array([37, 80, 68, 70])], {
-      type: "application/pdf",
-    })),
+    createRakReportPdf: vi.fn(async ([model]) => new Blob(
+      [await markerPdf(reportMarker(model.groupIndex))],
+      { type: "application/pdf" },
+    )),
   };
   return loadWorkspace();
 }
@@ -132,16 +141,17 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
+    delete globalThis.PDFLib;
     vi.stubGlobal("URL", Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => "blob:generated"),
       revokeObjectURL: vi.fn(),
     }));
     // Reports without a mapped model fall back to fetching the reference
-    // asset for the archive, so every test gets a working default; tests that
+    // asset for the merge, so every test gets a working default; tests that
     // care about the fetched bytes or a fetch failure override this.
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
-      arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+      arrayBuffer: async () => markerPdfBuffer(ASSET_MARKER),
     })));
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -156,6 +166,7 @@ describe("workspace controller", () => {
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
     delete globalThis.docuAlignLogger;
+    delete globalThis.PDFLib;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -202,7 +213,7 @@ describe("workspace controller", () => {
     // Datasheet and standalone-worksheet exports are temporarily withheld, so
     // the six test reports and the Summary are all that export today.
     expect(document.querySelector("#feedback").textContent).toBe(
-      "ETL complete. Export produces 7 separate PDFs.",
+      "ETL complete. Export merges 7 documents into one PDF.",
     );
   });
 
@@ -238,7 +249,7 @@ describe("workspace controller", () => {
       "Parsed 1 test report from 2 worksheets.",
     );
     expect(document.querySelector("#feedback").textContent).toBe(
-      "ETL complete. Export produces 1 separate PDF.",
+      "ETL complete. Export merges 1 document into one PDF.",
     );
     expect(document.querySelector("#pdf-export").disabled).toBe(false);
 
@@ -246,9 +257,9 @@ describe("workspace controller", () => {
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
     expect(document.querySelector("#feedback").textContent).toBe(
-      "Downloaded single.zip with 1 document. Cloud save is now available.",
+      "Downloaded single.pdf with 1 document. Cloud save is now available.",
     );
-    expect(clickSpy.mock.contexts[0].download).toBe("single.zip");
+    expect(clickSpy.mock.contexts[0].download).toBe("single.pdf");
   });
 
   it("fails the pipeline when the workbook holds no complete report groups", async () => {
@@ -354,7 +365,7 @@ describe("workspace controller", () => {
     clearFile();
   });
 
-  it("blocks premature export, then downloads one archive holding every document", async () => {
+  it("blocks premature export, then downloads one PDF holding every document", async () => {
     const { clearFile, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const exportButton = document.querySelector("#pdf-export");
@@ -370,27 +381,25 @@ describe("workspace controller", () => {
     // Six reports + the Summary. The DS1/SB1 datasheets and the coral + org
     // worksheet are temporarily withheld from the export.
     expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalledOnce();
-    expect(clickSpy.mock.contexts[0].download).toBe("Client-Sample-01.zip");
+    expect(clickSpy.mock.contexts[0].download).toBe("Client-Sample-01.pdf");
     expect(URL.createObjectURL).toHaveBeenCalledOnce();
-    expect(URL.createObjectURL.mock.calls[0][0].type).toBe("application/zip");
+    expect(URL.createObjectURL.mock.calls[0][0].type).toBe("application/pdf");
 
-    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
-    expect(names).toHaveLength(7);
-    expect(names.slice(0, 3)).toEqual([
-      "Client-Sample-01/Client-Sample-01-X-2026-522-1.pdf",
-      "Client-Sample-01/Client-Sample-01-X-2026-522-2.pdf",
-      "Client-Sample-01/Client-Sample-01-X-2026-522-3.pdf",
+    // The Summary leads, then the six reports. Without the mapping renderer
+    // loaded, each report falls back to the reference asset, so all six carry
+    // that marker. The DS1/SB1 datasheets and the coral + org worksheet are
+    // temporarily withheld, so nothing of theirs appears.
+    expect(await downloadedPageMarkers()).toEqual([
+      SUMMARY_MARKER,
+      ...Array.from({ length: 6 }, () => ASSET_MARKER),
     ]);
-    expect(names).toContain("Client-Sample-01/Client-Sample-01-Summary.pdf");
-    expect(names.some((name) => /-DS1\.pdf$|-SB1\.pdf$/.test(name))).toBe(false);
-    expect(names).not.toContain("Client-Sample-01/Client-Sample-01-coral-org.pdf");
     // The six test reports keep their established layout: each is fetched
     // from the reference asset rather than generated.
     expect(fetch).toHaveBeenCalledTimes(6);
     fetch.mock.calls.forEach(([url]) => expect(url).toContain("SampleOutput.pdf"));
 
     expect(document.querySelector("#feedback").textContent).toBe(
-      "Downloaded Client-Sample-01.zip with 7 documents. Cloud save is now available.",
+      "Downloaded Client-Sample-01.pdf with 7 documents. Cloud save is now available.",
     );
     expect(document.querySelector("#cloud-save").disabled).toBe(false);
     clearFile();
@@ -441,7 +450,7 @@ describe("workspace controller", () => {
     fetch.mockImplementationOnce(() => new Promise((resolve) => {
       releaseFetch = () => resolve({
         ok: true,
-        arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+        arrayBuffer: async () => markerPdfBuffer(ASSET_MARKER),
       });
     }));
     stubSingleReportWorkbook();
@@ -452,32 +461,36 @@ describe("workspace controller", () => {
 
     // A disabled button does not dispatch click at all (the click() algorithm
     // no-ops for it), so a repeat click here starts no second build; only one
-    // archive is ever produced for this export.
+    // merged PDF is ever produced for this export.
     exportButton.click();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     releaseFetch();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
     expect(fetch).toHaveBeenCalledOnce();
     expect(exportButton.disabled).toBe(false);
   });
 
-  it("drops the archive when the workbook is reset before the build finishes", async () => {
+  it("drops the merged PDF when the workbook is reset before the build finishes", async () => {
     const { clearFile, selectFile } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    // Built up front so the save() spy below counts only the build's own save.
+    const assetBuffer = await markerPdfBuffer(ASSET_MARKER);
     let releaseFetch;
     fetch.mockImplementationOnce(() => new Promise((resolve) => {
-      releaseFetch = () => resolve({
-        ok: true,
-        arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
-      });
+      releaseFetch = () => resolve({ ok: true, arrayBuffer: async () => assetBuffer });
     }));
     stubSingleReportWorkbook();
     await selectFile(workbook("single.xlsx"));
 
+    // Saving the merged document is the build's last step before it decides
+    // whether to download, so it is the point to wait for here.
+    const saveSpy = vi.spyOn(PDFLib.PDFDocument.prototype, "save");
     document.querySelector("#pdf-export").click();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     // The workbook is cleared while the fetch for its report is still pending.
     clearFile();
     releaseFetch();
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(saveSpy).toHaveBeenCalledOnce());
 
     // No download for a workbook that is no longer selected, and the export
     // button stays disabled -- clearFile()'s own reset, left undisturbed.
@@ -663,16 +676,18 @@ describe("workspace controller", () => {
     document.querySelector("#pdf-export").click();
 
     // The other six documents (five reports + Summary) are still worth
-    // having, so the failure of one does not stop the archive.
+    // having, so the failure of one does not stop the merge.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Downloaded lab-data.zip with 6 documents; could not generate Test Report X-2026-522-1.",
+        "Downloaded lab-data.pdf with 6 documents; could not generate Test Report X-2026-522-1.",
       ),
     );
     expect(clickSpy).toHaveBeenCalledOnce();
-    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
-    expect(names).toHaveLength(6);
-    expect(names.some((name) => name.includes("X-2026-522-1"))).toBe(false);
+    // Group 1 is missing; the rest still merge in order behind the Summary.
+    expect(await downloadedPageMarkers()).toEqual([
+      SUMMARY_MARKER,
+      ...[2, 3, 4, 5, 6].map(reportMarker),
+    ]);
     expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
       "Test report PDF generation failed",
       expect.any(Error),
@@ -766,11 +781,108 @@ describe("workspace controller", () => {
 
     document.querySelector("#pdf-export").click();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
-    expect(clickSpy.mock.contexts[0].download).toBe("lab-data.zip");
-    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
-    expect(names).toHaveLength(20);
-    expect(names).toContain("lab-data/lab-data-X-2026-522-1-DS1.pdf");
-    expect(names).toContain("lab-data/lab-data-coral-org.pdf");
+    expect(clickSpy.mock.contexts[0].download).toBe("lab-data.pdf");
+    // All 20 merge, in kind order: the Summary, the six reports (each from the
+    // reference asset), then the twelve datasheets and the coral + org
+    // worksheet, which the generic writer lays out landscape.
+    const markers = await downloadedPageMarkers();
+    expect(markers.slice(0, 7)).toEqual([
+      SUMMARY_MARKER,
+      ...Array.from({ length: 6 }, () => ASSET_MARKER),
+    ]);
+    // The generated documents run to however many pages their grids need.
+    expect(markers.slice(7).every((marker) => marker === GENERIC_MARKER)).toBe(true);
+    expect(markers.length).toBeGreaterThan(7);
+  });
+
+  it("reports a missing PDF library rather than downloading nothing silently", async () => {
+    const { selectFile } = await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    await selectFile(workbook("lab-data.xlsx"));
+    // The merge needs pdf-lib; over file:// its <script> can fail to load.
+    delete globalThis.PDFLib;
+
+    document.querySelector("#pdf-export").click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Could not build the export. The PDF library is unavailable.",
+      ),
+    );
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(document.querySelector("#pdf-export").disabled).toBe(false);
+  });
+
+  it("orders the merged export: Summary first, then reports by sampling date", async () => {
+    const { DOCUMENT_KINDS, exportOrder } = await loadWorkspace();
+    const report = (slug, samplingDate) => ({
+      slug,
+      kind: DOCUMENT_KINDS.REPORT,
+      samplingDate,
+    });
+
+    const ordered = exportOrder([
+      report("june", "12/06/2026"),
+      report("iso-april", "2026-04-09"),
+      { slug: "Summary", kind: DOCUMENT_KINDS.SUMMARY },
+      report("april", "08/04/2026"),
+      report("may", "1/5/2026"),
+    ]);
+
+    // The Summary leads whatever its position in the workbook, and the reports
+    // follow oldest first. A day-first date and an ISO one compare correctly
+    // against each other, and single-digit days and months parse too.
+    expect(ordered.map((entry) => entry.slug)).toEqual([
+      "Summary",
+      "april",
+      "iso-april",
+      "may",
+      "june",
+    ]);
+
+    // Reports sharing a date -- the usual case -- keep the workbook's order,
+    // and a report with no usable date sorts last rather than being guessed at.
+    const sameDay = exportOrder([
+      report("undated", ""),
+      report("third", "08/04/2026"),
+      report("unparsed", "April 8th"),
+      report("first", "08/04/2026"),
+      report("second", "08/04/2026"),
+    ]);
+    expect(sameDay.map((entry) => entry.slug)).toEqual([
+      "third",
+      "first",
+      "second",
+      "undated",
+      "unparsed",
+    ]);
+
+    // Restoring the withheld kinds keeps them behind the reports.
+    expect(exportOrder([
+      { slug: "sheet", kind: DOCUMENT_KINDS.WORKSHEET },
+      { slug: "ds", kind: DOCUMENT_KINDS.DATASHEET },
+      report("report", "08/04/2026"),
+    ]).map((entry) => entry.slug)).toEqual(["report", "ds", "sheet"]);
+  });
+
+  it("carries each report's sampling date onto its planned document", async () => {
+    const { planExportDocuments, selectFile } = await loadMappedWorkspace();
+    await selectFile(workbook("lab-data.xlsx"));
+
+    const planned = planExportDocuments(
+      { sheetNames: ["CV1", "TR1"] },
+      [{ group: 1, job_ref: "X-1", sheets: { CV1: "CV1", TR1: "TR1" } }],
+      new Map([[1, { cover: { samplingDate: "08/04/2026" } }]]),
+    );
+    expect(planned[0].samplingDate).toBe("08/04/2026");
+
+    // A report with no mapped model is served from the reference asset and
+    // carries no date of its own.
+    const unmapped = planExportDocuments(
+      { sheetNames: ["CV1", "TR1"] },
+      [{ group: 1, job_ref: "X-1", sheets: { CV1: "CV1", TR1: "TR1" } }],
+      new Map(),
+    );
+    expect(unmapped[0].samplingDate).toBe("");
   });
 
   it("plans around reports whose datasheets are missing", async () => {
@@ -821,11 +933,11 @@ describe("workspace controller", () => {
     document.querySelector("#pdf-export").click();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
-    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
-    expect(names).toEqual(["ghost/ghost-X-1.pdf", "ghost/ghost-Ghost.pdf"]);
+    // The report leads, then the empty worksheet the generic writer produced.
+    expect(await downloadedPageMarkers()).toEqual([ASSET_MARKER, GENERIC_MARKER]);
   });
 
-  it("archives a generated document whichever byte container its renderer returns", async () => {
+  it("merges a generated document whichever byte container its renderer returns", async () => {
     const { selectFile, setDisabledDocumentKinds } = await loadWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     setDisabledDocumentKinds([]);
@@ -839,19 +951,19 @@ describe("workspace controller", () => {
       extractReportIdentity: () => ({ job_ref: "X-1" }),
     });
     // The generic writer's documented return type is a Uint8Array, but the
-    // archive step also accepts a plain ArrayBuffer -- pdf-lib's own save()
+    // merge step also accepts a plain ArrayBuffer -- pdf-lib's own save()
     // can return either depending on version, and neither should be coerced
     // through an unnecessary extra copy when it is already a Uint8Array.
+    const NOTES_MARKER = 321;
     globalThis.docuAlignPdf = {
-      createDocument: vi.fn(() => new Uint8Array([1, 2, 3]).buffer),
+      createDocument: vi.fn(() => markerPdfBuffer(NOTES_MARKER)),
     };
 
     await selectFile(workbook("notes.xlsx"));
     document.querySelector("#pdf-export").click();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
 
-    const notes = (await downloadedArchiveEntries()).find((entry) => entry.name.endsWith("Notes.pdf"));
-    expect([...notes.data]).toEqual([1, 2, 3]);
+    expect(await downloadedPageMarkers()).toEqual([ASSET_MARKER, NOTES_MARKER]);
   });
 
   it("reports a fixed-format Summary generation failure without blocking other exports", async () => {
@@ -880,12 +992,11 @@ describe("workspace controller", () => {
     // The report is still worth having even though the Summary failed.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Downloaded summary-error.zip with 1 document; could not generate Summary.",
+        "Downloaded summary-error.pdf with 1 document; could not generate Summary.",
       ),
     );
     expect(clickSpy).toHaveBeenCalledOnce();
-    const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
-    expect(names).toEqual(["summary-error/summary-error-X-1.pdf"]);
+    expect(await downloadedPageMarkers()).toEqual([ASSET_MARKER]);
     expect(globalThis.docuAlignLogger.logError).toHaveBeenCalledWith(
       "Summary PDF generation failed",
       expect.any(Error),
@@ -922,7 +1033,7 @@ describe("workspace controller", () => {
     expect(reportBaseName()).toBe("report");
     document.querySelector("#pdf-export").click();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
-    expect(clickSpy.mock.contexts[0].download).toBe("report.zip");
+    expect(clickSpy.mock.contexts[0].download).toBe("report.pdf");
 
     applyRuntimeNotice("https:");
     applyRuntimeNotice("file:");
