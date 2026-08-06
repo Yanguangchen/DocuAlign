@@ -1063,20 +1063,11 @@ a:focus-visible {
   transform: translate(-1px, -1px);
 }
 
-.share-modal-whatsapp {
-  background: #1f9e56;
-  border-color: #1f9e56;
-}
-
-.share-modal-email {
+/* Sending is the recipient's own business now: the modal hands over the link
+   and the copy button is the primary action, so it keeps the filled style. */
+.share-modal-dashboard {
   background: var(--teal);
   border-color: var(--teal);
-}
-
-.share-modal-copy {
-  background: transparent;
-  color: var(--ink);
-  border-color: var(--line);
 }
 
 .share-modal-note {

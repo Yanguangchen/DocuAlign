@@ -44,9 +44,9 @@ export function setFeedback(message) {
 }
 
 /**
- * Publish the just-saved report as a public link, so the share modal can offer
- * WhatsApp and email straight away rather than sending staff to the dashboard
- * to press "Create public link" as a second errand.
+ * Publish the just-saved report as a public link, so the share modal can hand
+ * it over straight away rather than sending staff to the dashboard to press
+ * "Create public link" as a second errand.
  *
  * Publishing is best-effort: the report is already safely in the cloud, so a
  * failure here degrades to "saved, share it from the dashboard" instead of
@@ -185,10 +185,10 @@ cloudSave?.addEventListener("click", async () => {
         : "Report saved. View it anytime on the dashboard.",
     );
 
-    // The payoff of the whole drop-to-share workflow: the link is live and
-    // one tap from WhatsApp, email, or the dashboard.
+    // The payoff of the whole drop-to-share workflow: the link is live, ready
+    // to copy, and one tap from the dashboard.
     if (shareUrl) {
-      openShareModal(shareUrl, savedReport.reportName, { dashboardUrl: DASHBOARD_PATH });
+      openShareModal(shareUrl, { dashboardUrl: DASHBOARD_PATH });
     }
   } catch {
     // Failure already logged by trackOperation; recover the UI.

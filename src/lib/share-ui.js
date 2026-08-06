@@ -2,8 +2,7 @@
  * @file share-ui.js
  * @description The "send this link" surface shared by the ETL workspace
  * (`index.html`) and the saved-report dashboard (`dashboard.html`): clipboard
- * copying, and the modal that offers WhatsApp, email, and copy the moment a
- * capability URL exists.
+ * copying, and the modal that surfaces a capability URL the moment one exists.
  *
  * Both pages render the same `#share-modal-*` markup, so the wiring below is
  * done once here rather than duplicated per controller. Every element lookup
@@ -15,8 +14,6 @@ import { logWarn } from "./logger.js";
 const backdrop = document.querySelector("#share-modal-backdrop");
 const closeButton = document.querySelector("#share-modal-close");
 const linkOutput = document.querySelector("#share-modal-link");
-const whatsappAction = document.querySelector("#share-modal-whatsapp");
-const emailAction = document.querySelector("#share-modal-email");
 const copyAction = document.querySelector("#share-modal-copy");
 const dashboardAction = document.querySelector("#share-modal-dashboard");
 const note = document.querySelector("#share-modal-note");
@@ -53,48 +50,19 @@ export async function copyToClipboard(url, caller) {
 }
 
 /**
- * Build a WhatsApp click-to-chat URL with the share message pre-filled.
- * Opening it lands on WhatsApp Web (already signed in) or the native app,
- * with the message ready to send to whichever contact the user picks.
+ * Open the share modal for a published link: the URL laid out plainly with a
+ * copy button, so staff never have to select the rendered link text by hand.
  * @param {string} url - The published capability URL.
- * @param {string} label - What is being shared, for the message text.
- * @returns {string} A `https://wa.me/` URL.
- */
-export function buildWhatsAppShareUrl(url, label) {
-  return `https://wa.me/?text=${encodeURIComponent(`${label}\n${url}`)}`;
-}
-
-/**
- * Build a `mailto:` URL that opens the visitor's default mail app with the
- * share link pre-filled in the subject and body.
- * @param {string} url - The published capability URL.
- * @param {string} label - What is being shared, for the subject/body text.
- * @returns {string} A `mailto:` URL.
- */
-export function buildMailtoShareUrl(url, label) {
-  const subject = encodeURIComponent(`${label} — DocuAlign report link`);
-  const body = encodeURIComponent(`${label}\n\n${url}`);
-  return `mailto:?subject=${subject}&body=${body}`;
-}
-
-/**
- * Open the share modal for a published link: WhatsApp and email actions ready
- * to send, plus a copy button, so staff never have to select the rendered link
- * text by hand to get it into another app.
- * @param {string} url - The published capability URL.
- * @param {string} label - Human-readable description of what is being shared.
  * @param {{dashboardUrl?: string}} [options] - `dashboardUrl` reveals a
  * "View on dashboard" action, which the workspace uses to send staff straight
  * to the documents it just saved. The dashboard itself passes none.
  * @returns {void}
  */
-export function openShareModal(url, label, { dashboardUrl = "" } = {}) {
+export function openShareModal(url, { dashboardUrl = "" } = {}) {
   if (!backdrop) return;
 
   shareModalUrl = url;
   linkOutput.textContent = url;
-  whatsappAction.href = buildWhatsAppShareUrl(url, label);
-  emailAction.href = buildMailtoShareUrl(url, label);
   // Only the workspace renders this action, and only it passes a URL for it.
   if (dashboardAction && dashboardUrl) {
     dashboardAction.href = dashboardUrl;

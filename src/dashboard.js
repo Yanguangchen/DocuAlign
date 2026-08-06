@@ -17,15 +17,9 @@ import { copyToClipboard, openShareModal } from "./lib/share-ui.js";
 import { logWarn, trackOperation } from "./lib/logger.js";
 import { initObservability } from "./lib/observability.js";
 
-// Re-exported so the share helpers keep one import site from the dashboard's
+// Re-exported so the modal helpers keep one import site from the dashboard's
 // point of view, wherever they are actually implemented.
-export {
-  buildMailtoShareUrl,
-  buildWhatsAppShareUrl,
-  closeShareModal,
-  openShareModal,
-} from "./lib/share-ui.js";
-
+export { closeShareModal, openShareModal } from "./lib/share-ui.js";
 
 initObservability();
 
@@ -341,7 +335,7 @@ export async function handleBundleClick() {
     bundleCreate.textContent = "Group link created";
 
     await copyToClipboard(url, "handleBundleClick");
-    openShareModal(url, `${entries.length} ${entries.length === 1 ? "report" : "reports"}`);
+    openShareModal(url);
   } catch {
     // Failure already logged by trackOperation; recover the UI.
     bundleCreate.disabled = false;
@@ -403,7 +397,7 @@ export async function handleShareClick(button) {
     button.textContent = "Public link created";
 
     await copyToClipboard(url, "handleShareClick");
-    openShareModal(url, report.reportName || report.sourceFileName || "Untitled report");
+    openShareModal(url);
   } catch (error) {
     // Failure already logged by trackOperation; recover the UI. A package that
     // is simply too large needs its own wording, because retrying cannot help.

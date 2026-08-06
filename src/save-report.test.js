@@ -47,8 +47,6 @@ const WORKSPACE_DOM = `
     <button id="share-modal-close" type="button"></button>
     <p id="share-modal-link"></p>
     <a id="share-modal-dashboard" hidden></a>
-    <a id="share-modal-whatsapp"></a>
-    <a id="share-modal-email"></a>
     <button id="share-modal-copy" type="button"></button>
     <p id="share-modal-note"></p>
   </div>
@@ -234,7 +232,7 @@ describe("save-report module", () => {
       delete globalThis.docuAlignWorkspace;
     });
 
-    it("publishes a package link and opens the modal ready to send", async () => {
+    it("publishes a package link and opens the modal with it", async () => {
       mockPublishBundle.mockResolvedValueOnce("bundle-token");
       const documents = [
         { slug: "Summary", title: "Summary", data: "[]" },
@@ -259,10 +257,6 @@ describe("save-report module", () => {
       );
       expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
       expect(document.querySelector("#share-modal-link").textContent).toBe(BUNDLE_URL);
-      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toContain(
-        encodeURIComponent(BUNDLE_URL),
-      );
-      expect(document.querySelector("#share-modal-email").getAttribute("href")).toContain("mailto:");
 
       // The workspace modal also offers a way straight to the saved documents.
       const dashboard = document.querySelector("#share-modal-dashboard");
