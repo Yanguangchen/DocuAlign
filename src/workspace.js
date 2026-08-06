@@ -495,29 +495,93 @@ function documentSections(plan, sheets) {
 }
 
 /**
+ * The stable key identifying one of a report's embedded pictures.
+ *
+ * Shared by the upload and the published payload so a viewer can pair a
+ * picture's metadata back up with the file that was uploaded for it.
+ * @param {number} groupIndex - The report's worksheet group.
+ * @param {string} slot - `preparedSignature`, `authorisedSignature`, or `photo`.
+ * @param {number} [index] - Position, for the appendix photographs.
+ * @returns {string} Asset key.
+ */
+function pictureKey(groupIndex, slot, index) {
+  return index === undefined ? `${groupIndex}:${slot}` : `${groupIndex}:${slot}:${index}`;
+}
+
+/**
+ * Every embedded picture the mapped reports carry, ready to upload.
+ *
+ * A share's `documentData` is bounded at 100,000 characters, and one report's
+ * pictures run to hundreds of kilobytes, so the bytes cannot travel in the
+ * payload. They are uploaded once at save time instead and the payload carries
+ * each picture's URL.
+ * @returns {Array<{key: string, mimeType: string, bytes: Uint8Array}>} Pictures with bytes.
+ */
+function getPublishableAssets() {
+  const assets = [];
+  const collect = (asset, key) => {
+    if (asset?.bytes?.length) {
+      assets.push({ key, mimeType: asset.mimeType, bytes: asset.bytes });
+    }
+  };
+
+  mappedReports.forEach((report, groupIndex) => {
+    collect(report.assets?.preparedSignature, pictureKey(groupIndex, "preparedSignature"));
+    collect(report.assets?.authorisedSignature, pictureKey(groupIndex, "authorisedSignature"));
+    (report.appendix?.photos ?? []).forEach((photo, index) => {
+      collect(photo, pictureKey(groupIndex, "photo", index));
+    });
+  });
+
+  return assets;
+}
+
+/**
  * Describe a mapped report's embedded pictures without their bytes.
  *
  * The downloaded report renders from the in-memory model, which carries the
  * workbook's signatures and appendix photographs in full. A published share
  * cannot: one report's pictures run to megabytes, far past the 100,000
  * character `documentData` bound the Firestore rules validate in a single
- * expression. Only the picture metadata travels, so a share rebuilt by the
- * public viewer keeps the reference pages' own artwork.
+ * expression. Only the metadata travels -- plus, for a picture that was
+ * uploaded to Cloud Storage, the URL the viewer refetches it from, so a share
+ * shows the uploaded workbook's own artwork rather than the reference's.
  * @param {Object} report - Semantic report model.
- * @returns {Object} The report with picture bytes replaced by their metadata.
+ * @param {number} groupIndex - The report's worksheet group.
+ * @param {Map<string, string>} pictureUrls - Asset key to uploaded picture URL.
+ * @returns {Object} The report with picture bytes replaced by metadata and URLs.
  */
-function withoutPictureBytes(report) {
-  const describe = (asset) => (asset
-    ? { name: asset.name, row: asset.row, column: asset.column, mimeType: asset.mimeType }
-    : asset);
+function withoutPictureBytes(report, groupIndex, pictureUrls) {
+  const describe = (asset, key) => {
+    if (!asset) return asset;
+    const url = pictureUrls.get(key);
+    const described = {
+      name: asset.name,
+      row: asset.row,
+      column: asset.column,
+      mimeType: asset.mimeType,
+    };
+    // Absent when the picture had no bytes, or its upload failed; the viewer
+    // then keeps the reference artwork for that one image.
+    if (url) described.url = url;
+    return described;
+  };
 
   return Object.assign({}, report, {
     assets: {
-      preparedSignature: describe(report.assets?.preparedSignature),
-      authorisedSignature: describe(report.assets?.authorisedSignature),
+      preparedSignature: describe(
+        report.assets?.preparedSignature,
+        pictureKey(groupIndex, "preparedSignature"),
+      ),
+      authorisedSignature: describe(
+        report.assets?.authorisedSignature,
+        pictureKey(groupIndex, "authorisedSignature"),
+      ),
     },
     appendix: Object.assign({}, report.appendix, {
-      photos: (report.appendix?.photos ?? []).map(describe),
+      photos: (report.appendix?.photos ?? []).map(
+        (photo, index) => describe(photo, pictureKey(groupIndex, "photo", index)),
+      ),
     }),
   });
 }
@@ -529,13 +593,18 @@ function withoutPictureBytes(report) {
  * existing section payload.
  * @param {{sheets: string[], renderer?: string}} plan - Planned document.
  * @param {Map<string, Map<string, string>>} sheets - Per-sheet cell lookups.
+ * @param {Map<string, string>} pictureUrls - Asset key to uploaded picture URL.
  * @returns {string} Bounded JSON document data.
  */
-function serializeDocumentData(plan, sheets) {
+function serializeDocumentData(plan, sheets, pictureUrls) {
   if (plan.renderer === "report") {
     return JSON.stringify({
       renderer: "report",
-      report: withoutPictureBytes(mappedReports.get(plan.groupIndex)),
+      report: withoutPictureBytes(
+        mappedReports.get(plan.groupIndex),
+        plan.groupIndex,
+        pictureUrls,
+      ),
     });
   }
   if (plan.renderer === "summary") {
@@ -704,9 +773,12 @@ function downloadArchive(archive, baseName) {
  * Worksheet grids are serialised to JSON here because Firestore cannot store
  * nested arrays, and the same string is what a published share carries so the
  * public viewer can rebuild the PDF.
+ * @param {Map<string, string>} [pictureUrls] - Asset key to uploaded picture
+ * URL, from `getPublishableAssets()`. Omitted before the pictures are
+ * uploaded, in which case a share keeps the reference pages' own artwork.
  * @returns {Array<Object>|null} Serialisable documents, or null before a parse.
  */
-function getExportDocuments() {
+function getExportDocuments(pictureUrls = new Map()) {
   if (!parsedDocuments) return null;
 
   return parsedDocuments.map((plan) => ({
@@ -715,7 +787,7 @@ function getExportDocuments() {
     subtitle: plan.subtitle,
     assetPath: plan.assetPath ?? null,
     // The fixed-format test report is served from its asset and carries no data.
-    data: plan.assetPath ? null : serializeDocumentData(plan, parsedSheets),
+    data: plan.assetPath ? null : serializeDocumentData(plan, parsedSheets, pictureUrls),
   }));
 }
 
@@ -835,6 +907,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   exportOrder,
   formatFileSize,
   getExportDocuments,
+  getPublishableAssets,
   isExcelFile,
   planExportDocuments,
   reportBaseName,

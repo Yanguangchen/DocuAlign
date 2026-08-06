@@ -111,6 +111,55 @@ export function resolveDocumentUrl(share) {
 }
 
 /**
+ * Refetch one uploaded picture into the bytes the renderer draws with.
+ *
+ * A share carries each picture's URL rather than its bytes, because the bytes
+ * are far past the payload's 100,000-character bound. A picture that cannot be
+ * refetched is left without bytes, which the renderer treats as "nothing to
+ * draw here" and keeps the reference page's own artwork for that one image.
+ * @param {Object|null} asset - Described picture, possibly carrying a `url`.
+ * @returns {Promise<Object|null>} The picture with `bytes`, or as it arrived.
+ */
+async function withPictureBytes(asset) {
+  if (!asset?.url) return asset;
+
+  try {
+    const response = await fetch(asset.url);
+    if (!response.ok) throw new Error(`Picture unavailable (${response.status}).`);
+    return { ...asset, bytes: new Uint8Array(await response.arrayBuffer()) };
+  } catch (error) {
+    logWarn("Could not load a shared report picture", {
+      feature: "ReportPhotos",
+      function: "withPictureBytes",
+      operation: "fetch",
+      category: "PhotoFetchFailure",
+      errorMessage: String(error),
+    });
+    return asset;
+  }
+}
+
+/**
+ * Restore a shared report's signatures and appendix photographs before it is
+ * rendered, so a recipient sees the uploaded workbook's own artwork.
+ * @param {Object} report - The published report model.
+ * @returns {Promise<Object>} The report with picture bytes restored.
+ */
+async function withRestoredPictures(report) {
+  const [preparedSignature, authorisedSignature, ...photos] = await Promise.all([
+    withPictureBytes(report.assets?.preparedSignature),
+    withPictureBytes(report.assets?.authorisedSignature),
+    ...(report.appendix?.photos ?? []).map(withPictureBytes),
+  ]);
+
+  return {
+    ...report,
+    assets: { preparedSignature, authorisedSignature },
+    appendix: { ...report.appendix, photos },
+  };
+}
+
+/**
  * Rebuild one shared document into PDF bytes.
  *
  * Returns null -- rather than throwing or resolving to a fallback -- when the
@@ -131,7 +180,8 @@ function rebuildDocument(share) {
   }
 
   if (payload?.renderer === "report" && payload.report) {
-    return Promise.resolve(globalThis.docuAlignRakReportPdf.createRakReportPdf([payload.report]))
+    return withRestoredPictures(payload.report)
+      .then((report) => globalThis.docuAlignRakReportPdf.createRakReportPdf([report]))
       .then(async (blob) => new Uint8Array(await blob.arrayBuffer()));
   }
 

@@ -5,8 +5,9 @@
  * records (`docuAlignReports`) linked to the authenticated user's session.
  */
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "./lib/firebase.js";
+import { auth, db, storage } from "./lib/firebase.js";
 import { saveReport, saveReportDocuments } from "./lib/reports.js";
+import { uploadReportPhotos } from "./lib/report-photos.js";
 import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
 import { openShareModal } from "./lib/share-ui.js";
 import { logWarn, trackOperation } from "./lib/logger.js";
@@ -135,9 +136,27 @@ cloudSave?.addEventListener("click", async () => {
         }),
     );
 
+    // Signatures and appendix photographs are far too large for a share's
+    // bounded documentData, so they go to Cloud Storage once and each
+    // document's payload carries the URL the viewer refetches them from.
+    const pictures = globalThis.docuAlignWorkspace?.getPublishableAssets?.() ?? [];
+    const pictureUrls = pictures.length > 0
+      ? await trackOperation(
+        "Upload report pictures",
+        {
+          feature: "ReportPhotos",
+          function: "cloudSave.onClick",
+          operation: "storage.uploadBytes",
+          safeIdentifier: reportNameFromSource(source),
+          pictureCount: pictures.length,
+        },
+        () => uploadReportPhotos(storage, reference.id, pictures),
+      )
+      : new Map();
+
     // Persist every exported document so each can be shared individually and
     // grouped into packages from the dashboard.
-    const documents = globalThis.docuAlignWorkspace?.getExportDocuments() ?? [];
+    const documents = globalThis.docuAlignWorkspace?.getExportDocuments(pictureUrls) ?? [];
     if (documents.length > 0) {
       await trackOperation(
         "Save report documents",

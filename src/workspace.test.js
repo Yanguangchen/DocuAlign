@@ -1073,6 +1073,72 @@ describe("workspace controller", () => {
     expect(slugs).toEqual(["X-1", "X-1-DS1", "X-1-2", "X-1-2-DS1"]);
   });
 
+  it("collects every embedded picture for upload, and publishes their URLs", async () => {
+    const { getPublishableAssets, getExportDocuments, selectFile } = await loadMappedWorkspace();
+    await selectFile(workbook("lab-data.xlsx"));
+
+    // Signatures and appendix photographs are far past a share's payload
+    // bound, so they are uploaded and referenced by URL instead.
+    const assets = getPublishableAssets();
+    expect(assets.length).toBeGreaterThan(0);
+    assets.forEach((asset) => {
+      expect(asset.bytes.length).toBeGreaterThan(0);
+      expect(asset.key).toMatch(/^\d+:(photo:\d+|preparedSignature|authorisedSignature)$/);
+    });
+
+    // Without uploaded URLs the payload carries metadata only, exactly as
+    // before, so a share falls back to the reference pages' artwork.
+    const bare = getExportDocuments();
+    const bareReport = JSON.parse(
+      bare.find((entry) => entry.slug === "X-2026-522-1").data,
+    ).report;
+    expect(bareReport.appendix.photos[0].bytes).toBeUndefined();
+    expect(bareReport.appendix.photos[0].url).toBeUndefined();
+
+    // With them, each picture carries the URL the viewer refetches it from.
+    const urls = new Map(assets.map((asset) => [asset.key, `https://cdn/${asset.key}`]));
+    const published = getExportDocuments(urls);
+    const report = JSON.parse(
+      published.find((entry) => entry.slug === "X-2026-522-1").data,
+    ).report;
+    expect(report.appendix.photos[0].url).toBe("https://cdn/1:photo:0");
+    expect(report.appendix.photos[0].bytes).toBeUndefined();
+    expect(report.appendix.photos[0].name).toBeTruthy();
+
+    // The payload must still fit the 100,000-character share bound.
+    expect(published.find((entry) => entry.slug === "X-2026-522-1").data.length)
+      .toBeLessThan(100000);
+  });
+
+  it("describes a report with no pictures at all without inventing any", async () => {
+    const { getPublishableAssets, planExportDocuments } = await loadWorkspace();
+    // No mapping renderer is loaded here, so no report model is mapped.
+    planExportDocuments({ sheetNames: ["CV1", "TR1"] }, [
+      { group: 1, job_ref: "X-1", sheets: { CV1: "CV1", TR1: "TR1" } },
+    ]);
+
+    expect(getPublishableAssets()).toEqual([]);
+  });
+
+  it("skips pictures a workbook never supplied, and reports with no appendix", async () => {
+    const { getPublishableAssets, selectFile } = await loadMappedWorkspace();
+    // A workbook can leave a signature out entirely, carry a picture with no
+    // bytes, or have no appendix at all; none of those may be uploaded.
+    globalThis.docuAlignReportMapping = {
+      buildMappedReports: () => [
+        {
+          groupIndex: 1,
+          jobRef: "X-1",
+          assets: { preparedSignature: null, authorisedSignature: { name: "s", bytes: [] } },
+        },
+      ],
+    };
+
+    await selectFile(workbook("sparse.xlsx"));
+
+    expect(getPublishableAssets()).toEqual([]);
+  });
+
   it("plans around reports whose datasheets are missing", async () => {
     const { planExportDocuments } = await loadWorkspace();
     const plan = planExportDocuments({ sheetNames: ["CV1", "TR1"] }, [
