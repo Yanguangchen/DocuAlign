@@ -265,6 +265,40 @@ Design properties:
 * The same capability-URL contract applies: public `get`, denied `list`,
   staff-only create/delete, immutable snapshots, revocation by deletion.
 
+#### Report Photographs (Cloud Storage)
+
+A share's `documentData` is capped at 100,000 characters by the Firestore
+rules, and a report's appendix photographs are roughly 335 KB raw (~446 KB
+base64). The bytes cannot travel in the payload, so `src/lib/report-photos.js`
+uploads each picture to `docuAlignReportPhotos/{reportId}/{assetKey}` in Cloud
+Storage when the report is saved, and the payload carries a download URL
+instead. `src/view-report.js` fetches the bytes back before rebuilding the PDF,
+which keeps the payload at ~7 KB while the share shows the uploaded workbook's
+own artwork.
+
+The bucket (`crewhub-43647.firebasestorage.app`) is shared with WorkGrid and
+CubeSync, so `storage.rules` holds the DocuAlign block only and is deliberately
+**not** wired into `firebase.json`. Deploy it by pasting the
+`docuAlignReportPhotos` match into the existing console rules, never by
+replacing the file. Reads are closed to staff there on purpose: a public share
+never reads through those rules, because `getDownloadURL()` mints a URL
+carrying its own unguessable access token — the same capability-URL model the
+share tokens use — which keeps the bucket unlistable.
+
+Two things to know when this looks broken:
+
+* **Uploads fail silently, per picture.** A rejected upload leaves that image
+  out and the share falls back to the reference artwork for it, so a
+  misconfigured bucket looks exactly like a rendering bug. Check the browser
+  console for `PhotoUploadFailure` first.
+* **The `docuAlignReportPhotos/` folder does not exist until the first
+  successful upload**, and reports saved before this feature shipped have no
+  uploaded pictures — they must be re-saved. There is no backfill.
+
+Full record, including the pixel measurements that diagnosed it:
+[documentation/report-export-static-asset-fix.md](./documentation/report-export-static-asset-fix.md)
+§13.
+
 ## PDF Mapping Approach
 
 The app should use logical field keys instead of relying on existing PDF field names.

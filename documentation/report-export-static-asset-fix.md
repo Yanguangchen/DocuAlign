@@ -136,10 +136,13 @@ showing another sample's photographs.
 payload, keeping name/anchor/MIME metadata, which returns it to ~7 KB. The
 downloaded report renders from the in-memory model and has full artwork; a
 share rebuilt by the public viewer keeps the reference pages' artwork.
-**This is a known remaining gap** — shared/public copies still show the
-reference photographs. Closing it needs the pictures hosted (for example
-Firebase Storage) and referenced by URL, which is a product decision, not a
-code cleanup.
+
+> [!NOTE]
+> That gap is now closed — see §13. Pictures are uploaded to Cloud Storage at
+> save time and the payload carries their download URLs, so a share rebuilds
+> with the workbook's own artwork while `documentData` stays around 7 KB.
+> `withoutPictureBytes` still strips the bytes; it just adds a `url` alongside
+> the metadata it already kept.
 
 ## 4. Verification performed
 
@@ -426,3 +429,100 @@ off the blobs `URL.createObjectURL` was handed, paired with each anchor's
 - Printing is asserted by finding the `iframe.print-frame`, defining a
   `contentWindow` on it, and dispatching `load`; the merged bytes are read off
   the last blob `createObjectURL` was handed.
+
+## 13. Shared reports showed the wrong photographs
+
+Reported as "the package link doesn't display the correct report — the
+extracted photos, vessel name and details are incorrect". Two independent
+defects were behind it, and the second one (§14) is what made the *details*
+look wrong. This section covers the photographs.
+
+### Diagnosis
+
+The question worth settling first was whether the shared photographs were
+*static* or merely *mismatched*, because those have different fixes. Measured
+by rastering page 5 and diffing the two appendix photo boxes —
+`(105.84, 172.08, 368.49, 260.79)` and `(105.84, 475.68, …)`:
+
+| Comparison | Pixels different |
+| --- | --- |
+| Downloaded export vs reference sample | 344,728 |
+| Downloaded export vs another report's export | 342,022 |
+| **Shared copy vs reference sample** | **0** |
+
+So downloads were genuinely per-report, and every *share* was serving the
+bundled sample's artwork — 100% static. That is the §3a gap reaching a user,
+not a new regression.
+
+### Fix
+
+`src/lib/report-photos.js` uploads each picture to
+`docuAlignReportPhotos/{reportId}/{assetKey}` at save time and returns a map of
+asset key to download URL. `withoutPictureBytes` writes that URL into the
+published payload beside the metadata it already kept, and
+`src/view-report.js`'s `withRestoredPictures` fetches the bytes back before
+handing the model to `createRakReportPdf`.
+
+Verified end to end: a round-tripped share now differs from the local export by
+**0 px** across both photo boxes, and `documentData` stays at ~7,327
+characters — nowhere near the 100,000 bound.
+
+### Why no public read rule
+
+`getDownloadURL()` mints a URL carrying its own unguessable access token, and
+**that token grants the read** — the request never consults the Storage rules.
+This is the same capability-URL model the share tokens already use, so
+`storage.rules` restricts reads to verified staff and the bucket is never
+publicly listable or browsable. Do **not** "fix" a working share by relaxing
+that to `allow read: if true`; it would not change share behaviour at all, and
+would expose every other app's objects to enumeration.
+
+### Failure is silent, by design
+
+`uploadReportPhotos` catches **per asset**, so one rejected picture leaves that
+one image out of the map and the share falls back to the reference artwork for
+it — the save still succeeds. This is deliberate (a bad photo must not lose a
+report) but it means a misconfigured bucket looks exactly like the original
+bug. When photographs are wrong or missing on a share, check the browser
+console for `PhotoUploadFailure` before touching the renderer; the log carries
+the asset key and the underlying error.
+
+### Operating notes
+
+- **The bucket folder does not exist until the first successful upload.**
+  Firebase Storage lists prefixes that have objects under them, not
+  directories, so `docuAlignReportPhotos/` is absent from the console until one
+  report saves. An empty file list is not evidence that the code is broken.
+- **Reports saved before this shipped have no uploaded pictures** and must be
+  re-saved to pick them up. Uploading happens at save time only; there is no
+  backfill.
+- The write rule requires `contentType.matches('image/.*')`. That is safe
+  because `pictureMediaType` in `src/xlsx-reader.js` only ever yields
+  `image/png` or `image/jpeg` and discards any other media type before it
+  reaches the upload — the `application/octet-stream` fallback in
+  `uploadReportPhotos` is unreachable for real workbook pictures. Widening the
+  reader's accepted types without widening the rule would start silent upload
+  failures.
+- The app writes to `crewhub-43647.firebasestorage.app`, from `storageBucket`
+  in `src/lib/firebase.js`. If uploads fail everywhere at once, confirm that
+  value still matches the bucket shown in the console.
+
+## 14. Reports sharing a job reference overwrote each other
+
+The other half of the "wrong report" complaint, and the reason vessel names and
+details looked wrong rather than merely stale.
+
+`saveReportDocuments(db, reportId, documents)` wrote each document to
+`.../documents/{entry.slug}`, and the slug came from `reportIdentifier()` —
+`slugify(job_ref)`. Two reports sharing a job reference therefore resolved to
+the **same document path**, and the later save silently overwrote the earlier
+one. Proved directly: saving three reports left one document in Firestore, so
+every card served whichever report was written last.
+
+`claimSlug()` now claims each slug against a per-save `Set`, appending the
+report's own suffix on collision (`x-2026-522`, `x-2026-522-2`, …). The fix was
+written test-first; the failing test asserted three distinct stored paths.
+
+Worth knowing when reading old data: **reports saved before this fix lost the
+overwritten documents**, and no repair is possible from Firestore alone. They
+have to be re-saved from the workbook.
