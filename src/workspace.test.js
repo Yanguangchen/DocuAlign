@@ -368,12 +368,22 @@ describe("workspace controller", () => {
 
   it("handles input changes and drag/drop interaction states", async () => {
     const { clearFile } = await loadWorkspace();
+    // Choosing or dropping a file now runs the export too, and a real click on
+    // the download anchor would navigate happy-dom to the stubbed blob URL --
+    // breaking relative asset resolution for every test that follows.
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const input = document.querySelector("#excel-file");
     const dropzone = document.querySelector("#dropzone");
     const file = workbook("drop.xls");
     Object.defineProperty(input, "files", { value: [file] });
     input.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(document.querySelector("#pipeline-state").textContent).toBe("Complete"));
+    // Choosing a file now runs the whole workflow, so settle it before moving
+    // on -- an export still in flight would otherwise leak into the next test.
+    // The wait names this workbook's own archive, since a later drop would
+    // otherwise match feedback this one already left behind.
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toContain("drop.zip"));
+    expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
     expect(document.querySelector("#file-name").textContent).toBe("drop.xls");
 
     const dragEnter = new Event("dragenter", { cancelable: true });
@@ -400,7 +410,9 @@ describe("workspace controller", () => {
     const drop = new Event("drop", { cancelable: true });
     Object.defineProperty(drop, "dataTransfer", { value: { files: [workbook("dropped.xlsx")] } });
     dropzone.dispatchEvent(drop);
-    await vi.waitFor(() => expect(document.querySelector("#pipeline-state").textContent).toBe("Complete"));
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toContain("dropped.zip"));
+    expect(document.querySelector("#pipeline-state").textContent).toBe("Complete");
     expect(drop.defaultPrevented).toBe(true);
     expect(document.querySelector("#file-name").textContent).toBe("dropped.xlsx");
     clearFile();
@@ -849,6 +861,75 @@ describe("workspace controller", () => {
     // The generated documents run to however many pages their grids need.
     expect(markers.slice(7).every((marker) => marker === GENERIC_MARKER)).toBe(true);
     expect(markers.length).toBeGreaterThan(7);
+  });
+
+  it("carries a dropped workbook through export and cloud save unattended", async () => {
+    await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const cloudSave = document.querySelector("#cloud-save");
+    const saveSpy = vi.fn();
+    // The cloud-save controller is a separate ES module in the real page; the
+    // workspace hands off by clicking this button, so that is what is asserted.
+    cloudSave.addEventListener("click", saveSpy);
+    const dropzone = document.querySelector("#dropzone");
+
+    const drop = new Event("drop", { cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", { value: { files: [workbook("auto.xlsx")] } });
+    dropzone.dispatchEvent(drop);
+
+    // One drop: parsed, exported, and handed to cloud save without a click.
+    await vi.waitFor(() => expect(saveSpy).toHaveBeenCalledOnce());
+    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(clickSpy.mock.contexts[0].download).toBe("auto.zip");
+    expect(document.querySelector("#feedback").textContent).toContain("auto.zip");
+  });
+
+  it("stops the unattended workflow at whichever stage fails", async () => {
+    await loadWorkspace();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const saveSpy = vi.fn();
+    document.querySelector("#cloud-save").addEventListener("click", saveSpy);
+    const dropzone = document.querySelector("#dropzone");
+
+    const dropFile = (file) => {
+      const drop = new Event("drop", { cancelable: true });
+      Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
+      dropzone.dispatchEvent(drop);
+    };
+
+    // A file the workspace refuses never starts the pipeline at all.
+    dropFile(workbook("notes.pdf"));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    // A workbook that parses to nothing stops before the export.
+    stubReader({
+      readWorkbook: () => ({ sheetNames: ["Summary"], cells: new Map(), reportGroups: [] }),
+    });
+    dropFile(workbook("empty.xlsx"));
+    await vi.waitFor(() =>
+      expect(document.querySelector("#pipeline-state").textContent).toBe("Failed"));
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    // A workbook that parses but cannot produce a single document stops
+    // before the cloud save, so nothing is persisted for an empty export.
+    stubReader({
+      readWorkbook: () => ({
+        sheetNames: ["CV1", "TR1"],
+        cells: new Map(),
+        sheets: new Map([["CV1", new Map()], ["TR1", new Map()]]),
+        reportGroups: [{ group: 1, sheets: { CV1: "CV1", TR1: "TR1" } }],
+      }),
+      extractReportIdentity: () => ({ job_ref: "X-1" }),
+    });
+    fetch.mockResolvedValue({ ok: false, status: 404 });
+    dropFile(workbook("unbuildable.xlsx"));
+    await vi.waitFor(() =>
+      expect(document.querySelector("#feedback").textContent).toContain("Could not build"));
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("orders the export: Summary first, then reports by sampling date", async () => {

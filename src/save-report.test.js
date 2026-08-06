@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 let authStateCallback = null;
 
@@ -20,6 +20,33 @@ vi.mock("./lib/reports.js", () => ({
   saveReport: (...args) => mockSaveReport(...args),
   saveReportDocuments: (...args) => mockSaveReportDocuments(...args),
 }));
+
+const SHARE_URL = "https://example.com/view.html?share=token";
+const BUNDLE_URL = "https://example.com/view.html?bundle=token";
+const mockPublishReport = vi.fn();
+const mockPublishBundle = vi.fn();
+vi.mock("./lib/share.js", () => ({
+  publishReport: (...args) => mockPublishReport(...args),
+  publishBundle: (...args) => mockPublishBundle(...args),
+  buildPublicUrl: () => SHARE_URL,
+  buildBundleUrl: () => BUNDLE_URL,
+}));
+
+/** The workspace page's DOM, including the share modal save-report opens. */
+const WORKSPACE_DOM = `
+  <button id="cloud-save"></button>
+  <span id="file-name">lab_report.xlsx</span>
+  <div id="feedback"></div>
+  <div id="share-modal-backdrop" hidden>
+    <button id="share-modal-close" type="button"></button>
+    <p id="share-modal-link"></p>
+    <a id="share-modal-dashboard" hidden></a>
+    <a id="share-modal-whatsapp"></a>
+    <a id="share-modal-email"></a>
+    <button id="share-modal-copy" type="button"></button>
+    <p id="share-modal-note"></p>
+  </div>
+`;
 
 describe("save-report module", () => {
   beforeEach(() => {
@@ -183,5 +210,108 @@ describe("save-report module", () => {
       "Report saved with 2 documents. View it anytime on the dashboard."
     );
     delete globalThis.docuAlignWorkspace;
+  });
+
+  describe("share link and modal after saving", () => {
+    async function save(documents) {
+      document.body.innerHTML = WORKSPACE_DOM;
+      mockSaveReport.mockResolvedValueOnce({ id: "report-1" });
+      mockSaveReportDocuments.mockResolvedValueOnce(undefined);
+      globalThis.docuAlignWorkspace = { getExportDocuments: () => documents };
+      await import("./save-report.js");
+      if (authStateCallback) authStateCallback({ email: "docu@example.com" });
+      document.querySelector("#cloud-save").click();
+      await new Promise((r) => setTimeout(r, 15));
+    }
+
+    afterEach(() => {
+      delete globalThis.docuAlignWorkspace;
+    });
+
+    it("publishes a package link and opens the modal ready to send", async () => {
+      mockPublishBundle.mockResolvedValueOnce("bundle-token");
+      const documents = [
+        { slug: "Summary", title: "Summary", data: "[]" },
+        { slug: "X-1", title: "Test Report X-1", assetPath: "./a.pdf", data: null },
+      ];
+
+      await save(documents);
+
+      // Every saved document goes into one package link for the recipient.
+      expect(mockPublishBundle).toHaveBeenCalledWith(
+        {},
+        documents.map((document) => ({
+          report: {
+            id: "report-1",
+            reportName: "lab_report",
+            sourceFileName: "lab_report.xlsx",
+            status: "complete",
+          },
+          document,
+        })),
+        { name: "lab_report" },
+      );
+      expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
+      expect(document.querySelector("#share-modal-link").textContent).toBe(BUNDLE_URL);
+      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toContain(
+        encodeURIComponent(BUNDLE_URL),
+      );
+      expect(document.querySelector("#share-modal-email").getAttribute("href")).toContain("mailto:");
+
+      // The workspace modal also offers a way straight to the saved documents.
+      const dashboard = document.querySelector("#share-modal-dashboard");
+      expect(dashboard.hidden).toBe(false);
+      expect(dashboard.getAttribute("href")).toBe("./dashboard.html");
+    });
+
+    it("publishes a plain share when the report has no stored documents", async () => {
+      mockPublishReport.mockResolvedValueOnce("share-token");
+
+      await save([]);
+
+      expect(mockPublishBundle).not.toHaveBeenCalled();
+      expect(mockPublishReport).toHaveBeenCalledWith({}, expect.objectContaining({
+        id: "report-1",
+        reportName: "lab_report",
+      }));
+      expect(document.querySelector("#share-modal-link").textContent).toBe(SHARE_URL);
+    });
+
+    it("still reports the save when the share link cannot be published", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockPublishReport.mockRejectedValueOnce(new Error("denied"));
+
+      await save([]);
+
+      // The report really is saved, so the failure must not read as a save
+      // failure -- and the modal, which only offers a link, stays shut.
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Report saved. View it anytime on the dashboard.",
+      );
+      expect(document.querySelector("#share-modal-backdrop").hidden).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Could not publish the saved report's share link",
+        expect.objectContaining({ category: "SharePublishFailure" }),
+      );
+    });
+
+    it("saves without a modal on a page that renders none", async () => {
+      mockPublishReport.mockResolvedValueOnce("share-token");
+      document.body.innerHTML = `
+        <button id="cloud-save"></button>
+        <span id="file-name">lab_report.xlsx</span>
+        <div id="feedback"></div>
+      `;
+      mockSaveReport.mockResolvedValueOnce({ id: "report-1" });
+      globalThis.docuAlignWorkspace = { getExportDocuments: () => [] };
+      await import("./save-report.js");
+      if (authStateCallback) authStateCallback({ email: "docu@example.com" });
+      document.querySelector("#cloud-save").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector("#feedback").textContent).toBe(
+        "Report saved. View it anytime on the dashboard.",
+      );
+    });
   });
 });
