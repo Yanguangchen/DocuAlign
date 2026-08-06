@@ -1005,6 +1005,74 @@ describe("workspace controller", () => {
     expect(unmapped[0].samplingDate).toBe("");
   });
 
+  it("keeps every report's slug unique when they share a job reference", async () => {
+    const { planExportDocuments } = await loadWorkspace();
+
+    // One job number covering several cargo holds is normal lab practice, and
+    // the slug is the Firestore document id -- a collision silently overwrites
+    // one report with another, so the wrong report is served to a recipient.
+    const plan = planExportDocuments({ sheetNames: ["CV1", "TR1", "CV1 (2)", "TR1 (2)"] }, [
+      { group: 1, job_ref: "X-2026-522", sheets: { CV1: "CV1", TR1: "TR1" } },
+      { group: 2, job_ref: "X-2026-522", sheets: { CV1: "CV1 (2)", TR1: "TR1 (2)" } },
+    ]);
+
+    // The first keeps the clean job-reference name; later ones are
+    // disambiguated by their group, and their datasheets follow suit.
+    expect(plan.map((entry) => entry.slug)).toEqual(["X-2026-522", "X-2026-522-2"]);
+
+    // A third hold sharing the reference, plus a worksheet whose own name
+    // already slugifies onto a taken slug, still resolve to distinct ids.
+    const crowded = planExportDocuments(
+      { sheetNames: ["CV1", "TR1", "CV1 (2)", "TR1 (2)", "CV1 (3)", "TR1 (3)", "X-2026-522"] },
+      [
+        { group: 1, job_ref: "X-2026-522", sheets: { CV1: "CV1", TR1: "TR1" } },
+        { group: 2, job_ref: "X-2026-522", sheets: { CV1: "CV1 (2)", TR1: "TR1 (2)" } },
+        { group: 3, job_ref: "X-2026-522", sheets: { CV1: "CV1 (3)", TR1: "TR1 (3)" } },
+      ],
+    );
+    const crowdedSlugs = crowded.map((entry) => entry.slug);
+    expect(new Set(crowdedSlugs).size).toBe(crowdedSlugs.length);
+    expect(crowdedSlugs.slice(0, 3)).toEqual(["X-2026-522", "X-2026-522-2", "X-2026-522-3"]);
+  });
+
+  it("disambiguates again when the first fallback slug is also taken", async () => {
+    const { planExportDocuments, setDisabledDocumentKinds } = await loadWorkspace();
+    setDisabledDocumentKinds([]);
+
+    // A standalone worksheet can land on the very slug a repeated job
+    // reference was already disambiguated into, so one pass is not always
+    // enough: report group 2 takes "notes-2", and the worksheet sitting at
+    // sheet index 1 would ask for that same name.
+    const plan = planExportDocuments(
+      { sheetNames: ["CV1", "notes", "TR1", "CV1 (2)", "TR1 (2)"] },
+      [
+        { group: 1, job_ref: "notes", sheets: { CV1: "CV1", TR1: "TR1" } },
+        { group: 2, job_ref: "notes", sheets: { CV1: "CV1 (2)", TR1: "TR1 (2)" } },
+      ],
+    );
+
+    const slugs = plan.map((entry) => entry.slug);
+    expect(new Set(slugs).size).toBe(slugs.length);
+    expect(slugs).toEqual(["notes", "notes-2", "notes-2-2"]);
+  });
+
+  it("keeps datasheet slugs unique when their report's slug repeats", async () => {
+    const { planExportDocuments, setDisabledDocumentKinds } = await loadWorkspace();
+    setDisabledDocumentKinds([]);
+
+    const plan = planExportDocuments(
+      { sheetNames: ["CV1", "TR1", "DS1", "CV1 (2)", "TR1 (2)", "DS1 (2)"] },
+      [
+        { group: 1, job_ref: "X-1", sheets: { CV1: "CV1", TR1: "TR1", DS1: "DS1" } },
+        { group: 2, job_ref: "X-1", sheets: { CV1: "CV1 (2)", TR1: "TR1 (2)", DS1: "DS1 (2)" } },
+      ],
+    );
+
+    const slugs = plan.map((entry) => entry.slug);
+    expect(new Set(slugs).size).toBe(slugs.length);
+    expect(slugs).toEqual(["X-1", "X-1-DS1", "X-1-2", "X-1-2-DS1"]);
+  });
+
   it("plans around reports whose datasheets are missing", async () => {
     const { planExportDocuments } = await loadWorkspace();
     const plan = planExportDocuments({ sheetNames: ["CV1", "TR1"] }, [

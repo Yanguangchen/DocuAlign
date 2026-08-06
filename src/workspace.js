@@ -351,6 +351,30 @@ function reportIdentifier(report) {
 }
 
 /**
+ * Claim a slug no other planned document is using.
+ *
+ * A document's slug is both its file name in the export archive and its
+ * Firestore document id, so a duplicate does not merely look untidy: the
+ * second document overwrites the first, and every card that points at it then
+ * serves the wrong report. One job reference covering several cargo holds is
+ * ordinary lab practice, so collisions are expected rather than exotic.
+ * @param {string} preferred - The slug the document would like.
+ * @param {string|number} suffix - Disambiguator when the preferred slug is taken.
+ * @param {Set<string>} used - Slugs already claimed by this plan.
+ * @returns {string} A slug unique within the plan, now claimed.
+ */
+function claimSlug(preferred, suffix, used) {
+  let slug = preferred;
+  let attempt = 0;
+  while (used.has(slug)) {
+    attempt += 1;
+    slug = attempt === 1 ? `${preferred}-${suffix}` : `${preferred}-${suffix}-${attempt}`;
+  }
+  used.add(slug);
+  return slug;
+}
+
+/**
  * Plan every document the export will produce. Each test report (its `CV1`
  * cover plus `TR1` results) is one document, and the standalone worksheets --
  * the summary, the coral/organic reference, and every `DS1` and `SB1`
@@ -367,9 +391,12 @@ function reportIdentifier(report) {
 function planExportDocuments(workbook, reports, models = mappedReports) {
   const documents = [];
   const claimed = new Set();
+  // Slugs are Firestore ids and archive file names, so they must not repeat
+  // across the whole plan -- see claimSlug.
+  const slugs = new Set();
 
   reports.forEach((report) => {
-    const identifier = reportIdentifier(report);
+    const identifier = claimSlug(reportIdentifier(report), report.group, slugs);
     // The cover and test-result sheets belong to the report, which keeps its
     // established layout: the reference pages are copied and only this group's
     // own values are overlaid, never re-laid-out from the worksheet grid.
@@ -397,7 +424,7 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
       if (!sheetName) return;
       claimed.add(sheetName);
       documents.push({
-        slug: `${identifier}-${prefix}`,
+        slug: claimSlug(`${identifier}-${prefix}`, report.group, slugs),
         title: `${prefix} Datasheet ${report.job_ref || report.group}`,
         subtitle: sheetName,
         kind: DOCUMENT_KINDS.DATASHEET,
@@ -407,11 +434,11 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
   });
 
   // Anything outside a report group (Summary, coral + org, …) stands alone.
-  workbook.sheetNames.forEach((sheetName) => {
+  workbook.sheetNames.forEach((sheetName, index) => {
     if (claimed.has(sheetName)) return;
     const isSummary = sheetName.trim() === "Summary";
     const document = {
-      slug: slugify(sheetName) || "sheet",
+      slug: claimSlug(slugify(sheetName) || "sheet", index + 1, slugs),
       title: sheetName.trim(),
       subtitle: "",
       kind: isSummary ? DOCUMENT_KINDS.SUMMARY : DOCUMENT_KINDS.WORKSHEET,
