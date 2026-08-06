@@ -351,6 +351,30 @@ function reportIdentifier(report) {
 }
 
 /**
+ * Claim a slug no other planned document is using.
+ *
+ * A document's slug is both its file name in the export archive and its
+ * Firestore document id, so a duplicate does not merely look untidy: the
+ * second document overwrites the first, and every card that points at it then
+ * serves the wrong report. One job reference covering several cargo holds is
+ * ordinary lab practice, so collisions are expected rather than exotic.
+ * @param {string} preferred - The slug the document would like.
+ * @param {string|number} suffix - Disambiguator when the preferred slug is taken.
+ * @param {Set<string>} used - Slugs already claimed by this plan.
+ * @returns {string} A slug unique within the plan, now claimed.
+ */
+function claimSlug(preferred, suffix, used) {
+  let slug = preferred;
+  let attempt = 0;
+  while (used.has(slug)) {
+    attempt += 1;
+    slug = attempt === 1 ? `${preferred}-${suffix}` : `${preferred}-${suffix}-${attempt}`;
+  }
+  used.add(slug);
+  return slug;
+}
+
+/**
  * Plan every document the export will produce. Each test report (its `CV1`
  * cover plus `TR1` results) is one document, and the standalone worksheets --
  * the summary, the coral/organic reference, and every `DS1` and `SB1`
@@ -367,9 +391,12 @@ function reportIdentifier(report) {
 function planExportDocuments(workbook, reports, models = mappedReports) {
   const documents = [];
   const claimed = new Set();
+  // Slugs are Firestore ids and archive file names, so they must not repeat
+  // across the whole plan -- see claimSlug.
+  const slugs = new Set();
 
   reports.forEach((report) => {
-    const identifier = reportIdentifier(report);
+    const identifier = claimSlug(reportIdentifier(report), report.group, slugs);
     // The cover and test-result sheets belong to the report, which keeps its
     // established layout: the reference pages are copied and only this group's
     // own values are overlaid, never re-laid-out from the worksheet grid.
@@ -397,7 +424,7 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
       if (!sheetName) return;
       claimed.add(sheetName);
       documents.push({
-        slug: `${identifier}-${prefix}`,
+        slug: claimSlug(`${identifier}-${prefix}`, report.group, slugs),
         title: `${prefix} Datasheet ${report.job_ref || report.group}`,
         subtitle: sheetName,
         kind: DOCUMENT_KINDS.DATASHEET,
@@ -407,11 +434,11 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
   });
 
   // Anything outside a report group (Summary, coral + org, …) stands alone.
-  workbook.sheetNames.forEach((sheetName) => {
+  workbook.sheetNames.forEach((sheetName, index) => {
     if (claimed.has(sheetName)) return;
     const isSummary = sheetName.trim() === "Summary";
     const document = {
-      slug: slugify(sheetName) || "sheet",
+      slug: claimSlug(slugify(sheetName) || "sheet", index + 1, slugs),
       title: sheetName.trim(),
       subtitle: "",
       kind: isSummary ? DOCUMENT_KINDS.SUMMARY : DOCUMENT_KINDS.WORKSHEET,
@@ -468,29 +495,93 @@ function documentSections(plan, sheets) {
 }
 
 /**
+ * The stable key identifying one of a report's embedded pictures.
+ *
+ * Shared by the upload and the published payload so a viewer can pair a
+ * picture's metadata back up with the file that was uploaded for it.
+ * @param {number} groupIndex - The report's worksheet group.
+ * @param {string} slot - `preparedSignature`, `authorisedSignature`, or `photo`.
+ * @param {number} [index] - Position, for the appendix photographs.
+ * @returns {string} Asset key.
+ */
+function pictureKey(groupIndex, slot, index) {
+  return index === undefined ? `${groupIndex}:${slot}` : `${groupIndex}:${slot}:${index}`;
+}
+
+/**
+ * Every embedded picture the mapped reports carry, ready to upload.
+ *
+ * A share's `documentData` is bounded at 100,000 characters, and one report's
+ * pictures run to hundreds of kilobytes, so the bytes cannot travel in the
+ * payload. They are uploaded once at save time instead and the payload carries
+ * each picture's URL.
+ * @returns {Array<{key: string, mimeType: string, bytes: Uint8Array}>} Pictures with bytes.
+ */
+function getPublishableAssets() {
+  const assets = [];
+  const collect = (asset, key) => {
+    if (asset?.bytes?.length) {
+      assets.push({ key, mimeType: asset.mimeType, bytes: asset.bytes });
+    }
+  };
+
+  mappedReports.forEach((report, groupIndex) => {
+    collect(report.assets?.preparedSignature, pictureKey(groupIndex, "preparedSignature"));
+    collect(report.assets?.authorisedSignature, pictureKey(groupIndex, "authorisedSignature"));
+    (report.appendix?.photos ?? []).forEach((photo, index) => {
+      collect(photo, pictureKey(groupIndex, "photo", index));
+    });
+  });
+
+  return assets;
+}
+
+/**
  * Describe a mapped report's embedded pictures without their bytes.
  *
  * The downloaded report renders from the in-memory model, which carries the
  * workbook's signatures and appendix photographs in full. A published share
  * cannot: one report's pictures run to megabytes, far past the 100,000
  * character `documentData` bound the Firestore rules validate in a single
- * expression. Only the picture metadata travels, so a share rebuilt by the
- * public viewer keeps the reference pages' own artwork.
+ * expression. Only the metadata travels -- plus, for a picture that was
+ * uploaded to Cloud Storage, the URL the viewer refetches it from, so a share
+ * shows the uploaded workbook's own artwork rather than the reference's.
  * @param {Object} report - Semantic report model.
- * @returns {Object} The report with picture bytes replaced by their metadata.
+ * @param {number} groupIndex - The report's worksheet group.
+ * @param {Map<string, string>} pictureUrls - Asset key to uploaded picture URL.
+ * @returns {Object} The report with picture bytes replaced by metadata and URLs.
  */
-function withoutPictureBytes(report) {
-  const describe = (asset) => (asset
-    ? { name: asset.name, row: asset.row, column: asset.column, mimeType: asset.mimeType }
-    : asset);
+function withoutPictureBytes(report, groupIndex, pictureUrls) {
+  const describe = (asset, key) => {
+    if (!asset) return asset;
+    const url = pictureUrls.get(key);
+    const described = {
+      name: asset.name,
+      row: asset.row,
+      column: asset.column,
+      mimeType: asset.mimeType,
+    };
+    // Absent when the picture had no bytes, or its upload failed; the viewer
+    // then keeps the reference artwork for that one image.
+    if (url) described.url = url;
+    return described;
+  };
 
   return Object.assign({}, report, {
     assets: {
-      preparedSignature: describe(report.assets?.preparedSignature),
-      authorisedSignature: describe(report.assets?.authorisedSignature),
+      preparedSignature: describe(
+        report.assets?.preparedSignature,
+        pictureKey(groupIndex, "preparedSignature"),
+      ),
+      authorisedSignature: describe(
+        report.assets?.authorisedSignature,
+        pictureKey(groupIndex, "authorisedSignature"),
+      ),
     },
     appendix: Object.assign({}, report.appendix, {
-      photos: (report.appendix?.photos ?? []).map(describe),
+      photos: (report.appendix?.photos ?? []).map(
+        (photo, index) => describe(photo, pictureKey(groupIndex, "photo", index)),
+      ),
     }),
   });
 }
@@ -502,13 +593,18 @@ function withoutPictureBytes(report) {
  * existing section payload.
  * @param {{sheets: string[], renderer?: string}} plan - Planned document.
  * @param {Map<string, Map<string, string>>} sheets - Per-sheet cell lookups.
+ * @param {Map<string, string>} pictureUrls - Asset key to uploaded picture URL.
  * @returns {string} Bounded JSON document data.
  */
-function serializeDocumentData(plan, sheets) {
+function serializeDocumentData(plan, sheets, pictureUrls) {
   if (plan.renderer === "report") {
     return JSON.stringify({
       renderer: "report",
-      report: withoutPictureBytes(mappedReports.get(plan.groupIndex)),
+      report: withoutPictureBytes(
+        mappedReports.get(plan.groupIndex),
+        plan.groupIndex,
+        pictureUrls,
+      ),
     });
   }
   if (plan.renderer === "summary") {
@@ -677,9 +773,12 @@ function downloadArchive(archive, baseName) {
  * Worksheet grids are serialised to JSON here because Firestore cannot store
  * nested arrays, and the same string is what a published share carries so the
  * public viewer can rebuild the PDF.
+ * @param {Map<string, string>} [pictureUrls] - Asset key to uploaded picture
+ * URL, from `getPublishableAssets()`. Omitted before the pictures are
+ * uploaded, in which case a share keeps the reference pages' own artwork.
  * @returns {Array<Object>|null} Serialisable documents, or null before a parse.
  */
-function getExportDocuments() {
+function getExportDocuments(pictureUrls = new Map()) {
   if (!parsedDocuments) return null;
 
   return parsedDocuments.map((plan) => ({
@@ -688,7 +787,7 @@ function getExportDocuments() {
     subtitle: plan.subtitle,
     assetPath: plan.assetPath ?? null,
     // The fixed-format test report is served from its asset and carries no data.
-    data: plan.assetPath ? null : serializeDocumentData(plan, parsedSheets),
+    data: plan.assetPath ? null : serializeDocumentData(plan, parsedSheets, pictureUrls),
   }));
 }
 
@@ -808,6 +907,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   exportOrder,
   formatFileSize,
   getExportDocuments,
+  getPublishableAssets,
   isExcelFile,
   planExportDocuments,
   reportBaseName,

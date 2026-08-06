@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// ===============================================================
+// SHARED BUCKET — READ THIS BEFORE DEPLOYING
+//
+// The Firebase project `crewhub-43647` is shared by DocuAlign,
+// WorkGrid, and CubeSync, exactly like `firestore.rules` (see
+// AGENTS.md §1). This file therefore holds only the DocuAlign
+// block. If the other apps already have Cloud Storage rules
+// deployed, DO NOT deploy this file wholesale — paste the
+// `docuAlignReportPhotos` match below into the existing rules in
+// the Firebase console instead, leaving every other match intact.
+//
+// It is deliberately NOT wired into `firebase.json`, so a routine
+// `firebase deploy` cannot overwrite another app's rules by
+// accident.
+// ===============================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // DocuAlign report pictures: appendix photographs and the two
+    // signature images, uploaded once when a report is saved.
+    //
+    // Reads are deliberately closed here. A public share never reads
+    // through these rules: `getDownloadURL()` mints a URL carrying its
+    // own unguessable access token, and that token grants the read.
+    // That is the same capability-URL model the share tokens use, and
+    // it means the bucket itself is never publicly listable or
+    // browsable. Do NOT relax this to `allow read: if true`.
+    match /docuAlignReportPhotos/{reportId}/{picture} {
+      allow read: if request.auth != null
+        && request.auth.token.email_verified == true;
+
+      // Staff upload only, and only images, bounded so a malformed or
+      // hostile file cannot fill the shared bucket.
+      allow write: if request.auth != null
+        && request.auth.token.email_verified == true
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

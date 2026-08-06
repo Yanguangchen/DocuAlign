@@ -12,6 +12,7 @@ vi.mock("firebase/auth", () => ({
 vi.mock("./lib/firebase.js", () => ({
   auth: {},
   db: {},
+  storage: {},
 }));
 
 const mockSaveReport = vi.fn();
@@ -19,6 +20,11 @@ const mockSaveReportDocuments = vi.fn();
 vi.mock("./lib/reports.js", () => ({
   saveReport: (...args) => mockSaveReport(...args),
   saveReportDocuments: (...args) => mockSaveReportDocuments(...args),
+}));
+
+const mockUploadReportPhotos = vi.fn(async () => new Map());
+vi.mock("./lib/report-photos.js", () => ({
+  uploadReportPhotos: (...args) => mockUploadReportPhotos(...args),
 }));
 
 const SHARE_URL = "https://example.com/view.html?share=token";
@@ -41,8 +47,6 @@ const WORKSPACE_DOM = `
     <button id="share-modal-close" type="button"></button>
     <p id="share-modal-link"></p>
     <a id="share-modal-dashboard" hidden></a>
-    <a id="share-modal-whatsapp"></a>
-    <a id="share-modal-email"></a>
     <button id="share-modal-copy" type="button"></button>
     <p id="share-modal-note"></p>
   </div>
@@ -228,7 +232,7 @@ describe("save-report module", () => {
       delete globalThis.docuAlignWorkspace;
     });
 
-    it("publishes a package link and opens the modal ready to send", async () => {
+    it("publishes a package link and opens the modal with it", async () => {
       mockPublishBundle.mockResolvedValueOnce("bundle-token");
       const documents = [
         { slug: "Summary", title: "Summary", data: "[]" },
@@ -253,15 +257,42 @@ describe("save-report module", () => {
       );
       expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
       expect(document.querySelector("#share-modal-link").textContent).toBe(BUNDLE_URL);
-      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toContain(
-        encodeURIComponent(BUNDLE_URL),
-      );
-      expect(document.querySelector("#share-modal-email").getAttribute("href")).toContain("mailto:");
 
       // The workspace modal also offers a way straight to the saved documents.
       const dashboard = document.querySelector("#share-modal-dashboard");
       expect(dashboard.hidden).toBe(false);
       expect(dashboard.getAttribute("href")).toBe("./dashboard.html");
+    });
+
+    it("uploads the workbook's pictures and publishes their URLs", async () => {
+      mockPublishBundle.mockResolvedValueOnce("bundle-token");
+      const pictures = [
+        { key: "1:photo:0", mimeType: "image/jpeg", bytes: new Uint8Array([1, 2]) },
+      ];
+      const urls = new Map([["1:photo:0", "https://cdn/1_photo_0?token=t"]]);
+      mockUploadReportPhotos.mockResolvedValueOnce(urls);
+
+      document.body.innerHTML = WORKSPACE_DOM;
+      mockSaveReport.mockResolvedValueOnce({ id: "report-1" });
+      mockSaveReportDocuments.mockResolvedValueOnce(undefined);
+      const getExportDocuments = vi.fn(() => [{ slug: "X-1", title: "Test Report X-1", data: "{}" }]);
+      globalThis.docuAlignWorkspace = {
+        getPublishableAssets: () => pictures,
+        getExportDocuments,
+      };
+      await import("./save-report.js");
+      if (authStateCallback) authStateCallback({ email: "docu@example.com" });
+      document.querySelector("#cloud-save").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      // Pictures go to Storage under the saved report's id, and the URLs they
+      // come back with are what the published documents carry.
+      expect(mockUploadReportPhotos).toHaveBeenCalledWith(
+        expect.anything(),
+        "report-1",
+        pictures,
+      );
+      expect(getExportDocuments).toHaveBeenCalledWith(urls);
     });
 
     it("publishes a plain share when the report has no stored documents", async () => {

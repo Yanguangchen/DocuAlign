@@ -200,9 +200,78 @@ describe("view-report module", () => {
 
       expect(url).toBe("blob:rebuilt");
       // The recipient sees the uploaded workbook's report, not the reference.
-      expect(createRakReportPdf).toHaveBeenCalledWith([report]);
+      expect(createRakReportPdf).toHaveBeenCalledWith([expect.objectContaining(report)]);
       const [blob] = URL.createObjectURL.mock.calls[0];
       expect(blob.type).toBe("application/pdf");
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("refetches a shared report's uploaded photographs before rendering", async () => {
+      const photo = new Uint8Array([1, 2, 3, 4]);
+      const signature = new Uint8Array([9, 9]);
+      fetch.mockReset().mockImplementation(async (url) => ({
+        ok: true,
+        arrayBuffer: async () => (url.includes("sig") ? signature : photo).buffer,
+      }));
+      const createRakReportPdf = vi.fn(async () =>
+        new Blob([new Uint8Array([37, 80, 68, 70])], { type: "application/pdf" }));
+      globalThis.docuAlignRakReportPdf = { createRakReportPdf };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      await resolveDocumentUrl(share({
+        documentData: JSON.stringify({
+          renderer: "report",
+          report: {
+            jobRef: "X-1",
+            assets: {
+              preparedSignature: { name: "sig-a", mimeType: "image/png", url: "https://x/sig-a" },
+              authorisedSignature: null,
+            },
+            appendix: {
+              label: "Photographs",
+              photos: [{ name: "p1", mimeType: "image/jpeg", url: "https://x/p1" }],
+            },
+          },
+        }),
+      }));
+
+      // The bytes the renderer draws come back from Storage, so a recipient
+      // sees the uploaded workbook's artwork rather than the reference's.
+      const [[rebuilt]] = createRakReportPdf.mock.calls[0];
+      expect([...rebuilt.appendix.photos[0].bytes]).toEqual([1, 2, 3, 4]);
+      expect([...rebuilt.assets.preparedSignature.bytes]).toEqual([9, 9]);
+      expect(rebuilt.assets.authorisedSignature).toBeNull();
+      // Untouched fields survive the restore.
+      expect(rebuilt.appendix.label).toBe("Photographs");
+      expect(rebuilt.jobRef).toBe("X-1");
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("keeps the reference artwork when an uploaded picture cannot be fetched", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
+      const createRakReportPdf = vi.fn(async () =>
+        new Blob([new Uint8Array([37, 80, 68, 70])], { type: "application/pdf" }));
+      globalThis.docuAlignRakReportPdf = { createRakReportPdf };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      await resolveDocumentUrl(share({
+        documentData: JSON.stringify({
+          renderer: "report",
+          report: {
+            appendix: { photos: [{ name: "p1", url: "https://x/gone" }] },
+          },
+        }),
+      }));
+
+      // No bytes means "nothing to draw here", which leaves the reference
+      // page's own artwork rather than failing the whole document.
+      const [[rebuilt]] = createRakReportPdf.mock.calls[0];
+      expect(rebuilt.appendix.photos[0].bytes).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] Could not load a shared report picture",
+        expect.objectContaining({ category: "PhotoFetchFailure" }),
+      );
       delete globalThis.docuAlignRakReportPdf;
     });
 

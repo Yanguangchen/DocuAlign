@@ -67,8 +67,6 @@ describe("dashboard module", () => {
           <button id="share-modal-close" type="button">Close</button>
           <strong id="share-modal-title"></strong>
           <p id="share-modal-link"></p>
-          <a id="share-modal-whatsapp"></a>
-          <a id="share-modal-email"></a>
           <button id="share-modal-copy" type="button">Copy link</button>
           <p id="share-modal-note"></p>
         </div>
@@ -1020,24 +1018,7 @@ describe("dashboard module", () => {
       { id: "doc-2", reportName: "Report 2", matchFilter: true },
     ];
 
-    it("builds a WhatsApp click-to-chat URL with the link in the message", async () => {
-      const { buildWhatsAppShareUrl } = await import("./dashboard.js");
-      const url = buildWhatsAppShareUrl("https://example.com/x", "Report 1");
-      expect(url).toBe(
-        `https://wa.me/?text=${encodeURIComponent("Report 1\nhttps://example.com/x")}`,
-      );
-    });
-
-    it("builds a mailto: URL with a subject and the link in the body", async () => {
-      const { buildMailtoShareUrl } = await import("./dashboard.js");
-      const url = buildMailtoShareUrl("https://example.com/x", "Report 1");
-      expect(url).toBe(
-        `mailto:?subject=${encodeURIComponent("Report 1 — DocuAlign report link")}`
-        + `&body=${encodeURIComponent("Report 1\n\nhttps://example.com/x")}`,
-      );
-    });
-
-    it("opens with WhatsApp/email actions ready after a report link is created", async () => {
+    it("opens with the link ready to copy after a report link is created", async () => {
       mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
       await renderOneReport();
 
@@ -1048,16 +1029,10 @@ describe("dashboard module", () => {
 
       expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
       expect(document.querySelector("#share-modal-link").textContent).toBe(SHARE_URL);
-      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toBe(
-        `https://wa.me/?text=${encodeURIComponent(`Report 1\n${SHARE_URL}`)}`,
-      );
-      expect(document.querySelector("#share-modal-email").getAttribute("href")).toBe(
-        `mailto:?subject=${encodeURIComponent("Report 1 — DocuAlign report link")}`
-        + `&body=${encodeURIComponent(`Report 1\n\n${SHARE_URL}`)}`,
-      );
+      expect(document.querySelector("#share-modal-copy")).not.toBeNull();
     });
 
-    it("opens with a document-count label after a group link is created", async () => {
+    it("opens with the group link after one is created", async () => {
       mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
       await renderReports(twoReports);
       toggle("doc-1");
@@ -1068,9 +1043,6 @@ describe("dashboard module", () => {
 
       expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
       expect(document.querySelector("#share-modal-link").textContent).toBe(BUNDLE_URL);
-      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toContain(
-        encodeURIComponent("2 reports"),
-      );
     });
 
     it("closes on the close button, the backdrop, and Escape -- but not a panel click", async () => {
@@ -1098,12 +1070,12 @@ describe("dashboard module", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       expect(backdrop.hidden).toBe(true);
 
-      openShareModal(SHARE_URL, "Report 1");
+      openShareModal(SHARE_URL);
       expect(backdrop.hidden).toBe(false);
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       expect(backdrop.hidden).toBe(true);
 
-      openShareModal(SHARE_URL, "Report 1");
+      openShareModal(SHARE_URL);
       document
         .querySelector("#share-modal-close")
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
