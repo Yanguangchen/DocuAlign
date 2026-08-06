@@ -74,11 +74,20 @@ export function selectedEntries() {
   return entries;
 }
 
+/**
+ * Copy a URL to the clipboard, best-effort.
+ * @param {string} url - The URL to copy.
+ * @param {string} caller - Logging context for a failed copy.
+ * @returns {Promise<boolean>} Whether the copy succeeded, so a caller driving
+ * its own UI feedback (the persistent copy button) can tell success from
+ * failure rather than assuming the silent-by-design creation-time copy.
+ */
 async function copyToClipboard(url, caller) {
-  if (!navigator.clipboard?.writeText) return;
+  if (!navigator.clipboard?.writeText) return false;
 
   try {
     await navigator.clipboard.writeText(url);
+    return true;
   } catch (error) {
     // Copying is a convenience and must not hide the rendered capability URL,
     // but failures remain useful for diagnosing browser permission issues.
@@ -89,7 +98,74 @@ async function copyToClipboard(url, caller) {
       category: "ClipboardFailure",
       errorMessage: String(error),
     });
+    return false;
   }
+}
+
+/** Static two-rectangle "copy" icon; no interpolated data, so innerHTML is safe. */
+const COPY_ICON_MARKUP = '<svg viewBox="0 0 24 24" aria-hidden="true">'
+  + '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>'
+  + '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>'
+  + "</svg>";
+
+/** How long the "Copied!" feedback stays visible after a click. */
+const COPY_FEEDBACK_MS = 2000;
+
+/**
+ * Build a small icon button that re-copies an already-published URL on
+ * demand, so staff are not stuck selecting the rendered link text and
+ * pressing Ctrl+C every time they want it again after the one-time
+ * copy-on-creation.
+ * @param {string} url - The published URL this button copies.
+ * @param {string} caller - Logging context for a failed copy.
+ * @returns {HTMLElement} A `<span>` wrapping the button and its feedback text.
+ */
+function createCopyLinkButton(url, caller) {
+  const wrap = document.createElement("span");
+  wrap.className = "copy-link";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy-link-button";
+  button.setAttribute("aria-label", "Copy link");
+  button.innerHTML = COPY_ICON_MARKUP;
+
+  const feedback = document.createElement("span");
+  feedback.className = "copy-feedback";
+  feedback.setAttribute("aria-live", "polite");
+
+  let hideTimer;
+  button.addEventListener("click", async () => {
+    const copied = await copyToClipboard(url, caller);
+    clearTimeout(hideTimer);
+    feedback.textContent = copied ? "Copied!" : "Could not copy — select the link instead.";
+    button.classList.toggle("is-copied", copied);
+    hideTimer = setTimeout(() => {
+      feedback.textContent = "";
+      button.classList.remove("is-copied");
+    }, COPY_FEEDBACK_MS);
+  });
+
+  wrap.append(button, feedback);
+  return wrap;
+}
+
+/**
+ * Render a published capability URL alongside a persistent copy button.
+ * @param {HTMLElement} container - Element to fill (`.share-link` or `#bundle-link`).
+ * @param {string} url - The published URL.
+ * @param {string} caller - Logging context for a failed copy.
+ * @returns {void}
+ */
+function renderShareLink(container, url, caller) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener";
+  anchor.textContent = url;
+
+  container.replaceChildren(anchor, createCopyLinkButton(url, caller));
+  container.hidden = false;
 }
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -278,13 +354,7 @@ export async function handleBundleClick() {
     );
     const url = buildBundleUrl(token);
 
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.target = "_blank";
-    anchor.rel = "noopener";
-    anchor.textContent = url;
-    bundleLink.replaceChildren(anchor);
-    bundleLink.hidden = false;
+    renderShareLink(bundleLink, url, "handleBundleClick");
     bundleCreate.textContent = "Group link created";
 
     await copyToClipboard(url, "handleBundleClick");
@@ -345,15 +415,7 @@ export async function handleShareClick(button) {
       );
     const url = documents.length > 0 ? buildBundleUrl(token) : buildPublicUrl(token);
 
-    if (output) {
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.target = "_blank";
-      anchor.rel = "noopener";
-      anchor.textContent = url;
-      output.replaceChildren(anchor);
-      output.hidden = false;
-    }
+    if (output) renderShareLink(output, url, "handleShareClick");
     button.textContent = "Public link created";
 
     await copyToClipboard(url, "handleShareClick");

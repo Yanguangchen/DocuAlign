@@ -395,7 +395,8 @@ h1 {
 .upload-symbol svg,
 .primary-button svg,
 .share-pdf-button svg,
-.file-icon svg {
+.file-icon svg,
+.copy-link-button svg {
   width: 26px;
   fill: none;
   stroke: currentColor;
@@ -898,14 +899,62 @@ a:focus-visible {
 
 .share-link {
   margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   font-size: 0.78rem;
-  word-break: break-all;
 }
 
 .share-link a {
   color: var(--teal);
   font-weight: 600;
+  word-break: break-all;
+}
+
+/* Wraps the copy button with its transient feedback text, inline with the
+   rendered link so re-copying never needs a select-and-Ctrl+C round trip. */
+.copy-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.copy-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.copy-link-button svg {
+  width: 15px;
+}
+
+.copy-link-button:hover {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--paper);
+}
+
+.copy-link-button.is-copied {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--paper);
+}
+
+.copy-feedback {
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: var(--teal);
 }
 
 .share-card {

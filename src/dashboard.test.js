@@ -430,6 +430,75 @@ describe("dashboard module", () => {
       delete navigator.clipboard;
     });
 
+    it("renders a copy button that re-copies the link on demand", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      // The creation-time copy already happened; clicking the button must
+      // copy again rather than relying on that first, easy-to-miss copy.
+      writeText.mockClear();
+      const copyButton = document.querySelector(".share-link .copy-link-button");
+      expect(copyButton.getAttribute("aria-label")).toBe("Copy link");
+
+      vi.useFakeTimers();
+      try {
+        copyButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+        expect(copyButton.classList.contains("is-copied")).toBe(true);
+        expect(document.querySelector(".share-link .copy-feedback").textContent)
+          .toBe("Copied!");
+
+        // The feedback is transient, so a later click still shows fresh text.
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(copyButton.classList.contains("is-copied")).toBe(false);
+        expect(document.querySelector(".share-link .copy-feedback").textContent).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+      delete navigator.clipboard;
+    });
+
+    it("tells the user to copy manually when the copy button's copy fails", async () => {
+      const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      document
+        .querySelector(".share-link .copy-link-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector(".share-link .copy-feedback").textContent).toBe(
+        "Could not copy — select the link instead.",
+      );
+      expect(document.querySelector(".share-link .copy-link-button").classList.contains(
+        "is-copied",
+      )).toBe(false);
+      delete navigator.clipboard;
+    });
+
     it("re-enables the button and reports failures on publish error", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockPublishReport.mockRejectedValueOnce(new Error("denied"));
@@ -659,6 +728,28 @@ describe("dashboard module", () => {
       expect(link.textContent).toBe(BUNDLE_URL);
       expect(button.disabled).toBe(true);
       expect(button.textContent).toContain("created");
+    });
+
+    it("also gives the group link its own re-copy button", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      writeText.mockClear();
+      document
+        .querySelector("#bundle-link .copy-link-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(writeText).toHaveBeenCalledWith(BUNDLE_URL);
+      delete navigator.clipboard;
     });
 
     it("copies the group URL to the clipboard when available", async () => {
