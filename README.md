@@ -218,6 +218,11 @@ from the dashboard. Each card offers a **Create public link** button that:
    PDF output path, publish timestamp — never the staff creator email) to the
    `docuAlignPublicShares/{token}` Firestore collection.
 3. Shows the resulting URL (`view.html?share=<token>`) and copies it to the clipboard.
+4. Opens a share modal offering **WhatsApp**, **Email**, and a **Copy link**
+   button, so the link can go straight to a recipient without switching apps
+   to paste it in manually. The same modal appears after creating a group
+   ("package") link. The rendered link itself also keeps its own small copy
+   icon afterward, for re-copying later without selecting the text by hand.
 
 Anyone holding the full URL — no Google sign-in required — can open `view.html`
 to read that one report snapshot and open its PDF output. The URL is specifically

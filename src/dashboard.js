@@ -28,6 +28,13 @@ const bundleBar = document.querySelector("#bundle-bar");
 const bundleCount = document.querySelector("#bundle-count");
 const bundleCreate = document.querySelector("#bundle-create");
 const bundleLink = document.querySelector("#bundle-link");
+const shareModalBackdrop = document.querySelector("#share-modal-backdrop");
+const shareModalClose = document.querySelector("#share-modal-close");
+const shareModalLink = document.querySelector("#share-modal-link");
+const shareModalWhatsapp = document.querySelector("#share-modal-whatsapp");
+const shareModalEmail = document.querySelector("#share-modal-email");
+const shareModalCopy = document.querySelector("#share-modal-copy");
+const shareModalNote = document.querySelector("#share-modal-note");
 
 let allReports = [];
 let loadedForUser = null;
@@ -167,6 +174,78 @@ function renderShareLink(container, url, caller) {
   container.replaceChildren(anchor, createCopyLinkButton(url, caller));
   container.hidden = false;
 }
+
+/**
+ * Build a WhatsApp click-to-chat URL with the share message pre-filled.
+ * Opening it lands on WhatsApp Web (already signed in) or the native app,
+ * with the message ready to send to whichever contact the user picks.
+ * @param {string} url - The published capability URL.
+ * @param {string} label - What is being shared, for the message text.
+ * @returns {string} A `https://wa.me/` URL.
+ */
+export function buildWhatsAppShareUrl(url, label) {
+  return `https://wa.me/?text=${encodeURIComponent(`${label}\n${url}`)}`;
+}
+
+/**
+ * Build a `mailto:` URL that opens the visitor's default mail app with the
+ * share link pre-filled in the subject and body.
+ * @param {string} url - The published capability URL.
+ * @param {string} label - What is being shared, for the subject/body text.
+ * @returns {string} A `mailto:` URL.
+ */
+export function buildMailtoShareUrl(url, label) {
+  const subject = encodeURIComponent(`${label} — DocuAlign report link`);
+  const body = encodeURIComponent(`${label}\n\n${url}`);
+  return `mailto:?subject=${subject}&body=${body}`;
+}
+
+// The link a currently-open share modal points at, so its copy button can
+// re-copy it without threading the URL through a DOM attribute.
+let shareModalUrl = "";
+
+/**
+ * Open the share modal for a just-published link: WhatsApp and email actions
+ * ready to send, plus a copy button, so staff never have to select the
+ * rendered link text by hand to get it into another app.
+ * @param {string} url - The published capability URL.
+ * @param {string} label - Human-readable description of what is being shared.
+ * @returns {void}
+ */
+export function openShareModal(url, label) {
+  shareModalUrl = url;
+  shareModalLink.textContent = url;
+  shareModalWhatsapp.href = buildWhatsAppShareUrl(url, label);
+  shareModalEmail.href = buildMailtoShareUrl(url, label);
+  shareModalNote.textContent = "";
+  shareModalBackdrop.hidden = false;
+  shareModalClose.focus();
+}
+
+/**
+ * Close the share modal. Safe to call whether or not it is open.
+ * @returns {void}
+ */
+export function closeShareModal() {
+  shareModalBackdrop.hidden = true;
+  shareModalNote.textContent = "";
+}
+
+shareModalClose.addEventListener("click", closeShareModal);
+shareModalBackdrop.addEventListener("click", (event) => {
+  // Only the backdrop itself dismisses the modal; clicking inside the panel
+  // (including its own padding) must not close it under the click.
+  if (event.target === shareModalBackdrop) closeShareModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !shareModalBackdrop.hidden) closeShareModal();
+});
+shareModalCopy.addEventListener("click", async () => {
+  const copied = await copyToClipboard(shareModalUrl, "shareModalCopy");
+  shareModalNote.textContent = copied
+    ? "Copied!"
+    : "Could not copy — select the link above instead.";
+});
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -358,6 +437,7 @@ export async function handleBundleClick() {
     bundleCreate.textContent = "Group link created";
 
     await copyToClipboard(url, "handleBundleClick");
+    openShareModal(url, `${entries.length} ${entries.length === 1 ? "report" : "reports"}`);
   } catch {
     // Failure already logged by trackOperation; recover the UI.
     bundleCreate.disabled = false;
@@ -419,6 +499,7 @@ export async function handleShareClick(button) {
     button.textContent = "Public link created";
 
     await copyToClipboard(url, "handleShareClick");
+    openShareModal(url, report.reportName || report.sourceFileName || "Untitled report");
   } catch (error) {
     // Failure already logged by trackOperation; recover the UI. A package that
     // is simply too large needs its own wording, because retrying cannot help.
