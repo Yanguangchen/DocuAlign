@@ -62,6 +62,17 @@ describe("dashboard module", () => {
         <button id="bundle-create" type="button">Create group link</button>
         <p id="bundle-link" hidden></p>
       </section>
+      <div id="share-modal-backdrop" hidden>
+        <div id="share-modal">
+          <button id="share-modal-close" type="button">Close</button>
+          <strong id="share-modal-title"></strong>
+          <p id="share-modal-link"></p>
+          <a id="share-modal-whatsapp"></a>
+          <a id="share-modal-email"></a>
+          <button id="share-modal-copy" type="button">Copy link</button>
+          <p id="share-modal-note"></p>
+        </div>
+      </div>
     `;
   });
 
@@ -430,6 +441,75 @@ describe("dashboard module", () => {
       delete navigator.clipboard;
     });
 
+    it("renders a copy button that re-copies the link on demand", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      // The creation-time copy already happened; clicking the button must
+      // copy again rather than relying on that first, easy-to-miss copy.
+      writeText.mockClear();
+      const copyButton = document.querySelector(".share-link .copy-link-button");
+      expect(copyButton.getAttribute("aria-label")).toBe("Copy link");
+
+      vi.useFakeTimers();
+      try {
+        copyButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+        expect(copyButton.classList.contains("is-copied")).toBe(true);
+        expect(document.querySelector(".share-link .copy-feedback").textContent)
+          .toBe("Copied!");
+
+        // The feedback is transient, so a later click still shows fresh text.
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(copyButton.classList.contains("is-copied")).toBe(false);
+        expect(document.querySelector(".share-link .copy-feedback").textContent).toBe("");
+      } finally {
+        vi.useRealTimers();
+      }
+      delete navigator.clipboard;
+    });
+
+    it("tells the user to copy manually when the copy button's copy fails", async () => {
+      const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      document
+        .querySelector(".share-link .copy-link-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector(".share-link .copy-feedback").textContent).toBe(
+        "Could not copy — select the link instead.",
+      );
+      expect(document.querySelector(".share-link .copy-link-button").classList.contains(
+        "is-copied",
+      )).toBe(false);
+      delete navigator.clipboard;
+    });
+
     it("re-enables the button and reports failures on publish error", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockPublishReport.mockRejectedValueOnce(new Error("denied"));
@@ -661,6 +741,28 @@ describe("dashboard module", () => {
       expect(button.textContent).toContain("created");
     });
 
+    it("also gives the group link its own re-copy button", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      writeText.mockClear();
+      document
+        .querySelector("#bundle-link .copy-link-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(writeText).toHaveBeenCalledWith(BUNDLE_URL);
+      delete navigator.clipboard;
+    });
+
     it("copies the group URL to the clipboard when available", async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, "clipboard", {
@@ -882,6 +984,176 @@ describe("dashboard module", () => {
       await handleDeleteClick(button); // confirm
 
       expect(document.querySelector("#bundle-bar").hidden).toBe(true);
+    });
+  });
+
+  describe("share modal", () => {
+    async function renderOneReport() {
+      mockFetchReports.mockResolvedValueOnce([
+        { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      ]);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-modal" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    async function renderReports(reports) {
+      mockFetchReports.mockResolvedValueOnce(reports);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-modal-bundle" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    function toggle(reportId, checked = true) {
+      const box = document.querySelector(
+        `.bundle-checkbox[data-report-id="${reportId}"]:not([data-document-slug])`,
+      );
+      box.checked = checked;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      return box;
+    }
+
+    const twoReports = [
+      { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      { id: "doc-2", reportName: "Report 2", matchFilter: true },
+    ];
+
+    it("builds a WhatsApp click-to-chat URL with the link in the message", async () => {
+      const { buildWhatsAppShareUrl } = await import("./dashboard.js");
+      const url = buildWhatsAppShareUrl("https://example.com/x", "Report 1");
+      expect(url).toBe(
+        `https://wa.me/?text=${encodeURIComponent("Report 1\nhttps://example.com/x")}`,
+      );
+    });
+
+    it("builds a mailto: URL with a subject and the link in the body", async () => {
+      const { buildMailtoShareUrl } = await import("./dashboard.js");
+      const url = buildMailtoShareUrl("https://example.com/x", "Report 1");
+      expect(url).toBe(
+        `mailto:?subject=${encodeURIComponent("Report 1 — DocuAlign report link")}`
+        + `&body=${encodeURIComponent("Report 1\n\nhttps://example.com/x")}`,
+      );
+    });
+
+    it("opens with WhatsApp/email actions ready after a report link is created", async () => {
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
+      expect(document.querySelector("#share-modal-link").textContent).toBe(SHARE_URL);
+      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toBe(
+        `https://wa.me/?text=${encodeURIComponent(`Report 1\n${SHARE_URL}`)}`,
+      );
+      expect(document.querySelector("#share-modal-email").getAttribute("href")).toBe(
+        `mailto:?subject=${encodeURIComponent("Report 1 — DocuAlign report link")}`
+        + `&body=${encodeURIComponent(`Report 1\n\n${SHARE_URL}`)}`,
+      );
+    });
+
+    it("opens with a document-count label after a group link is created", async () => {
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+      toggle("doc-1");
+      toggle("doc-2");
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector("#share-modal-backdrop").hidden).toBe(false);
+      expect(document.querySelector("#share-modal-link").textContent).toBe(BUNDLE_URL);
+      expect(document.querySelector("#share-modal-whatsapp").getAttribute("href")).toContain(
+        encodeURIComponent("2 reports"),
+      );
+    });
+
+    it("closes on the close button, the backdrop, and Escape -- but not a panel click", async () => {
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      const { openShareModal } = await renderOneReport();
+      const backdrop = document.querySelector("#share-modal-backdrop");
+
+      // The share button that opens it is a one-shot action (it disables
+      // itself once the link exists), so each reopen below drives the modal
+      // directly -- this is exercising the modal's own dismissal behavior,
+      // not the button that happens to trigger it the first time.
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+      expect(backdrop.hidden).toBe(false);
+
+      document.querySelector("#share-modal").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(backdrop.hidden).toBe(false);
+
+      backdrop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(backdrop.hidden).toBe(true);
+
+      // Escape only acts while the modal is actually open.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(backdrop.hidden).toBe(true);
+
+      openShareModal(SHARE_URL, "Report 1");
+      expect(backdrop.hidden).toBe(false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(backdrop.hidden).toBe(true);
+
+      openShareModal(SHARE_URL, "Report 1");
+      document
+        .querySelector("#share-modal-close")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(backdrop.hidden).toBe(true);
+    });
+
+    it("re-copies the link from the modal's own copy button", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+      });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+      writeText.mockClear();
+
+      document
+        .querySelector("#share-modal-copy")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+      expect(document.querySelector("#share-modal-note").textContent).toBe("Copied!");
+      delete navigator.clipboard;
+    });
+
+    it("tells the user to copy manually when the modal's copy button fails", async () => {
+      Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+      mockPublishReport.mockResolvedValueOnce(SHARE_TOKEN);
+      await renderOneReport();
+
+      document
+        .querySelector(".share-button")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      document
+        .querySelector("#share-modal-copy")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector("#share-modal-note").textContent).toBe(
+        "Could not copy — select the link above instead.",
+      );
+      delete navigator.clipboard;
     });
   });
 

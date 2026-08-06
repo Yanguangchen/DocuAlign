@@ -310,7 +310,7 @@ function applyRuntimeNotice(protocol = globalThis.location.protocol) {
   document.querySelector("#auth-message").classList.add("is-error");
 }
 
-input.addEventListener("change", () => selectFile(input.files[0]));
+input.addEventListener("change", () => runWorkbookWorkflow(input.files[0]));
 document.querySelector("#replace-file").addEventListener("click", () => input.click());
 document.querySelector("#remove-file").addEventListener("click", () => {
   clearFile();
@@ -692,10 +692,17 @@ function getExportDocuments() {
   }));
 }
 
-pdfExport.addEventListener("click", async () => {
+/**
+ * Build and download the export archive for the current workbook.
+ *
+ * Separated from the click listener so the drop-to-share workflow can await
+ * the same run the button performs, rather than racing an event handler.
+ * @returns {Promise<boolean>} Whether an archive actually downloaded.
+ */
+async function runExport() {
   if (!parsedDocuments) {
     setFeedback("Select and process a workbook before exporting the PDF.", true);
-    return;
+    return false;
   }
   // A repeat click while a build is running cannot re-enter here: disabling
   // the button below (per the HTML click() algorithm) stops a disabled
@@ -714,7 +721,7 @@ pdfExport.addEventListener("click", async () => {
     const { archive, included, failed } = await buildExportArchive(documents, baseName);
     // The workbook was cleared or replaced while this was building; the
     // archive describes a workbook that is no longer selected; drop it.
-    if (parsedDocuments !== documents) return;
+    if (parsedDocuments !== documents) return false;
     downloadArchive(archive, baseName);
 
     exportStep.classList.add("is-complete");
@@ -727,15 +734,48 @@ pdfExport.addEventListener("click", async () => {
         : `Downloaded ${baseName}.zip with ${documentCount}; could not generate ${failed.join(", ")}.`,
       true,
     );
+    return true;
   } catch (error) {
-    if (parsedDocuments !== documents) return;
+    if (parsedDocuments !== documents) return false;
     setFeedback(`Could not build the export. ${error.message}`, true);
+    return false;
   } finally {
     // Only re-enable for the workbook this build was for; a reset already
     // set the button's disabled state appropriately for whatever came after.
     if (parsedDocuments === documents) pdfExport.disabled = false;
   }
-});
+}
+
+pdfExport.addEventListener("click", runExport);
+
+/**
+ * Carry a freshly chosen workbook all the way through: parse it, download the
+ * export, and save it to the cloud, without waiting for three separate clicks.
+ *
+ * Only the interactive entry points (drop and file picker) run this. The
+ * `selectFile` API stays a plain parse so scripted callers and tests can drive
+ * each stage on their own terms.
+ *
+ * Each stage gates the next on real success, so a workbook that fails to parse
+ * never downloads, and a failed export never reaches the cloud save.
+ * @param {File} file - The dropped or chosen workbook.
+ * @returns {Promise<void>} Resolves once the workflow settles.
+ */
+async function runWorkbookWorkflow(file) {
+  const pipeline = selectFile(file);
+  if (!pipeline) return;
+
+  await pipeline;
+  // A failed pipeline leaves no plan behind, and the export button disabled.
+  if (!parsedDocuments) return;
+
+  if (!(await runExport())) return;
+
+  // The cloud-save controller is an ES module listening on this button, so
+  // the click is how the classic workspace script hands the workflow over.
+  // It publishes the share link and opens the send-it-now modal from there.
+  cloudSave.click();
+}
 
 dropzone.addEventListener("dragenter", (event) => {
   event.preventDefault();
@@ -753,7 +793,7 @@ dropzone.addEventListener("drop", (event) => {
   event.preventDefault();
   dropzone.classList.remove("is-dragging");
   promptTitle.textContent = "Drop your Excel workbook here";
-  selectFile(event.dataTransfer.files[0]);
+  runWorkbookWorkflow(event.dataTransfer.files[0]);
 });
 
 applyRuntimeNotice();

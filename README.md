@@ -137,27 +137,37 @@ Users should be able to:
 
 The app generates a PDF report from stored data.
 
-#### Requirement: every worksheet group exports as its own PDF
+#### Requirement: every worksheet group exports as its own PDF, delivered in one ZIP
 
-Exporting a workbook produces **separate PDFs**, never a single combined document:
+Exporting a workbook produces **separate PDFs — one file per document, never a
+single combined document** — packed into one `<workbook>.zip` so there is a
+single download and a single browser prompt rather than a burst of them. The
+archive is only a wrapper: unzip it and every document is its own byte-exact
+PDF.
 
 | Document | Count for `SampleInput.xlsx` | Named | Source |
 | --- | --- | --- | --- |
-| Test report (`CV1` + `TR1`) | 6 | `<workbook>-<job ref>.pdf` | **Fixed format — exported as-is** |
+| `Summary` | 1 | `<workbook>-Summary.pdf` | Fixed-format overlay renderer (`src/summary-pdf.js`) |
+| Test report (`CV1` + `TR1`) | 6 | `<workbook>-<job ref>.pdf` | **Fixed format — reference pages with mapped values overlaid** |
 | `DS1` sieve datasheet | 6 | `<workbook>-<job ref>-DS1.pdf` | Generated |
 | `SB1` direct shear datasheet | 6 | `<workbook>-<job ref>-SB1.pdf` | Generated |
-| `Summary` | 1 | `<workbook>-Summary.pdf` | Generated |
 | `coral + org` | 1 | `<workbook>-coral-org.pdf` | Generated |
 | **Total** | **20** | | |
 
+Inside the archive, documents are ordered **Summary first, then the test
+reports oldest sampling date first** — the same order a package link's
+"Download all" and "Print all" buttons use (see Packages, below). Reports
+sharing a sampling date keep the workbook's own order.
+
 A workbook with three `CV1`/`TR1` pairs exports proportionally fewer. The counts are always derived from the uploaded file.
 
+> [!NOTE]
+> **Temporary export restriction.** Only the `CV1` + `TR1` test reports and the `Summary` document are exported today, so `SampleInput.xlsx` currently produces **7** documents in the ZIP, not 20. The `DS1`/`SB1` datasheets and `coral + org` are still planned and rendered by the code above; they are withheld by `TEMPORARILY_DISABLED_DOCUMENT_KINDS` in `src/workspace.js` and restored by clearing that list.
+
 > **IMPORTANT — the test report format must never be altered.**
-> The `CV1` + `TR1` test report is the client's established deliverable. Its layout is fixed and it is exported exactly as-is. It must never be re-rendered, restyled, or regenerated from worksheet data, regardless of what other export work is happening.
+> The `CV1` + `TR1` test report is the client's established deliverable. Its layout is fixed: the five reference pages are copied byte-for-byte and only the uploaded workbook's own values are overlaid at coordinates measured from that reference. It must never be re-rendered, restyled, or regenerated from worksheet data, regardless of what other export work is happening.
 
-The **supporting** documents (summary, `coral + org`, `DS1`, `SB1`) are generated in the browser from the parsed worksheet data by `src/pdf-writer.js` — no PDF library and no server involved. In those documents, Excel date serials are converted to `DD/MM/YYYY` and cached floating-point values are normalised, so they read like the source workbook rather than its raw storage.
-
-Because browsers throttle downloads triggered together, the export spaces the downloads apart. Chrome may still ask permission to download multiple files — that prompt must be allowed, or only the first PDF is saved.
+The **supporting** documents (`coral + org`, `DS1`, `SB1`) are generated in the browser from the parsed worksheet data by `src/pdf-writer.js` — no PDF library and no server involved. In those documents, Excel date serials are converted to `DD/MM/YYYY` and cached floating-point values are normalised, so they read like the source workbook rather than its raw storage. The Summary and the test report each have their own fixed-format overlay renderer instead, because both must keep an approved reference layout exactly.
 
 The generated PDF should match the intended RAK report layout, including:
 
@@ -180,18 +190,23 @@ Any document can be shared publicly, and documents are grouped into **packages**
 * A package holds up to **25 documents** (`MAX_BUNDLE_REPORTS`), enforced on both the client and in the Firestore rules.
 * Each document in a package is published as its **own** share token, so any single document stays individually revocable by deleting its share. The package document stores only the tokens — never embedded snapshots — which keeps rules evaluation far below Firestore's 1000-expression cap.
 
-How a recipient gets the file depends on the document:
+How a recipient gets each document's bytes depends on what was published:
 
-* The fixed-format **test report** is served from its static asset via `pdfUrl`.
-* **Generated** documents publish their worksheet grid as one JSON string (`documentData`, capped at 100,000 characters). The public viewer rebuilds the PDF locally with the same `src/pdf-writer.js` used by the export, so nothing has to be hosted.
+* The **test report** and the **Summary** each publish their own fixed-format payload (`{renderer: "report", report: {…}}` or `{renderer: "summary", cells: […]}`) and the viewer rebuilds them the same way the export does — overlaying onto the matching reference pages — so a shared copy shows the uploaded workbook's data, not the sample. Only a document that could not be mapped falls back to a static `pdfUrl`.
+* Every other **generated** document (`DS1`, `SB1`, `coral + org`) publishes its worksheet grid as one JSON string (`documentData`, capped at 100,000 characters), and the viewer rebuilds the PDF locally with the same `src/pdf-writer.js` used by the export — nothing has to be hosted.
 
 Saving a workbook persists its exported documents to a `documents` subcollection under the saved report, which is what the dashboard lists. Reports saved before this existed simply show no document list and remain shareable as a whole.
 
+A package link's viewer page lists every document as its own card, in the export's own order (Summary first, then reports oldest sampling date first), plus two buttons above the list:
+
+* **Download all N documents** rebuilds each document and saves it as its **own separate file** — no ZIP, no merge, nothing bundled. Saves are spaced apart (`DOWNLOAD_INTERVAL_MS`) because browsers throttle a burst of programmatic downloads; the recipient may need to allow multiple downloads once.
+* **Print all N documents** sends the whole package to the printer as **one job**. This is the one place documents are merged: a print job is one document by definition, so printing separately would open one dialog per report. The merged PDF is built only in memory for the print dialog and is **never saved or offered as a download**.
+
+A document that cannot be rebuilt is skipped and named in the button's status line rather than failing the rest of the package.
+
 ### Print Support
 
-The app should allow users to print the generated report directly from the browser.
-
-The print version should use the same layout logic as the PDF export so that print output and PDF output remain consistent.
+A package link's **Print all N documents** button (above) sends every document in the package to the browser's print dialog as one merged job, so a recipient never has to open and print each document individually. It reuses the same rebuild path the download button and the individual document links use, so print output always reflects the uploaded workbook's data, and pages keep their own orientation (the landscape Summary prints landscape; the portrait reports print portrait).
 
 ### Public Share Links
 
@@ -203,6 +218,11 @@ from the dashboard. Each card offers a **Create public link** button that:
    PDF output path, publish timestamp — never the staff creator email) to the
    `docuAlignPublicShares/{token}` Firestore collection.
 3. Shows the resulting URL (`view.html?share=<token>`) and copies it to the clipboard.
+4. Opens a share modal offering **WhatsApp**, **Email**, and a **Copy link**
+   button, so the link can go straight to a recipient without switching apps
+   to paste it in manually. The same modal appears after creating a group
+   ("package") link. The rendered link itself also keeps its own small copy
+   icon afterward, for re-copying later without selecting the text by hand.
 
 Anyone holding the full URL — no Google sign-in required — can open `view.html`
 to read that one report snapshot and open its PDF output. The URL is specifically
@@ -231,8 +251,10 @@ more reports reveals a group bar with a **Create group link** button that:
 3. Shows the group URL (`view.html?bundle=<token>`) and copies it to the
    clipboard.
 
-A customer opening the group URL sees every grouped report on one page, each
-with its own "Open PDF report" button. Design properties:
+A customer opening the group URL sees every grouped document on one page,
+each with its own "View document" link, plus **Download all** and **Print
+all** buttons above the list (see Packages, above, for what those do).
+Design properties:
 
 * A bundle may hold 1 to 25 reports (`MAX_BUNDLE_REPORTS`, mirrored in the
   Firestore rules).
@@ -615,25 +637,30 @@ modified or bypassed client.
 The frontend reads every worksheet in an uploaded `.xlsx` or `.xls` file,
 discovers the repeated CV/TR/DS/SB report groups, and maps each group to the
 five-page RAK layout represented by `SampleOutput.pdf`. The sample workbook has
-six groups, so its download contains six consecutive five-page reports (30
-pages). Shared calculation tabs remain upstream and are not dumped as raw
-worksheet grids.
+six groups, each of which becomes its own **five-page PDF** inside the
+exported ZIP — never one document concatenating all six. Shared calculation
+tabs remain upstream and are not dumped as raw worksheet grids.
 
-The generated Blob copies the exact pages of `SampleOutput.pdf`, then overlays
-only values, charts, signatures, and photos that differ for each report group.
-The matching reference report is therefore pixel-identical to the sample;
-other groups retain the same page geometry, branding, tables, and spacing. The
-field-level source and transform contract is documented in
+Each test report's generated Blob copies the exact pages of `SampleOutput.pdf`,
+then overlays only values, charts, signatures, and photos that differ for that
+report group. The matching reference report is therefore pixel-identical to
+the sample; other groups retain the same page geometry, branding, tables, and
+spacing. The field-level source and transform contract is documented in
 [`documentation/workbook-pdf-mapping.md`](./documentation/workbook-pdf-mapping.md).
 
-The same PDF must exist at both locations below:
+The Summary document works the same way against its own one-page reference,
+`sample_summary.pdf`. Every reference PDF must exist at both locations below:
 
-1. `SampleDocuments/SampleOutput.pdf` supports direct reference access.
-2. `public/SampleDocuments/SampleOutput.pdf` is copied into the Vite
-   production build.
+1. `SampleDocuments/SampleOutput.pdf`, `SampleOutput-cover.pdf`, and
+   `sample_summary.pdf` support direct reference access.
+2. `public/SampleDocuments/` holds byte-identical copies, copied into the
+   Vite production build.
 
 The browser parser and PDF libraries follow the same direct-file/build
-convention under `vendor/` and `public/vendor/`.
+convention under `vendor/` and `public/vendor/`. `src/pdf-export.test.js`
+enforces both the SHA-256 equality of every reference pair and the export/print
+architecture itself — see that file and `documentation/report-export-static-asset-fix.md`
+§12 for the currently-locked-in contract.
 
 ### Missing Export Incident
 
@@ -699,27 +726,37 @@ DocuAlign/
 ├── SampleDocuments/                 # Static source assets for file:// execution
 │   ├── SampleInput.xlsx             # Source geotechnical laboratory workbook
 │   ├── SampleOutput-cover.pdf       # Verified 1-page cover PDF reference
-│   └── SampleOutput.pdf             # Legacy full report reference
-├── public/SampleDocuments/          # Copied assets for Vite HTTP deployment
+│   ├── SampleOutput.pdf             # 5-page test report reference (CV1+TR1 layout)
+│   └── sample_summary.pdf           # 1-page Summary document reference
+├── public/SampleDocuments/          # Byte-identical copies for Vite HTTP deployment
 ├── vendor/                          # Direct-file workbook/PDF browser runtimes
 ├── public/vendor/                   # Vite copies of browser runtimes
 ├── src/
 │   ├── lib/
 │   │   ├── firebase.js              # Firebase SDK v12 singleton initialization
 │   │   ├── reports.js               # Domain layer: Firestore CRUD & date filtering
-│   │   └── share.js                 # Domain layer: public share tokens & snapshots
-│   ├── App.jsx                      # React workspace shell prototype
+│   │   ├── share.js                 # Domain layer: public share/bundle tokens & snapshots
+│   │   ├── excel-mapping.js         # Queries the checked-in logical field dictionary
+│   │   ├── logger.js                # Central structured logger (logInfo/logWarn/logError)
+│   │   └── observability.js         # Uncaught error / unhandled rejection capture
+│   ├── App.jsx                      # React workspace shell prototype (not mounted)
 │   ├── auth-gate.js                 # Google OAuth UI gatekeeper & Firestore probe
-│   ├── dashboard.js                 # Dashboard grid, date filtering & public share links
-│   ├── save-report.js               # Cloud persistence wiring for ETL workspace
-│   ├── workbook-pdf.js              # Workbook cells and embedded-media parser
-│   ├── report-mapping.js            # Repeated-group semantic field mapping
-│   ├── rak-report-pdf.js            # Fixed five-page RAK PDF renderer
-│   ├── view-report.js               # Public share viewer controller (unauthenticated)
+│   ├── workspace.js                 # index.html controller: ETL pipeline, plan/order/export
+│   ├── xlsx-reader.js               # Dependency-free .xlsx/.xls parser (cells, styles, media)
+│   ├── report-mapping.js            # Repeated CV1/TR1/DS1/SB1 group → semantic report model
+│   ├── rak-report-pdf.js            # Test report overlay renderer (copies reference pages)
+│   ├── summary-pdf.js               # Summary overlay renderer (copies its own reference page)
+│   ├── pdf-writer.js                # Generic renderer for DS1/SB1/coral+org worksheets
+│   ├── zip-writer.js                # Dependency-free ZIP archive builder (the export button)
+│   ├── pdf-merge.js                 # Page-copying PDF merger — print-all only, never delivered
+│   ├── save-report.js               # Cloud persistence wiring for the ETL workspace
+│   ├── dashboard.js                 # Dashboard grid, date filtering, share/package links
+│   ├── view-report.js               # Public share/package viewer (unauthenticated)
+│   ├── workbook-pdf.js              # Legacy xlsx-backed parser retained for test fixtures only
 │   └── styles.css                   # Premium vanilla CSS tokenized design system
 ├── index.html                       # Primary ingestion & ETL pipeline workspace
 ├── dashboard.html                   # Cloud dashboard for saved reports
-├── view.html                        # Public read-only share viewer (capability URL)
+├── view.html                        # Public read-only share/package viewer (capability URL)
 ├── firestore.rules                  # Shared Firestore security rules (WorkGrid, CubeSync, DocuAlign)
 ├── design.md                        # Technical design specification (UML & E/R diagrams)
 └── AGENTS.md                        # Developer and agent behavioral rules
