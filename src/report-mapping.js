@@ -80,40 +80,67 @@
     return values;
   }
 
-  function findImage(sheet, predicate) {
-    return (sheet.images ?? []).find(predicate) ?? null;
-  }
-
   /**
    * The appendix photographs on one report sheet.
    *
    * The strict anchor is the sample workbook's own: row 147 or below, column 5
-   * exactly. Real workbooks drift -- a photograph dragged into place lands a
-   * column or two off -- and a drift of one column used to yield NO photographs
-   * at all, which is worse than it sounds: `rak-report-pdf.js` skips the
-   * whiteout when a picture has no bytes, so the reference sample's own
-   * photographs survive onto the page. The report then shows another sample's
-   * evidence with no error anywhere.
+   * exactly. It is tried first so any workbook laid out like the sample keeps
+   * behaving exactly as before.
    *
-   * So the strict anchor is tried first and a wider window is used only when it
-   * finds nothing. That cannot change any workbook the strict rule already
-   * matches. The window stays below row 140 to clear the signature band (rows
-   * 129-131) and right of column 0 to clear the letterhead marks the sample
-   * anchors at rows 0, 40, 87 and 137.
-   * @param {{images?: Array<{row: number, column: number}>}} sheet - Report sheet.
+   * Real client workbooks do not share those coordinates. The appendix sits
+   * wherever that report's rows happen to end, so no absolute row or column
+   * survives contact with a second workbook -- and when the anchor misses,
+   * nothing is extracted, `rak-report-pdf.js` skips the whiteout for a picture
+   * with no bytes, and the REFERENCE SAMPLE's photographs stay on the page. The
+   * report then shows another vessel's sample bag with no error anywhere.
+   *
+   * The fallback is therefore structural rather than positional. Two facts hold
+   * across layouts: the appendix is the last thing on the sheet, and the
+   * letterhead is the only picture repeated on it. So drop the repeated marks
+   * and the two signatures, and the photographs are what remain at the bottom.
+   * Repetition is detected by `bytes` identity -- the reader inflates each
+   * media part once and hands every anchor the same array (see
+   * `readSheetImages`), so the letterhead's four anchors share one object.
+   * @param {{images?: Array<object>}} sheet - Report sheet.
+   * @param {Array<object>} signatures - Pictures already claimed as signatures.
    * @returns {Array<object>} Up to two photographs, in row order.
    */
-  function appendixPhotos(sheet) {
+  function reportPictures(sheet) {
     const images = sheet.images ?? [];
+    const byRow = (left, right) => left.row - right.row;
     const anchored = images.filter((image) => image.row >= 147 && image.column === 5);
-    const found = anchored.length > 0
-      ? anchored
-      : images.filter((image) => image.row >= 140 && image.column >= 1);
 
-    return found
-      .slice()
-      .sort((left, right) => left.row - right.row)
-      .slice(0, 2);
+    if (anchored.length > 0) {
+      return {
+        photos: anchored.slice().sort(byRow).slice(0, 2),
+        preparedSignature: images.find(
+          (image) => image.row >= 129 && image.row <= 131 && image.column <= 5,
+        ) ?? null,
+        authorisedSignature: images.find(
+          (image) => image.row >= 129 && image.row <= 131 && image.column >= 20,
+        ) ?? null,
+      };
+    }
+
+    // Everything the sheet repeats is furniture -- the letterhead is anchored
+    // once per printed page. Repetition is detected by `bytes` identity: the
+    // reader inflates each media part once and hands every anchor the same
+    // array (see `readSheetImages`), so one letterhead is one object.
+    const seen = new Set();
+    const repeated = new Set();
+    for (const image of images) {
+      if (seen.has(image.bytes)) repeated.add(image.bytes);
+      seen.add(image.bytes);
+    }
+
+    // What remains is the report's own content, and its order down the sheet is
+    // fixed by the document: the sign-off block, then the appendix.
+    const content = images.filter((image) => !repeated.has(image.bytes)).sort(byRow);
+    const [preparedSignature = null, authorisedSignature = null] = content
+      .slice(-4, -2)
+      .sort((left, right) => left.column - right.column);
+
+    return { photos: content.slice(-2), preparedSignature, authorisedSignature };
   }
 
   function buildPsdRows(reportSheet) {
@@ -175,14 +202,7 @@
     const reportSheet = sheetsByName.get(group.reportSheetName);
     const shearSheet = sheetsByName.get(group.shearSheetName);
     const jobRef = text(coverSheet, "K28") || text(reportSheet, "AE2");
-    const preparedSignature = findImage(
-      reportSheet,
-      (image) => image.row >= 129 && image.row <= 131 && image.column <= 5,
-    );
-    const authorisedSignature = findImage(
-      reportSheet,
-      (image) => image.row >= 129 && image.row <= 131 && image.column >= 20,
-    );
+    const { photos, preparedSignature, authorisedSignature } = reportPictures(reportSheet);
 
     return {
       schemaVersion: 2,
@@ -256,7 +276,7 @@
       appendix: {
         title: text(reportSheet, "A144") || "APPENDIX",
         label: text(reportSheet, "A146") || "Photographs of sample received:",
-        photos: appendixPhotos(reportSheet),
+        photos,
       },
     };
   }
