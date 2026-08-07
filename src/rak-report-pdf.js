@@ -335,7 +335,10 @@
     ];
     report.appendix.photos.forEach((asset, index) => {
       const position = positions.at(index);
-      if (position) plan.images.push({ asset, ...position });
+      // `evidence` marks a picture that belongs to THIS sample and to no other
+      // report. If it cannot be drawn, the box must be cleared rather than left
+      // showing whatever the reference page holds -- see the image loop.
+      if (position) plan.images.push({ asset, evidence: true, ...position });
     });
     return plan;
   }
@@ -689,9 +692,30 @@
         }
       }
       for (const image of pageOverlay.images) {
-        // Without replacement artwork the reference page keeps its own, so the
-        // approved signatures survive workbooks parsed without images.
-        if (!image.asset?.bytes) continue;
+        if (!image.asset?.bytes) {
+          // A signature is the same on every report RAK issues, so the
+          // reference page's own is still correct and is kept -- that is what
+          // lets a workbook parsed without images keep its approved sign-off.
+          //
+          // An appendix photograph is the opposite: it is this cargo hold's
+          // sample and no one else's. Leaving the reference page's photograph
+          // there produces a signed report that attributes ANOTHER VESSEL's
+          // sample to this one, with nothing on the page to show it. An empty
+          // box is obviously incomplete; misattributed evidence is not.
+          if (image.evidence) {
+            drawWhiteout(page, image, pdfLib);
+            drawText(page, {
+              text: "Photograph unavailable",
+              x: image.x,
+              top: image.top + (image.height / 2) - 5.22,
+              size: 10.44,
+              bold: false,
+              align: "center",
+              width: image.width,
+            }, fonts, pdfLib);
+          }
+          continue;
+        }
         drawWhiteout(page, image, pdfLib);
         await drawImage(outputDocument, page, image);
       }
