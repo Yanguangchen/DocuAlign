@@ -526,3 +526,57 @@ written test-first; the failing test asserted three distinct stored paths.
 Worth knowing when reading old data: **reports saved before this fix lost the
 overwritten documents**, and no repair is possible from Firestore alone. They
 have to be re-saved from the workbook.
+
+## 15. Photographs anchored off the sample's exact cell
+
+A later test still produced wrong photographs on *one* report while the others
+were right — which rules out both §13 and §14, since a Storage or slug problem
+takes every report with it.
+
+### The export path is not the problem
+
+Re-audited first, because it is cheap and it removes half the search space.
+Rendering all six groups of `SampleInput.xlsx` through the real pipeline and
+checking the generated PDFs for each group's own picture bytes:
+
+```
+group 0: photo0(e08f62aa41):PRESENT  photo1(80eb8f0d0c):PRESENT  | foreign: none
+… all six identical
+```
+
+Every report embeds its own two photographs and no other group's. The reader
+extracts distinct pictures per group. So a wrong photograph on a *downloaded*
+export cannot be cross-contamination between reports — the only remaining way
+to get one is for extraction to find nothing and the reference artwork to
+survive.
+
+### Root cause
+
+`appendixPhotos` selected `image.row >= 147 && image.column === 5` — the sample
+workbook's exact anchor. Column had **zero** tolerance. A photograph dragged
+into place one column off yields an empty list, and because
+`rak-report-pdf.js` skips the whiteout for a picture with no bytes (§3, the
+signature-erasure guard), the reference page keeps its own photographs.
+
+That combination is the nastiest failure mode in this pipeline: no error, no
+missing image, a complete-looking report carrying **another sample's
+evidence**. It is also per-report, since anchors drift one worksheet at a time
+— exactly the reported symptom.
+
+### Fix
+
+The strict anchor is tried first and a wider window (`row >= 140`,
+`column >= 1`) is used **only when it finds nothing**. This cannot change any
+workbook the strict rule already matches — verified by re-running the six-group
+audit unchanged. The window's bounds are chosen against the sample's own
+furniture: below row 140 clears the signature band (rows 129–131), and right of
+column 0 clears the letterhead marks at rows 0, 40, 87 and 137.
+
+### Diagnostic
+
+`reportPictureExtraction` in `src/workspace.js` now warns
+`Some reports carry no appendix photographs` with the offending group numbers
+(`category: "MissingReportPictures"`). The whole point is that this failure is
+invisible in the output, so the console has to say it. If a report still shows
+wrong photographs and **no** such warning appears, extraction succeeded and the
+problem is downstream — Storage upload or fetch, per §13.

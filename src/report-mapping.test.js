@@ -271,4 +271,53 @@ describe("semantic workbook report mapping", () => {
       },
     });
   });
+
+  it("finds appendix photographs that drift off the sample's exact anchor", async () => {
+    const { mapping } = await loadMappingModules();
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1 (2)" },
+        {
+          name: "TR1 (2)",
+          cells: { AE2: "DRIFTED" },
+          images: [
+            // The letterhead marks and both signatures must stay out of the
+            // appendix however wide the search for photographs gets.
+            { name: "letterhead", row: 137, column: 0 },
+            { name: "prepared", row: 129, column: 2 },
+            { name: "authorised", row: 129, column: 23 },
+            // A column off the sample's anchor, which used to yield nothing.
+            { name: "second-photo", row: 169, column: 4 },
+            { name: "first-photo", row: 147, column: 4 },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos.map((photo) => photo.name)).toEqual([
+      "first-photo",
+      "second-photo",
+    ]);
+    expect(report.assets.preparedSignature?.name).toBe("prepared");
+    expect(report.assets.authorisedSignature?.name).toBe("authorised");
+  });
+
+  it("prefers the sample's exact anchor over anything else on the sheet", async () => {
+    const { mapping } = await loadMappingModules();
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1 (2)" },
+        {
+          name: "TR1 (2)",
+          cells: { AE2: "ANCHORED" },
+          images: [
+            { name: "stray", row: 145, column: 9 },
+            { name: "anchored", row: 150, column: 5 },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos.map((photo) => photo.name)).toEqual(["anchored"]);
+  });
 });

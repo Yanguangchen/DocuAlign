@@ -696,6 +696,49 @@ describe("workspace controller", () => {
     expect(published.report.appendix.photos).toEqual([]);
   });
 
+  it("names the groups whose appendix photographs were not found", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+    // The quiet failure this warning exists for: a report with no photographs
+    // renders with the reference sample's own, and nothing else says so.
+    globalThis.docuAlignReportMapping = {
+      buildMappedReports: () => [
+        { groupIndex: 1, jobRef: "X-1", appendix: { photos: [{ name: "a" }] }, assets: {} },
+        { groupIndex: 2, jobRef: "X-2", appendix: { photos: [] }, assets: {} },
+        { groupIndex: 3, jobRef: "X-3", assets: {} },
+      ],
+    };
+
+    await selectFile(workbook("partial-pictures.xlsx"));
+
+    expect(globalThis.docuAlignLogger.logWarn).toHaveBeenCalledWith(
+      "Some reports carry no appendix photographs",
+      expect.objectContaining({ message: "Groups without photographs: 2, 3" }),
+      expect.objectContaining({
+        category: "MissingReportPictures",
+        safeIdentifier: "2,3",
+      }),
+    );
+  });
+
+  it("stays quiet when every mapped report carries its photographs", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+    globalThis.docuAlignReportMapping = {
+      buildMappedReports: () => [
+        { groupIndex: 1, jobRef: "X-1", appendix: { photos: [{ name: "a" }] }, assets: {} },
+      ],
+    };
+
+    await selectFile(workbook("all-pictures.xlsx"));
+
+    expect(globalThis.docuAlignLogger.logWarn).not.toHaveBeenCalledWith(
+      "Some reports carry no appendix photographs",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("falls back to the reference report when the workbook cannot be mapped", async () => {
     const { getExportDocuments, selectFile } = await loadMappedWorkspace();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});

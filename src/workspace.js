@@ -183,6 +183,38 @@ function toMappingWorkbook(workbook, sourceName) {
 }
 
 /**
+ * Warn when a mapped report carries no appendix photographs.
+ *
+ * A report without photographs is not a rendering failure -- the overlay skips
+ * a picture it has no bytes for, so the reference sample's own photographs stay
+ * on the page. That is the one failure mode of this pipeline that looks
+ * completely normal: a finished report showing another sample's evidence. The
+ * warning names the group so a workbook whose photographs are anchored
+ * somewhere unexpected can be identified from the console alone, without
+ * needing the file itself.
+ * @param {Map<number, Object>} models - Semantic report models by group index.
+ * @returns {void}
+ */
+function reportPictureExtraction(models) {
+  const empty = [...models.entries()]
+    .filter(([, model]) => (model.appendix?.photos ?? []).length === 0)
+    .map(([groupIndex]) => groupIndex);
+  if (empty.length === 0) return;
+
+  globalThis.docuAlignLogger?.logWarn?.(
+    "Some reports carry no appendix photographs",
+    new Error(`Groups without photographs: ${empty.join(", ")}`),
+    {
+      feature: "ReportMapping",
+      function: "mapReportModels",
+      operation: "mapping.appendixPhotos",
+      category: "MissingReportPictures",
+      safeIdentifier: empty.join(","),
+    },
+  );
+}
+
+/**
  * Map every worksheet group onto its semantic report model, keyed by group.
  *
  * A workbook whose sheets cannot be mapped is not a pipeline failure: the
@@ -198,7 +230,9 @@ function mapReportModels(workbook, sourceName) {
 
   try {
     const models = mapper.buildMappedReports(toMappingWorkbook(workbook, sourceName));
-    return new Map(models.map((model) => [model.groupIndex, model]));
+    const mapped = new Map(models.map((model) => [model.groupIndex, model]));
+    reportPictureExtraction(mapped);
+    return mapped;
   } catch (error) {
     globalThis.docuAlignLogger?.logWarn?.(
       "Workbook could not be mapped to report models",
