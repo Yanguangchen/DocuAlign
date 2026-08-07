@@ -92,10 +92,16 @@ service firebase.storage {
     // reference sample's photographs instead of its own. See
     // documentation/workbook-picture-identification.md.
     //
-    // `isActiveUser()` is NOT the right predicate here and must not be
-    // substituted: six DocuAlign staff (including the lab engineer who
-    // signs the reports) are on the CubeSync allowlist but absent from
-    // isHardcodedMaster, and have no `users/{uid}` profile.
+    // `isActiveUser()` is NOT the right predicate here, and must not be
+    // substituted for this one or added alongside it:
+    //   - Substituting it locks out six DocuAlign staff (including the lab
+    //     engineer who signs the reports) who are on the CubeSync allowlist
+    //     but absent from isHardcodedMaster and have no `users/{uid}` profile.
+    //   - Adding it as an alternative grants every WorkGrid master read and
+    //     write on these objects, though DocuAlign's own Firestore rules would
+    //     not let them read the reports those photographs belong to. AGENTS.md
+    //     §1.3 requires DocuAlign access to match verified CubeSync staff, and
+    //     only this helper does.
     //
     // Keep this list in sync with firestore.rules `isCubeSyncAllowedEmail()`.
     // ---------------------------------------------------------------
@@ -151,7 +157,7 @@ service firebase.storage {
     // `allow read: if true` — it would not change what a recipient can see,
     // and it would expose every other app's objects to enumeration.
     match /docuAlignReportPhotos/{reportId}/{picture} {
-      allow read: if isDocuAlignStaff() || isActiveUser();
+      allow read: if isDocuAlignStaff();
 
       // Only images, and only the two types `pictureMediaType()` in
       // src/xlsx-reader.js can produce. Anything else the reader discards
@@ -160,7 +166,7 @@ service firebase.storage {
       //
       // The bound is generous because appendix photographs come straight off a
       // phone camera; the sample workbook's are ~170KB each.
-      allow write: if (isDocuAlignStaff() || isActiveUser()) &&
+      allow write: if isDocuAlignStaff() &&
         request.resource != null &&
         request.resource.size < 10 * 1024 * 1024 &&
         request.resource.contentType.matches('image/(png|jpeg)');
