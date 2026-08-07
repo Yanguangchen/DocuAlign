@@ -272,23 +272,26 @@ describe("semantic workbook report mapping", () => {
     });
   });
 
-  it("finds appendix photographs that drift off the sample's exact anchor", async () => {
+  it("finds appendix photographs at a layout the sample's anchor never sees", async () => {
     const { mapping } = await loadMappingModules();
+    // A client workbook whose report simply ends earlier: nothing sits at the
+    // sample's row 147 / column 5, so the positional anchor finds nothing.
+    const letterhead = new Uint8Array([1, 2, 3]);
     const [report] = mapping.buildMappedReports({
       sheets: [
         { name: "CV1 (2)" },
         {
           name: "TR1 (2)",
-          cells: { AE2: "DRIFTED" },
+          cells: { AE2: "SHORTER" },
           images: [
-            // The letterhead marks and both signatures must stay out of the
-            // appendix however wide the search for photographs gets.
-            { name: "letterhead", row: 137, column: 0 },
-            { name: "prepared", row: 129, column: 2 },
-            { name: "authorised", row: 129, column: 23 },
-            // A column off the sample's anchor, which used to yield nothing.
-            { name: "second-photo", row: 169, column: 4 },
-            { name: "first-photo", row: 147, column: 4 },
+            { name: "letterhead", row: 0, column: 0, bytes: letterhead },
+            { name: "letterhead", row: 44, column: 0, bytes: letterhead },
+            { name: "letterhead", row: 96, column: 0, bytes: letterhead },
+            // The sign-off block closes page 4; the appendix follows on page 5.
+            { name: "authorised", row: 89, column: 22, bytes: new Uint8Array([5]) },
+            { name: "prepared", row: 89, column: 1, bytes: new Uint8Array([4]) },
+            { name: "second-photo", row: 129, column: 2, bytes: new Uint8Array([7]) },
+            { name: "first-photo", row: 107, column: 2, bytes: new Uint8Array([6]) },
           ],
         },
       ],
@@ -300,6 +303,90 @@ describe("semantic workbook report mapping", () => {
     ]);
     expect(report.assets.preparedSignature?.name).toBe("prepared");
     expect(report.assets.authorisedSignature?.name).toBe("authorised");
+  });
+
+  it("keeps the letterhead out of the appendix when it sits below the photographs", async () => {
+    const { mapping } = await loadMappingModules();
+    // The bottom-most picture is not always a photograph: a footer mark below
+    // them is still furniture, and repetition is what gives it away.
+    const letterhead = new Uint8Array([1, 2, 3]);
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1 (2)" },
+        {
+          name: "TR1 (2)",
+          cells: { AE2: "FOOTER" },
+          images: [
+            { name: "letterhead", row: 0, column: 0, bytes: letterhead },
+            { name: "photo", row: 104, column: 2, bytes: new Uint8Array([6]) },
+            { name: "footer", row: 200, column: 0, bytes: letterhead },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos.map((photo) => photo.name)).toEqual(["photo"]);
+  });
+
+  it("recovers the real workbook's own pictures at any anchor", async () => {
+    // The regression guard for the whole class of defect: a client workbook's
+    // appendix sits wherever that report's rows end, so no absolute row or
+    // column identifies it. Every picture is shifted here so the sample's
+    // anchor cannot match, and each group must still recover ITS OWN
+    // photographs and signatures -- not the reference sample's, and not
+    // another group's. See documentation/report-export-static-asset-fix.md 16.
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    const anchored = mapping.buildMappedReports(parsed);
+    const identify = (report) => [
+      ...report.appendix.photos,
+      report.assets.preparedSignature,
+      report.assets.authorisedSignature,
+    ].map((picture) => picture?.bytes);
+
+    for (const [rowShift, columnShift] of [[-40, -3], [25, 2], [-60, 0]]) {
+      const shifted = mapping.buildMappedReports({
+        ...parsed,
+        sheets: parsed.sheets.map((sheet) => ({
+          ...sheet,
+          images: sheet.images.map((image) => ({
+            ...image,
+            row: image.row + rowShift,
+            column: image.column + columnShift,
+          })),
+        })),
+      });
+
+      expect(shifted).toHaveLength(anchored.length);
+      shifted.forEach((report, index) => {
+        const recovered = identify(report);
+        const expected = identify(anchored.at(index));
+        expect(report.appendix.photos).toHaveLength(2);
+        // Reference equality, not deep equality: the reader inflates each media
+        // part once and shares the array, so identity is both the stricter
+        // check and the only one that stays fast on 170KB photographs.
+        recovered.forEach((bytes, picture) => expect(bytes).toBe(expected.at(picture)));
+      });
+    }
+  });
+
+  it("extracts nothing when a report sheet carries only furniture", async () => {
+    const { mapping } = await loadMappingModules();
+    const letterhead = new Uint8Array([1, 2, 3]);
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1 (2)" },
+        {
+          name: "TR1 (2)",
+          cells: { AE2: "NO-PHOTOS" },
+          images: [
+            { name: "letterhead", row: 0, column: 0, bytes: letterhead },
+            { name: "letterhead", row: 44, column: 0, bytes: letterhead },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos).toEqual([]);
   });
 
   it("prefers the sample's exact anchor over anything else on the sheet", async () => {

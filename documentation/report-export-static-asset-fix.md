@@ -580,3 +580,94 @@ column 0 clears the letterhead marks at rows 0, 40, 87 and 137.
 invisible in the output, so the console has to say it. If a report still shows
 wrong photographs and **no** such warning appears, extraction succeeded and the
 problem is downstream — Storage upload or fetch, per §13.
+
+## 16. No absolute coordinate survives a second workbook
+
+The widened window in §15 was still positional, and a real client report
+proved that insufficient. A report for vessel `ZHOU SHUN 9` (`X-2024-002-1`)
+rendered its cover correctly — client, job reference, vessel, PSD table all
+from the uploaded workbook — and then showed appendix photographs of a sample
+bag labelled `Vessel: JIAHE 99 / CH: 3-A`. That is group 2 of
+`SampleInput.xlsx`, which is exactly what `SampleOutput.pdf` carries. The
+report had fallen through to the reference artwork again.
+
+### Why widening could never have been enough
+
+The sample's appendix sits at rows 147 and 169 **because of where that
+workbook's rows happen to end**. A client report with fewer result rows puts
+its appendix somewhere else entirely. No constant works, and the ±few-row
+tolerance §15 added only bought margin for a workbook that was already nearly
+identical.
+
+Worse, the same fragility ran through signature detection
+(`row >= 129 && row <= 131`), and the two interact. Shifting the sample's
+anchors down 40 rows in a test made a *photograph* land inside the signature
+band, so it was claimed as the prepared signature and then excluded from the
+appendix. One positional rule silently corrupted the other. This was caught by
+the shift test below, before shipping — not in production.
+
+### The structural rule
+
+Two facts hold across layouts, and neither is a coordinate:
+
+1. **The letterhead is the only picture a report sheet repeats** — once per
+   printed page. Everything repeated is furniture.
+2. **The report's own pictures run in document order**: the sign-off block,
+   then the appendix.
+
+So `reportPictures` drops every repeated image, sorts what is left by row, and
+takes the bottom two as the photographs and the two above them as the
+signatures (left-hand column is prepared, right-hand authorised). Repetition is
+detected by **`bytes` identity**, not by hashing: `readSheetImages` inflates
+each media part once through `mediaCache` and hands every anchor the same
+array, so one letterhead is one object no matter how many times it is anchored.
+
+The sample's exact anchor is still tried first, so a workbook laid out like the
+sample cannot change behaviour at all.
+
+### Verification
+
+- **No regression.** All six groups of `SampleInput.xlsx` still embed their own
+  two photographs, byte-for-byte, with no foreign photographs — identical to
+  the §13 audit.
+- **The fallback recovers real pictures.** Re-mapping the sample workbook with
+  every anchor shifted (`-40 rows/-3 cols`, `+25 rows/+2 cols`,
+  `-60 rows/0 cols`) so the positional anchor cannot match: all six groups
+  recover both photographs **and** both signatures, matching the unshifted
+  result exactly. This is the test that failed on the first attempt and drove
+  the redesign.
+
+### Confirmed against the uploaded workbook
+
+The customer opened the source workbook and photographed the `TR1 (4)` sheet.
+It settles the diagnosis: the appendix photographs are present and correct in
+the workbook (a bag labelled `Vessel: ZHOU SHUN 9 / Voy: ZS9-17N / CH: 4-A`),
+anchored at approximately rows 147 and 170 — **but around column 2–3, not
+column 5**. The rows matched the sample; one column of drift was the entire
+cause of a report shipping another vessel's evidence.
+
+Note that the widened window from §15 (`column >= 1`) would have matched this
+particular sheet. The report was tested roughly four minutes after that fix
+merged, so it most likely ran against the previous production build. That
+changes nothing about the conclusion: a window is still a coordinate, and the
+next workbook moves again.
+
+### The remaining assumption
+
+Furniture below the appendix is excluded only if it repeats. A one-off footer
+image anchored beneath the photographs on a sheet that has no other copy of it
+would be taken for a photograph. Nothing in the sample workbook does this, and
+a letterhead by nature repeats, but it is the assumption to check first if this
+recurs.
+
+### The guard against recurrence
+
+`src/report-mapping.test.js` → `"recovers the real workbook's own pictures at
+any anchor"` re-maps the real workbook three times with every anchor shifted so
+the positional fast path cannot match, and asserts each group recovers its own
+photographs and signatures by bytes. Verified to fail against the old
+behaviour.
+
+The rule this defect produced, and what to check before touching picture
+handling again, is written up separately in
+**[workbook-picture-identification.md](./workbook-picture-identification.md)**.
