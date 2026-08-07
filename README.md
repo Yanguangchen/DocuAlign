@@ -747,6 +747,7 @@ For detailed technical design specifications, UML diagrams, E/R diagrams, and de
   - **implemented Firestore E/R diagram and schema contracts**;
   - authentication, public sharing, deployment, testing, and known limitations.
 * **[documentation/workbook-pdf-mapping.md](./documentation/workbook-pdf-mapping.md)** — Page-by-page CV/TR/DS/SB cell, range, transform, chart, signature, and appendix-photo mapping.
+* **[documentation/workbook-picture-identification.md](./documentation/workbook-picture-identification.md)** — Why a report's photographs and signatures are identified by structure rather than by cell coordinates: the silent failure where a missed extraction ships the reference sample's photographs inside a signed report, the rule that replaced the hard-coded anchors, and the shift guard that stops it recurring. **Read before changing anything that selects pictures from a worksheet.**
 * **[documentation/firestore-rules-expression-limit.md](./documentation/firestore-rules-expression-limit.md)** — Firestore's 1,000-expression-per-request rules evaluation cap: how it presents (identical error to a real permission denial), how to confirm it against the emulator, and the concrete incidents in this codebase (CubeSync batch edits, DocuAlign bundle design) that hit it.
 * **[design.md](./design.md)** — Stable compatibility link to the canonical guide.
 * **[AGENTS.md](./AGENTS.md)** — AI agent coding standards, shared database rules constraints, and testing protocols.

@@ -46,6 +46,24 @@ To support both environments without 404 file errors:
 
 ---
 
+## 2a. Workbook Pictures Are Identified By Structure, Never By Coordinates
+
+> [!CAUTION]
+> A report whose pictures are not extracted does **not** render blank. `rak-report-pdf.js` skips the whiteout when a picture has no bytes, so the copied reference page keeps `SampleOutput.pdf`'s own photographs. A failed extraction therefore ships **another vessel's sample photographs inside a signed lab report**, with no error, no missing image, and every other field correct.
+
+This defect shipped three times, each fix a wider version of the same mistake. The rules:
+
+1. **Never make an absolute row or column the primary selector** for a report's pictures. The sample workbook's anchors (photographs at rows 147/169 column 5, signatures at rows 129–131) are wherever *that* workbook's rows happened to end. A real client workbook drifts, and one column of drift was enough to cause the production case.
+2. Pictures are identified structurally by `reportPictures` in `src/report-mapping.js`: drop every image repeated on the sheet (the letterhead is anchored once per printed page), sort the rest by row, take the bottom two as appendix photographs and the two above as signatures. Repetition is detected by `bytes` object identity — the reader inflates each media part once and shares the array.
+3. A hard-coded anchor may exist **only** as a fast path with the structural rule behind it.
+4. **Never change one picture predicate in isolation.** Signatures and photographs are selected from the same list; a shifted photograph once landed in the signature band, was claimed as a signature, and was dropped from the appendix.
+5. **Never treat an empty extraction as a benign no-op.** Emit the `MissingReportPictures` warning (`reportPictureExtraction` in `src/workspace.js`) so the console reports what the page cannot.
+6. Run the guard: `src/report-mapping.test.js` → `"recovers the real workbook's own pictures at any anchor"` re-maps the real workbook with every anchor shifted. Passing on `SampleInput.xlsx` alone proves nothing — that is exactly how this recurred.
+
+Full reasoning, the production evidence, and the pre-change checklist: **[documentation/workbook-picture-identification.md](./documentation/workbook-picture-identification.md)**.
+
+---
+
 ## 3. Architecture & Frontend Standards
 
 1. **Technology Stack:**

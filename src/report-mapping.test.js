@@ -328,6 +328,47 @@ describe("semantic workbook report mapping", () => {
     expect(report.appendix.photos.map((photo) => photo.name)).toEqual(["photo"]);
   });
 
+  it("recovers the real workbook's own pictures at any anchor", async () => {
+    // The regression guard for the whole class of defect: a client workbook's
+    // appendix sits wherever that report's rows end, so no absolute row or
+    // column identifies it. Every picture is shifted here so the sample's
+    // anchor cannot match, and each group must still recover ITS OWN
+    // photographs and signatures -- not the reference sample's, and not
+    // another group's. See documentation/report-export-static-asset-fix.md 16.
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    const anchored = mapping.buildMappedReports(parsed);
+    const identify = (report) => [
+      ...report.appendix.photos,
+      report.assets.preparedSignature,
+      report.assets.authorisedSignature,
+    ].map((picture) => picture?.bytes);
+
+    for (const [rowShift, columnShift] of [[-40, -3], [25, 2], [-60, 0]]) {
+      const shifted = mapping.buildMappedReports({
+        ...parsed,
+        sheets: parsed.sheets.map((sheet) => ({
+          ...sheet,
+          images: sheet.images.map((image) => ({
+            ...image,
+            row: image.row + rowShift,
+            column: image.column + columnShift,
+          })),
+        })),
+      });
+
+      expect(shifted).toHaveLength(anchored.length);
+      shifted.forEach((report, index) => {
+        const recovered = identify(report);
+        const expected = identify(anchored.at(index));
+        expect(report.appendix.photos).toHaveLength(2);
+        // Reference equality, not deep equality: the reader inflates each media
+        // part once and shares the array, so identity is both the stricter
+        // check and the only one that stays fast on 170KB photographs.
+        recovered.forEach((bytes, picture) => expect(bytes).toBe(expected.at(picture)));
+      });
+    }
+  });
+
   it("extracts nothing when a report sheet carries only furniture", async () => {
     const { mapping } = await loadMappingModules();
     const letterhead = new Uint8Array([1, 2, 3]);

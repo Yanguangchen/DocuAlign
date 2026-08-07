@@ -637,6 +637,21 @@ sample cannot change behaviour at all.
   result exactly. This is the test that failed on the first attempt and drove
   the redesign.
 
+### Confirmed against the uploaded workbook
+
+The customer opened the source workbook and photographed the `TR1 (4)` sheet.
+It settles the diagnosis: the appendix photographs are present and correct in
+the workbook (a bag labelled `Vessel: ZHOU SHUN 9 / Voy: ZS9-17N / CH: 4-A`),
+anchored at approximately rows 147 and 170 — **but around column 2–3, not
+column 5**. The rows matched the sample; one column of drift was the entire
+cause of a report shipping another vessel's evidence.
+
+Note that the widened window from §15 (`column >= 1`) would have matched this
+particular sheet. The report was tested roughly four minutes after that fix
+merged, so it most likely ran against the previous production build. That
+changes nothing about the conclusion: a window is still a coordinate, and the
+next workbook moves again.
+
 ### The remaining assumption
 
 Furniture below the appendix is excluded only if it repeats. A one-off footer
@@ -644,3 +659,15 @@ image anchored beneath the photographs on a sheet that has no other copy of it
 would be taken for a photograph. Nothing in the sample workbook does this, and
 a letterhead by nature repeats, but it is the assumption to check first if this
 recurs.
+
+### The guard against recurrence
+
+`src/report-mapping.test.js` → `"recovers the real workbook's own pictures at
+any anchor"` re-maps the real workbook three times with every anchor shifted so
+the positional fast path cannot match, and asserts each group recovers its own
+photographs and signatures by bytes. Verified to fail against the old
+behaviour.
+
+The rule this defect produced, and what to check before touching picture
+handling again, is written up separately in
+**[workbook-picture-identification.md](./workbook-picture-identification.md)**.
