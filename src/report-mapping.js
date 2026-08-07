@@ -84,9 +84,34 @@
     return (sheet.images ?? []).find(predicate) ?? null;
   }
 
+  /**
+   * The appendix photographs on one report sheet.
+   *
+   * The strict anchor is the sample workbook's own: row 147 or below, column 5
+   * exactly. Real workbooks drift -- a photograph dragged into place lands a
+   * column or two off -- and a drift of one column used to yield NO photographs
+   * at all, which is worse than it sounds: `rak-report-pdf.js` skips the
+   * whiteout when a picture has no bytes, so the reference sample's own
+   * photographs survive onto the page. The report then shows another sample's
+   * evidence with no error anywhere.
+   *
+   * So the strict anchor is tried first and a wider window is used only when it
+   * finds nothing. That cannot change any workbook the strict rule already
+   * matches. The window stays below row 140 to clear the signature band (rows
+   * 129-131) and right of column 0 to clear the letterhead marks the sample
+   * anchors at rows 0, 40, 87 and 137.
+   * @param {{images?: Array<{row: number, column: number}>}} sheet - Report sheet.
+   * @returns {Array<object>} Up to two photographs, in row order.
+   */
   function appendixPhotos(sheet) {
-    return (sheet.images ?? [])
-      .filter((image) => image.row >= 147 && image.column === 5)
+    const images = sheet.images ?? [];
+    const anchored = images.filter((image) => image.row >= 147 && image.column === 5);
+    const found = anchored.length > 0
+      ? anchored
+      : images.filter((image) => image.row >= 140 && image.column >= 1);
+
+    return found
+      .slice()
       .sort((left, right) => left.row - right.row)
       .slice(0, 2);
   }

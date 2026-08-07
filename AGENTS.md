@@ -19,6 +19,19 @@ When modifying or auditing `firestore.rules`:
 
 ---
 
+## 1a. Shared Cloud Storage Bucket Constraint
+
+> [!CAUTION]
+> The same sharing applies to **Cloud Storage**. `crewhub-43647.firebasestorage.app` holds WorkGrid's and CubeSync's objects (`fleet_claims/`, `job-completion-signatures/`) alongside DocuAlign's.
+
+1. `storage.rules` in this repository carries the **DocuAlign block only**. It is deliberately **not** referenced from `firebase.json`, so a routine `firebase deploy` cannot overwrite another app's rules. Do not wire it in.
+2. Deploy it by pasting the `match /docuAlignReportPhotos/{reportId}/{picture}` block into the existing rules in the Firebase console, leaving every other match intact. Never paste the file wholesale.
+3. Everything this app writes stays under the `docuAlignReportPhotos/` prefix (`REPORT_PHOTO_PREFIX` in `src/lib/report-photos.js`). Never write outside it.
+4. **Reads stay closed.** Public shares do not read through these rules — `getDownloadURL()` mints a URL carrying its own unguessable access token, and that token grants the read. Never relax this to `allow read: if true`; it would not change share behaviour and would expose the other apps' objects to enumeration.
+5. Uploads fail **silently per asset** by design, so a rules misconfiguration presents as "the share shows the wrong photographs" rather than as an error. Check the browser console for `PhotoUploadFailure` before suspecting the renderer. See [documentation/report-export-static-asset-fix.md](./documentation/report-export-static-asset-fix.md) §13.
+
+---
+
 ## 2. Dual Asset Directory Contract (PDF Export)
 
 DocuAlign supports two execution environments:
