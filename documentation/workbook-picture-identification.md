@@ -128,7 +128,36 @@ regression test for the entire class of defect, not for one predicate.
   what this defect produces — the reference artwork is a real, plausible
   photograph.
 
-## 7. Known remaining assumption
+## 7. Two independent causes, one identical symptom
+
+Extraction is only half the path. A shared report shows the reference sample's
+photographs whenever it has no bytes to draw, and there are **two unrelated
+ways** to arrive there:
+
+| Cause | Local export | Shared link |
+| --- | --- | --- |
+| Extraction found nothing (§1–4) | wrong | wrong |
+| Cloud Storage upload or fetch failed (§13 of the incident record) | **correct** | wrong |
+
+So the first question when photographs are wrong is always: *is the downloaded
+PDF wrong too?* If the download is right and only the share is wrong,
+extraction is fine and nothing in this document applies — the fault is in the
+Storage round-trip.
+
+Three warnings separate every case without needing the workbook:
+
+| Console warning | Meaning |
+| --- | --- |
+| `MissingReportPictures` (on save) | Extraction found nothing. This document applies. |
+| `1 of N photographs could not be uploaded` (in the save feedback line) | The Storage **write** was refused. Check the bucket's rules. |
+| `SharePublishedWithoutPictures` (on the share page) | The share was published with no URLs at all — it was saved while uploads were failing, or saved before uploads existed. Re-save the report. |
+| `PhotoFetchFailure` (on the share page) | Upload worked; the **read** is failing now. Suspect CORS or a deleted object. |
+
+The upload warning is surfaced in the UI, not only the console, because
+whoever shares the link is the one person who cannot see that the shared copy
+is wrong.
+
+## 8. Known remaining assumption
 
 Furniture below the appendix is excluded only if it repeats. A one-off footer
 image anchored beneath the photographs, with no other copy on the sheet, would

@@ -146,10 +146,26 @@ async function withPictureBytes(asset) {
  * @returns {Promise<Object>} The report with picture bytes restored.
  */
 async function withRestoredPictures(report) {
+  const published = report.appendix?.photos ?? [];
+  // A photograph published without a URL was never uploaded, which is a
+  // different fault from one that fails to download -- the first is a Storage
+  // write that was refused when the report was saved, the second a read that
+  // is failing now. Both render identically (the reference sample's artwork),
+  // so the distinction only exists if it is logged.
+  if (published.length > 0 && published.every((photo) => !photo?.url)) {
+    logWarn("This share carries no uploaded photographs", {
+      feature: "ReportPhotos",
+      function: "withRestoredPictures",
+      operation: "share.rebuild",
+      category: "SharePublishedWithoutPictures",
+      errorMessage: `${published.length} photographs have no download URL`,
+    });
+  }
+
   const [preparedSignature, authorisedSignature, ...photos] = await Promise.all([
     withPictureBytes(report.assets?.preparedSignature),
     withPictureBytes(report.assets?.authorisedSignature),
-    ...(report.appendix?.photos ?? []).map(withPictureBytes),
+    ...published.map(withPictureBytes),
   ]);
 
   return {
