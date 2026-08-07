@@ -293,6 +293,37 @@ describe("save-report module", () => {
         pictures,
       );
       expect(getExportDocuments).toHaveBeenCalledWith(urls);
+      expect(document.querySelector("#feedback").textContent).not.toContain("WARNING");
+    });
+
+    it("says so when a picture could not be uploaded", async () => {
+      mockPublishBundle.mockResolvedValueOnce("bundle-token");
+      const pictures = [
+        { key: "1:photo:0", mimeType: "image/jpeg", bytes: new Uint8Array([1, 2]) },
+        { key: "1:photo:1", mimeType: "image/jpeg", bytes: new Uint8Array([3, 4]) },
+      ];
+      // One upload rejected -- the save still succeeds, but the share will show
+      // the reference sample's artwork for the picture that never arrived.
+      mockUploadReportPhotos.mockResolvedValueOnce(
+        new Map([["1:photo:0", "https://cdn/1_photo_0?token=t"]]),
+      );
+
+      document.body.innerHTML = WORKSPACE_DOM;
+      mockSaveReport.mockResolvedValueOnce({ id: "report-1" });
+      mockSaveReportDocuments.mockResolvedValueOnce(undefined);
+      globalThis.docuAlignWorkspace = {
+        getPublishableAssets: () => pictures,
+        getExportDocuments: () => [{ slug: "X-1", title: "Test Report X-1", data: "{}" }],
+      };
+      await import("./save-report.js");
+      if (authStateCallback) authStateCallback({ email: "docu@example.com" });
+      document.querySelector("#cloud-save").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      const feedback = document.querySelector("#feedback").textContent;
+      expect(feedback).toContain("Report saved with 1 documents");
+      expect(feedback).toContain("1 of 2 photographs could not be uploaded");
+      expect(feedback).toContain("Cloud Storage rules");
     });
 
     it("publishes a plain share when the report has no stored documents", async () => {

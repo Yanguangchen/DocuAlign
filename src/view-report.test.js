@@ -275,6 +275,30 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
+    it("distinguishes a share published without any uploaded photographs", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const createRakReportPdf = vi.fn(async () =>
+        new Blob([new Uint8Array([37, 80, 68, 70])], { type: "application/pdf" }));
+      globalThis.docuAlignRakReportPdf = { createRakReportPdf };
+      const { resolveDocumentUrl } = await import("./view-report.js");
+
+      await resolveDocumentUrl(share({
+        documentData: JSON.stringify({
+          renderer: "report",
+          // Metadata but no URL: the upload was refused when this was saved,
+          // which looks identical on the page to a download that fails now.
+          report: { appendix: { photos: [{ name: "p1" }, { name: "p2" }] } },
+        }),
+      }));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[DocuAlign] This share carries no uploaded photographs",
+        expect.objectContaining({ category: "SharePublishedWithoutPictures" }),
+      );
+      expect(fetch).not.toHaveBeenCalled();
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
     it("falls back to the stored PDF when a shared report cannot be rebuilt", async () => {
       globalThis.docuAlignRakReportPdf = {
         createRakReportPdf: vi.fn(async () => {

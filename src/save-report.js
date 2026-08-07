@@ -179,10 +179,21 @@ cloudSave?.addEventListener("click", async () => {
     };
     const shareUrl = await publishSavedReport(savedReport, documents);
 
+    const saved = documents.length > 0
+      ? `Report saved with ${documents.length} documents. View it anytime on the dashboard.`
+      : "Report saved. View it anytime on the dashboard.";
+
+    // A picture that fails to upload does not fail the save, but it does mean
+    // the shared copy falls back to the reference sample's artwork -- which
+    // renders as a finished report carrying another vessel's photographs. That
+    // is invisible to whoever shares the link, so it has to be said here.
+    const missing = pictures.length - pictureUrls.size;
     setFeedback(
-      documents.length > 0
-        ? `Report saved with ${documents.length} documents. View it anytime on the dashboard.`
-        : "Report saved. View it anytime on the dashboard.",
+      missing > 0
+        ? `${saved} WARNING: ${missing} of ${pictures.length} photographs could not be`
+          + " uploaded, so shared links will show placeholder images instead of this"
+          + " sample's own. Check the Cloud Storage rules."
+        : saved,
     );
 
     // The payoff of the whole drop-to-share workflow: the link is live, ready
