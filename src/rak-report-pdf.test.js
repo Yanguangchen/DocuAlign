@@ -209,6 +209,40 @@ describe("RAK sample-template PDF renderer", () => {
     );
   });
 
+  it("never leaves the reference sample's photographs on a report without its own", async () => {
+    const [sample] = await sampleReports();
+    // The exact production failure: everything else maps, but the photographs
+    // arrive with no bytes (a refused Storage upload, or a fetch that failed).
+    // The reference page must NOT keep its own photographs here -- doing so
+    // attributes another vessel's sample to this report, invisibly.
+    const withoutPhotos = {
+      ...sample,
+      appendix: {
+        ...sample.appendix,
+        photos: sample.appendix.photos.map((photo) => ({ ...photo, bytes: undefined })),
+      },
+    };
+
+    const plan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(withoutPhotos);
+    const appendixImages = plan[4].images;
+    expect(appendixImages).toHaveLength(2);
+    expect(appendixImages.every((image) => image.evidence)).toBe(true);
+
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [withoutPhotos],
+      templateOptions(),
+    );
+    const bytes = Buffer.from(await blob.arrayBuffer());
+
+    // The reference sample's photograph bytes must be absent from the output.
+    sample.appendix.photos.forEach((photo) => {
+      expect(bytes.includes(Buffer.from(photo.bytes))).toBe(false);
+    });
+    // Signatures are identical across every report RAK issues, so the
+    // reference's own are still correct and are deliberately kept.
+    expect(plan[3].images.every((image) => image.evidence)).toBe(false);
+  });
+
   it("combines all six workbook reports into 30 copied template pages", async () => {
     const reports = await sampleReports();
 

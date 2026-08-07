@@ -61,6 +61,9 @@ This defect shipped three times, each fix a wider version of the same mistake. T
 5. **Never treat an empty extraction as a benign no-op.** Emit the `MissingReportPictures` warning (`reportPictureExtraction` in `src/workspace.js`) so the console reports what the page cannot.
 6. Run the guard: `src/report-mapping.test.js` → `"recovers the real workbook's own pictures at any anchor"` re-maps the real workbook with every anchor shifted. Passing on `SampleInput.xlsx` alone proves nothing — that is exactly how this recurred.
 
+7. **A missing appendix photograph must never leave the reference page's own in place.** Signatures may (they are identical on every report RAK issues); photographs may not, because they are that cargo hold's evidence. `rak-report-pdf.js` marks appendix images `evidence: true` and clears the box to "Photograph unavailable" when there are no bytes. Never "restore" the old skip-the-whiteout behaviour for them.
+8. **Storage rules and Storage CORS are different systems.** Rules decide whether the write is allowed; CORS decides whether the browser may read the response of the viewer's `fetch`. CORS is bucket-wide, cannot be set from the Firebase console, and is absent by default — so a bucket can hold the correct uploaded photograph and still serve a shared report without it. See **[documentation/storage-cors.md](./documentation/storage-cors.md)** and `cors.json`.
+
 Full reasoning, the production evidence, and the pre-change checklist: **[documentation/workbook-picture-identification.md](./documentation/workbook-picture-identification.md)**.
 
 ---
