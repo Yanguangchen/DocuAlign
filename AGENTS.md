@@ -66,6 +66,9 @@ This defect shipped three times, each fix a wider version of the same mistake. T
 
 Full reasoning, the production evidence, and the pre-change checklist: **[documentation/workbook-picture-identification.md](./documentation/workbook-picture-identification.md)**.
 
+> [!IMPORTANT]
+> **Before debugging any wrong-photograph report, read [documentation/postmortem-wrong-photographs.md](./documentation/postmortem-wrong-photographs.md).** Four independent causes — extraction, a refused upload, a blocked fetch, and a stale share — produce a pixel-identical page. That post-mortem carries the ordered decision table that separates them in four questions, and the record of six deployments spent guessing between them without it. Do not start fixing until you can name which of the four failed and say what your evidence is.
+
 ---
 
 ## 3. Architecture & Frontend Standards
