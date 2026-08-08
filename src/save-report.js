@@ -116,6 +116,10 @@ cloudSave?.addEventListener("click", async () => {
 
   cloudSave.disabled = true;
   setFeedback("Saving report to the cloud…");
+  // Stages 3 and 4 of the drop-to-share throbber the workspace opened. It
+  // opens on demand, so this reads the same whether the workflow ran
+  // automatically or someone pressed the button themselves.
+  globalThis.docuAlignWorkspace?.setWorkflowStage?.("save", "Saving to the cloud…");
 
   try {
     const reference = await trackOperation(
@@ -177,7 +181,10 @@ cloudSave?.addEventListener("click", async () => {
       sourceFileName: source,
       status: "complete",
     };
+    globalThis.docuAlignWorkspace?.setWorkflowStage?.("share", "Creating the share link…");
     const shareUrl = await publishSavedReport(savedReport, documents);
+    // Closed before the modal opens so the two never overlap on screen.
+    globalThis.docuAlignWorkspace?.endWorkflow?.();
 
     const saved = documents.length > 0
       ? `Report saved with ${documents.length} documents. View it anytime on the dashboard.`
@@ -203,6 +210,7 @@ cloudSave?.addEventListener("click", async () => {
     }
   } catch {
     // Failure already logged by trackOperation; recover the UI.
+    globalThis.docuAlignWorkspace?.endWorkflow?.();
     cloudSave.disabled = false;
     setFeedback("Could not save the report. Check your connection and try again.");
   }

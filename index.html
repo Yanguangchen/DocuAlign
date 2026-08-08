@@ -177,6 +177,30 @@
       </footer>
       </div>
 
+      <div class="workflow-backdrop" id="workflow-backdrop" hidden>
+        <div
+          class="workflow-card"
+          role="status"
+          aria-live="polite"
+          aria-labelledby="workflow-title"
+        >
+          <span class="workflow-throbber" aria-hidden="true">
+            <svg viewBox="0 0 44 44">
+              <circle class="workflow-throbber-track" cx="22" cy="22" r="18"></circle>
+              <circle class="workflow-throbber-arc" cx="22" cy="22" r="18"></circle>
+            </svg>
+          </span>
+          <strong id="workflow-title">Preparing your report</strong>
+          <p class="workflow-stage-label" id="workflow-stage-label">Reading the workbook…</p>
+          <ol class="workflow-stages" id="workflow-stages">
+            <li data-stage="read">Read the workbook</li>
+            <li data-stage="build">Build the PDFs</li>
+            <li data-stage="save">Save to the cloud</li>
+            <li data-stage="share">Create the share link</li>
+          </ol>
+        </div>
+      </div>
+
       <div class="share-modal-backdrop" id="share-modal-backdrop" hidden>
         <div
           class="share-modal"

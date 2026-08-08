@@ -22,6 +22,15 @@ const note = document.querySelector("#share-modal-note");
 // threading the URL back through a DOM attribute.
 let shareModalUrl = "";
 
+/** Must match the exit transition on `.share-modal-backdrop` in styles.css. */
+const MODAL_EXIT_MS = 220;
+
+// Whether the modal is meant to be on screen. The `is-open` class cannot
+// answer that on its own: opening defers adding it by a frame, so a dismissal
+// arriving inside that frame would be undone when the frame runs.
+let shareModalOpen = false;
+let pendingOpenFrame = 0;
+
 /**
  * Copy a URL to the clipboard, best-effort.
  * @param {string} url - The URL to copy.
@@ -69,7 +78,13 @@ export function openShareModal(url, { dashboardUrl = "" } = {}) {
     dashboardAction.hidden = false;
   }
   note.textContent = "";
+  shareModalOpen = true;
   backdrop.hidden = false;
+  // `hidden` is display:none, and a transition needs two rendered states to
+  // move between. Painting the closed state for one frame before adding
+  // `is-open` is what gives the ease-in-out something to animate; setting both
+  // together would snap straight to the end.
+  pendingOpenFrame = requestAnimationFrame(() => backdrop.classList.add("is-open"));
   closeButton.focus();
 }
 
@@ -80,8 +95,22 @@ export function openShareModal(url, { dashboardUrl = "" } = {}) {
  * @returns {void}
  */
 export function closeShareModal() {
-  backdrop.hidden = true;
+  shareModalOpen = false;
+  // Cancels the frame `openShareModal` queued. Without this a dismissal inside
+  // that frame would be reversed the moment it ran, leaving the modal open
+  // with nothing left to close it.
+  cancelAnimationFrame(pendingOpenFrame);
+  backdrop.classList.remove("is-open");
   note.textContent = "";
+  // Hiding immediately would cut the exit animation off at its first frame, so
+  // the element stays displayed until the transition it just started ends.
+  // `transitionend` alone is not enough to rely on -- it never fires when the
+  // motion is suppressed (reduced-motion, a background tab), which is why the
+  // timeout below is the one that actually guarantees `hidden`. Reopening in
+  // the meantime wins: this only hides what is still meant to be closed.
+  globalThis.setTimeout(() => {
+    if (!shareModalOpen) backdrop.hidden = true;
+  }, MODAL_EXIT_MS);
 }
 
 if (backdrop) {
