@@ -22,7 +22,22 @@ const exportStep = document.querySelector("#export-step");
 const pdfExport = document.querySelector("#pdf-export");
 const saveStep = document.querySelector("#save-step");
 const cloudSave = document.querySelector("#cloud-save");
+const workflowBackdrop = document.querySelector("#workflow-backdrop");
+const workflowStageLabel = document.querySelector("#workflow-stage-label");
+const workflowStageItems = [...document.querySelectorAll("#workflow-stages li")];
 const defaultFeedback = "Select a workbook to begin the ETL pipeline.";
+
+/**
+ * The drop-to-share workflow's stages, in the order they run.
+ *
+ * The first two belong to this classic script and the last two to the ES
+ * module on `#cloud-save`, so the list is the contract between them: both
+ * halves name a stage from here rather than tracking progress separately.
+ */
+const WORKFLOW_STAGES = ["read", "build", "save", "share"];
+
+/** The queued frame that reveals the throbber, so a fast failure can cancel it. */
+let pendingWorkflowFrame = 0;
 
 /**
  * The test report document (`CV1` cover + `TR1` results) keeps the established
@@ -350,6 +365,54 @@ document.querySelector("#remove-file").addEventListener("click", () => {
   clearFile();
   setFeedback(defaultFeedback, false);
 });
+
+/**
+ * Advance the drop-to-share throbber to one stage, opening it if needed.
+ *
+ * Opening on demand means the cloud-save controller can call this for its own
+ * stages whether it was reached through the automatic workflow or by someone
+ * pressing "Save data to cloud" directly -- both deserve the same feedback,
+ * and neither has to know which happened.
+ * @param {string} stage - A name from `WORKFLOW_STAGES`.
+ * @param {string} label - What to tell the person waiting.
+ * @returns {void}
+ */
+function setWorkflowStage(stage, label) {
+  const reached = WORKFLOW_STAGES.indexOf(stage);
+  if (reached === -1) return;
+
+  if (workflowBackdrop.hidden) {
+    workflowBackdrop.hidden = false;
+    // One frame between "displayed" and "open" so the transition has two
+    // states to move between; setting both together animates nothing.
+    pendingWorkflowFrame = requestAnimationFrame(() => {
+      workflowBackdrop.classList.add("is-open");
+    });
+  }
+
+  workflowStageLabel.textContent = label;
+  workflowStageItems.forEach((item) => {
+    const position = WORKFLOW_STAGES.indexOf(item.dataset.stage);
+    item.classList.toggle("is-done", position < reached);
+    item.classList.toggle("is-active", position === reached);
+  });
+}
+
+/**
+ * Close the throbber, whether the workflow finished or gave up.
+ * @returns {void}
+ */
+function endWorkflow() {
+  // A workflow can fail inside the frame that was queued to open the throbber,
+  // which would otherwise leave it marked open behind a hidden element and
+  // skip the entrance animation on the next run.
+  cancelAnimationFrame(pendingWorkflowFrame);
+  workflowBackdrop.classList.remove("is-open");
+  workflowBackdrop.hidden = true;
+  workflowStageItems.forEach((item) => {
+    item.classList.remove("is-done", "is-active");
+  });
+}
 
 /**
  * Derive a filesystem-safe base name for the exported documents.
@@ -898,15 +961,25 @@ async function runWorkbookWorkflow(file) {
   const pipeline = selectFile(file);
   if (!pipeline) return;
 
+  setWorkflowStage("read", "Reading the workbook…");
   await pipeline;
   // A failed pipeline leaves no plan behind, and the export button disabled.
-  if (!parsedDocuments) return;
+  if (!parsedDocuments) {
+    endWorkflow();
+    return;
+  }
 
-  if (!(await runExport())) return;
+  setWorkflowStage("build", "Building the PDFs…");
+  if (!(await runExport())) {
+    endWorkflow();
+    return;
+  }
 
   // The cloud-save controller is an ES module listening on this button, so
   // the click is how the classic workspace script hands the workflow over.
-  // It publishes the share link and opens the send-it-now modal from there.
+  // It publishes the share link and opens the send-it-now modal from there,
+  // and drives the remaining two stages of the throbber through the globals
+  // exposed at the foot of this file.
   cloudSave.click();
 }
 
@@ -938,6 +1011,7 @@ globalThis.docuAlignWorkspace = Object.freeze({
   advancePipeline,
   applyRuntimeNotice,
   clearFile,
+  endWorkflow,
   exportOrder,
   formatFileSize,
   getExportDocuments,
@@ -950,5 +1024,6 @@ globalThis.docuAlignWorkspace = Object.freeze({
   selectFile,
   setDisabledDocumentKinds,
   setFeedback,
+  setWorkflowStage,
   startPipeline,
 });

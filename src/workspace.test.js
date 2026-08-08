@@ -97,6 +97,15 @@ function renderWorkspace() {
     <button id="remove-file"></button>
     <button id="google-sign-in"></button>
     <p id="auth-message"></p>
+    <div id="workflow-backdrop" hidden>
+      <p id="workflow-stage-label"></p>
+      <ol id="workflow-stages">
+        <li data-stage="read"></li>
+        <li data-stage="build"></li>
+        <li data-stage="save"></li>
+        <li data-stage="share"></li>
+      </ol>
+    </div>
   `;
 }
 
@@ -925,6 +934,51 @@ describe("workspace controller", () => {
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(clickSpy.mock.contexts[0].download).toBe("auto.zip");
     expect(document.querySelector("#feedback").textContent).toContain("auto.zip");
+
+    // The throbber tracks the whole run. By hand-off it is on "build", with
+    // "read" behind it -- the last two stages belong to the save controller,
+    // which is a separate module and is not loaded here.
+    const backdrop = document.querySelector("#workflow-backdrop");
+    expect(backdrop.hidden).toBe(false);
+    expect(document.querySelector("#workflow-stage-label").textContent)
+      .toBe("Building the PDFs…");
+    const stageState = (stage) => {
+      const item = document.querySelector(`#workflow-stages li[data-stage="${stage}"]`);
+      return [...item.classList].join(" ");
+    };
+    expect(stageState("read")).toBe("is-done");
+    expect(stageState("build")).toBe("is-active");
+    expect(stageState("save")).toBe("");
+  });
+
+  it("drives the throbber's later stages for a direct save, and closes it", async () => {
+    const { endWorkflow, setWorkflowStage } = await loadWorkspace();
+    const backdrop = document.querySelector("#workflow-backdrop");
+
+    // Pressing "Save data to cloud" without dropping a workbook reaches the
+    // save controller with no throbber open, so it must open on demand.
+    expect(backdrop.hidden).toBe(true);
+    setWorkflowStage("save", "Saving to the cloud…");
+    expect(backdrop.hidden).toBe(false);
+    expect(document.querySelector("#workflow-stage-label").textContent)
+      .toBe("Saving to the cloud…");
+
+    setWorkflowStage("share", "Creating the share link…");
+    const share = document.querySelector('#workflow-stages li[data-stage="share"]');
+    expect(share.classList.contains("is-active")).toBe(true);
+    expect(
+      document.querySelector('#workflow-stages li[data-stage="save"]').classList
+        .contains("is-done"),
+    ).toBe(true);
+
+    // An unknown stage cannot silently blank the display.
+    setWorkflowStage("nonsense", "Should not appear");
+    expect(document.querySelector("#workflow-stage-label").textContent)
+      .toBe("Creating the share link…");
+
+    endWorkflow();
+    expect(backdrop.hidden).toBe(true);
+    expect(share.classList.contains("is-active")).toBe(false);
   });
 
   it("stops the unattended workflow at whichever stage fails", async () => {

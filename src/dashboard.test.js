@@ -1063,8 +1063,12 @@ describe("dashboard module", () => {
       document.querySelector("#share-modal").dispatchEvent(new MouseEvent("click", { bubbles: true }));
       expect(backdrop.hidden).toBe(false);
 
+      // Dismissal drops `is-open` at once so the exit animation can run, and
+      // only hides the element once that animation has had its time.
       backdrop.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      expect(backdrop.hidden).toBe(true);
+      expect(backdrop.classList.contains("is-open")).toBe(false);
+      expect(backdrop.hidden).toBe(false);
+      await vi.waitFor(() => expect(backdrop.hidden).toBe(true));
 
       // Escape only acts while the modal is actually open.
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -1073,13 +1077,28 @@ describe("dashboard module", () => {
       openShareModal(SHARE_URL);
       expect(backdrop.hidden).toBe(false);
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      expect(backdrop.hidden).toBe(true);
+      await vi.waitFor(() => expect(backdrop.hidden).toBe(true));
 
       openShareModal(SHARE_URL);
       document
         .querySelector("#share-modal-close")
         .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      expect(backdrop.hidden).toBe(true);
+      await vi.waitFor(() => expect(backdrop.hidden).toBe(true));
+    });
+
+    it("keeps a reopened modal visible when the previous exit timer fires", async () => {
+      const { openShareModal, closeShareModal } = await renderOneReport();
+      const backdrop = document.querySelector("#share-modal-backdrop");
+
+      // Reopening inside the exit window must not be swallowed by the timer
+      // the dismissal left running -- that would blank the modal a moment
+      // after it appeared, which is exactly what the `is-open` guard prevents.
+      openShareModal(SHARE_URL);
+      closeShareModal();
+      openShareModal(SHARE_URL);
+
+      await new Promise((r) => setTimeout(r, 260));
+      expect(backdrop.hidden).toBe(false);
     });
 
     it("re-copies the link from the modal's own copy button", async () => {
