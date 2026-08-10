@@ -473,16 +473,26 @@ export function samplingOrder(value) {
 /**
  * The file name one document downloads as.
  *
- * Numbered by position so the saved files sort in the order the package lists
- * them, and sanitised because the name comes from staff-entered report titles.
+ * A document carries the name the lab gave it -- `X-2026-1338 (AV-2620N_RAK1)`
+ * -- so a package downloads under the same names the staff who exported it
+ * see, and it is used as-is apart from the characters a file name may not
+ * hold. (The workspace sanitises its own archive entries the same way; the two
+ * pages share no code because this one is an ES module and the workspace is a
+ * classic script.) A name left with nothing savable falls back to its position
+ * in the package, so two such documents are still saved as separate files.
  * @param {Object} share - A public share document.
  * @param {number} index - Zero-based position in the package.
- * @returns {string} A safe `NN-name.pdf` file name.
+ * @returns {string} A file name safe to save under.
  */
 function packageEntryName(share, index) {
-  const label = String(share?.reportName ?? "").trim() || "document";
-  const safe = label.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-  return `${String(index + 1).padStart(2, "0")}-${safe || "document"}.pdf`;
+  const safe = String(share?.reportName ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.]+|[\s.]+$/g, "")
+    .slice(0, 80)
+    .trim();
+  return `${safe || `document-${String(index + 1).padStart(2, "0")}`}.pdf`;
 }
 
 /**

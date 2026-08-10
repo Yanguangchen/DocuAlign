@@ -891,9 +891,9 @@ describe("view-report module", () => {
 
       // Three downloads, each its own PDF -- nothing bundled or merged.
       expect(await savedDocuments(blobs, anchorClick)).toEqual([
-        { name: "01-Summary.pdf", marker: 500 },
-        { name: "02-Test-Report-X-1.pdf", marker: 601 },
-        { name: "03-Legacy-report.pdf", marker: ASSET_MARKER },
+        { name: "Summary.pdf", marker: 500 },
+        { name: "Test Report X-1.pdf", marker: 601 },
+        { name: "Legacy report.pdf", marker: ASSET_MARKER },
       ]);
       await vi.waitFor(() =>
         expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
@@ -942,7 +942,7 @@ describe("view-report module", () => {
 
       // The Summary is still delivered; the failure is named, not swallowed.
       expect(await savedDocuments(blobs, anchorClick)).toEqual([
-        { name: "01-Summary.pdf", marker: 500 },
+        { name: "Summary.pdf", marker: 500 },
       ]);
       await vi.waitFor(() =>
         expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
@@ -970,8 +970,8 @@ describe("view-report module", () => {
 
       // Numbered, so two unnameable documents still save as separate files.
       expect((await savedDocuments(blobs, anchorClick)).map((entry) => entry.name)).toEqual([
-        "01-document.pdf",
-        "02-document.pdf",
+        "document-01.pdf",
+        "document-02.pdf",
       ]);
     });
 
@@ -1264,7 +1264,7 @@ describe("view-report module", () => {
 
       expect(globalThis.docuAlignSummaryPdf.createDocument).toHaveBeenCalled();
       expect(await savedDocuments(blobs, anchorClick)).toEqual([
-        { name: "01-Summary.pdf", marker: 500 },
+        { name: "Summary.pdf", marker: 500 },
       ]);
     });
 

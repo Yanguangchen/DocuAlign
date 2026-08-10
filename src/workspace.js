@@ -428,6 +428,93 @@ function reportBaseName() {
 }
 
 /**
+ * Strip what no file name may carry, while keeping the spaces, brackets and
+ * underscores the house naming convention is written with.
+ *
+ * The set removed is Windows' -- the strictest of the platforms staff save
+ * these files on -- plus control characters, and leading or trailing dots and
+ * spaces, which Windows silently drops from a saved file's name.
+ * @param {string} value - Raw label.
+ * @returns {string} A name safe to save under, possibly empty.
+ */
+function safeFileName(value) {
+  return String(value ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.]+|[\s.]+$/g, "");
+}
+
+/**
+ * The package-level job reference, taken from a report's own cover reference.
+ *
+ * A cover carries the reference of one sample (`X-2026-522-1`); the package
+ * they all belong to is that reference without the sample index, which is what
+ * every exported file is named after. Used only when the Summary sheet -- the
+ * sheet that states the package reference outright -- is absent.
+ * @param {Array<{job_ref?: string}>} reports - Detected reports, in workbook order.
+ * @returns {string} The package job reference, or an empty string.
+ */
+function packageJobRef(reports) {
+  const reference = String(reports.find((report) => report.job_ref)?.job_ref ?? "").trim();
+  return reference.replace(/-\d+$/, "");
+}
+
+/**
+ * The job reference and voyage number every exported file is named after.
+ *
+ * Both are read from the Summary sheet, which states them for the package as a
+ * whole: `U10` is the job reference covering every sample, and `U12` the
+ * voyage number. A workbook with no Summary falls back to the reports' own
+ * covers, which carry the same two values per sample.
+ * @param {{sheetNames?: string[], sheets?: Map<string, Map<string, string>>}} workbook - Parsed workbook.
+ * @param {Array<Object>} reports - Detected reports, in workbook order.
+ * @param {Map<number, Object>} models - Semantic report models by group index.
+ * @returns {{jobRef: string, voyageNumber: string}} The package's identity.
+ */
+function packageIdentity(workbook, reports, models) {
+  const summarySheet = (workbook.sheetNames ?? []).find(isSummarySheet);
+  const cells = workbook.sheets?.get(summarySheet) ?? new Map();
+  const cell = (address) => String(cells.get(address) ?? "").trim();
+  const firstCover = models.get(reports.find((report) => models.has(report.group))?.group)?.cover;
+
+  return {
+    jobRef: cell("U10") || packageJobRef(reports),
+    voyageNumber: cell("U12") || String(firstCover?.voyageNumber ?? "").trim(),
+  };
+}
+
+/**
+ * Name one exported document the way the lab names them by hand:
+ * `X-2026-1338 (AV-2620N_RAK SUMMARY)` for the summary, and
+ * `X-2026-1338 (AV-2620N_RAK1)`, `…_RAK2`, … for the test reports in the order
+ * the workbook lists them.
+ *
+ * A workbook missing either half of its identity still names its files: the
+ * empty half drops out rather than leaving `undefined` in the name. Only when
+ * both are missing is there nothing to build a name from, and the caller keeps
+ * its own descriptive title instead.
+ * @param {{jobRef: string, voyageNumber: string}} identity - The package's identity.
+ * @param {string} suffix - `RAK SUMMARY`, `RAK1`, `RAK2`, …
+ * @returns {string} The document's name, or an empty string.
+ */
+function conventionalName(identity, suffix) {
+  const { jobRef, voyageNumber } = identity;
+  if (!jobRef && !voyageNumber) return "";
+  const bracketed = [voyageNumber, suffix].filter(Boolean).join("_");
+  return safeFileName([jobRef, `(${bracketed})`].filter(Boolean).join(" "));
+}
+
+/**
+ * Whether a worksheet is the workbook's Summary sheet.
+ * @param {string} sheetName - Worksheet tab name.
+ * @returns {boolean} True for the Summary sheet.
+ */
+function isSummarySheet(sheetName) {
+  return sheetName.trim() === "Summary";
+}
+
+/**
  * Turn any label into a filesystem-safe slug.
  * @param {string} value - Raw label.
  * @returns {string} Sanitized slug.
@@ -472,10 +559,39 @@ function claimSlug(preferred, suffix, used) {
 }
 
 /**
+ * Claim a document name no other planned document is using.
+ *
+ * A name is what the document saves as, so two documents sharing one would
+ * overwrite each other in the recipient's downloads folder. The convention
+ * itself keeps them apart -- one Summary, then `RAK1`, `RAK2`, … -- so this
+ * only catches a workbook odd enough to plan the same name twice.
+ * @param {string} preferred - The name the document would like.
+ * @param {Set<string>} used - Names already claimed by this plan.
+ * @returns {string} A name unique within the plan, now claimed.
+ */
+function claimName(preferred, used) {
+  let name = preferred;
+  let attempt = 1;
+  while (used.has(name)) {
+    attempt += 1;
+    name = `${preferred} (${attempt})`;
+  }
+  used.add(name);
+  return name;
+}
+
+/**
  * Plan every document the export will produce. Each test report (its `CV1`
  * cover plus `TR1` results) is one document, and the standalone worksheets --
  * the summary, the coral/organic reference, and every `DS1` and `SB1`
  * datasheet -- are each their own separate document.
+ *
+ * The Summary and the test reports are named by the lab's own convention --
+ * `X-2026-1338 (AV-2620N_RAK SUMMARY)`, then `…_RAK1`, `…_RAK2`, … numbered in
+ * the order the workbook lists them -- so an exported package is
+ * indistinguishable from one named by hand. That name is the document's title
+ * throughout: it is what the archive entry is called, what the dashboard and
+ * the public viewer show, and what a shared document downloads as.
  *
  * Documents whose kind is currently withheld (see
  * `TEMPORARILY_DISABLED_DOCUMENT_KINDS`) are still planned here and then
@@ -488,11 +604,13 @@ function claimSlug(preferred, suffix, used) {
 function planExportDocuments(workbook, reports, models = mappedReports) {
   const documents = [];
   const claimed = new Set();
-  // Slugs are Firestore ids and archive file names, so they must not repeat
-  // across the whole plan -- see claimSlug.
+  // Slugs are Firestore ids, so they must not repeat across the whole plan --
+  // see claimSlug. Names are what the documents save as -- see claimName.
   const slugs = new Set();
+  const names = new Set();
+  const identity = packageIdentity(workbook, reports, models);
 
-  reports.forEach((report) => {
+  reports.forEach((report, position) => {
     const identifier = claimSlug(reportIdentifier(report), report.group, slugs);
     // The cover and test-result sheets belong to the report, which keeps its
     // established layout: the reference pages are copied and only this group's
@@ -500,7 +618,14 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
     [report.sheets.CV1, report.sheets.TR1].filter(Boolean).forEach((name) => claimed.add(name));
     const document = {
       slug: identifier,
-      title: `Test Report ${report.job_ref || report.group}`,
+      // `RAK1` for the first report the workbook lists, `RAK2` for the second,
+      // and so on. A workbook with neither a job reference nor a voyage number
+      // has nothing to name a document by, so it keeps a descriptive title.
+      title: claimName(
+        conventionalName(identity, `RAK${position + 1}`)
+          || `Test Report ${report.job_ref || report.group}`,
+        names,
+      ),
       subtitle: "",
       kind: DOCUMENT_KINDS.REPORT,
       groupIndex: report.group,
@@ -533,10 +658,12 @@ function planExportDocuments(workbook, reports, models = mappedReports) {
   // Anything outside a report group (Summary, coral + org, …) stands alone.
   workbook.sheetNames.forEach((sheetName, index) => {
     if (claimed.has(sheetName)) return;
-    const isSummary = sheetName.trim() === "Summary";
+    const isSummary = isSummarySheet(sheetName);
     const document = {
       slug: claimSlug(slugify(sheetName) || "sheet", index + 1, slugs),
-      title: sheetName.trim(),
+      title: isSummary
+        ? claimName(conventionalName(identity, "RAK SUMMARY") || sheetName.trim(), names)
+        : sheetName.trim(),
       subtitle: "",
       kind: isSummary ? DOCUMENT_KINDS.SUMMARY : DOCUMENT_KINDS.WORKSHEET,
       sheets: [sheetName],
@@ -804,6 +931,20 @@ function exportOrder(documents) {
 }
 
 /**
+ * The file name one planned document is archived under.
+ *
+ * The title is the name the lab would have typed -- see
+ * `planExportDocuments` -- so the archive simply carries it. A title with
+ * nothing savable in it falls back to the document's slug, which is sanitized
+ * by construction.
+ * @param {{title: string, slug: string}} plan - Planned document.
+ * @returns {string} The document's file name, extension included.
+ */
+function documentFileName(plan) {
+  return `${safeFileName(plan.title) || plan.slug}.pdf`;
+}
+
+/**
  * Render every planned document and pack them into one archive.
  *
  * Each document stays its own file: the archive is only a wrapper so there is
@@ -828,7 +969,7 @@ async function buildExportArchive(documents, baseName) {
   for (const plan of exportOrder(documents)) {
     try {
       entries.push({
-        name: `${baseName}/${baseName}-${plan.slug}.pdf`,
+        name: `${baseName}/${documentFileName(plan)}`,
         data: await documentBytes(plan),
       });
     } catch (error) {
@@ -1011,14 +1152,18 @@ globalThis.docuAlignWorkspace = Object.freeze({
   advancePipeline,
   applyRuntimeNotice,
   clearFile,
+  conventionalName,
+  documentFileName,
   endWorkflow,
   exportOrder,
   formatFileSize,
   getExportDocuments,
   getPublishableAssets,
   isExcelFile,
+  packageIdentity,
   planExportDocuments,
   reportBaseName,
+  safeFileName,
   reportIdentifier,
   resetPipeline,
   selectFile,
