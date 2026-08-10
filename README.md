@@ -212,7 +212,7 @@ Saving a workbook persists its exported documents to a `documents` subcollection
 
 A package link's viewer page lists every document as its own card, in the export's own order (Summary first, then reports oldest sampling date first), plus two buttons above the list:
 
-* **Download all N documents** rebuilds each document and saves it as its **own separate file** — no ZIP, no merge, nothing bundled. Saves are spaced apart (`DOWNLOAD_INTERVAL_MS`) because browsers throttle a burst of programmatic downloads; the recipient may need to allow multiple downloads once.
+* **Download all N documents (ZIP)** rebuilds each document and packs them into **one ZIP** — each document is still its own PDF inside it, nothing is merged. The archive is only a wrapper, so the recipient gets a single download and a single browser prompt rather than a burst the browser throttles and asks to allow. It downloads as `<job ref> (<voyage no>).zip`, taking the package's own name from the documents it holds (falling back to the name the sender gave it), and entries are named into a folder of that name so it unpacks tidily.
 * **Print all N documents** sends the whole package to the printer as **one job**. This is the one place documents are merged: a print job is one document by definition, so printing separately would open one dialog per report. The merged PDF is built only in memory for the print dialog and is **never saved or offered as a download**.
 
 A document that cannot be rebuilt is skipped and named in the button's status line rather than failing the rest of the package.

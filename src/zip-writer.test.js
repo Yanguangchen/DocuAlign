@@ -45,6 +45,22 @@ describe("zip writer", () => {
     return { entries, centralDirectoryOffset: offset };
   }
 
+  it("marks entry names as UTF-8 so a name is read back as it was written", () => {
+    // Entries carry the names staff gave the documents, so an unzip tool has
+    // to be told the names are UTF-8 rather than the legacy DOS code page.
+    const name = "X-2026-1338 (AV-2620N_RAK SUMMARY).pdf";
+    const archive = docuAlignZip.createArchive([
+      { name, data: new TextEncoder().encode("%PDF-1.4") },
+    ]);
+    const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+
+    // General-purpose bit 11, in the local header and the central directory.
+    const { entries, centralDirectoryOffset } = readEntries(archive);
+    expect(view.getUint16(6, true) & 0x0800).toBe(0x0800);
+    expect(view.getUint16(centralDirectoryOffset + 8, true) & 0x0800).toBe(0x0800);
+    expect(entries[0].name).toBe(name);
+  });
+
   it("refuses to build an archive with nothing in it", () => {
     expect(() => docuAlignZip.createArchive([])).toThrow(/at least one file/);
     expect(() => docuAlignZip.createArchive(undefined)).toThrow(/at least one file/);
