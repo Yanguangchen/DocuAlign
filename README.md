@@ -147,12 +147,25 @@ PDF.
 
 | Document | Count for `SampleInput.xlsx` | Named | Source |
 | --- | --- | --- | --- |
-| `Summary` | 1 | `<workbook>-Summary.pdf` | Fixed-format overlay renderer (`src/summary-pdf.js`) |
-| Test report (`CV1` + `TR1`) | 6 | `<workbook>-<job ref>.pdf` | **Fixed format — reference pages with mapped values overlaid** |
-| `DS1` sieve datasheet | 6 | `<workbook>-<job ref>-DS1.pdf` | Generated |
-| `SB1` direct shear datasheet | 6 | `<workbook>-<job ref>-SB1.pdf` | Generated |
-| `coral + org` | 1 | `<workbook>-coral-org.pdf` | Generated |
+| `Summary` | 1 | `<job ref> (<voyage no>_RAK SUMMARY).pdf` | Fixed-format overlay renderer (`src/summary-pdf.js`) |
+| Test report (`CV1` + `TR1`) | 6 | `<job ref> (<voyage no>_RAK1)`…`_RAK6).pdf` | **Fixed format — reference pages with mapped values overlaid** |
+| `DS1` sieve datasheet | 6 | `DS1 Datasheet <job ref>.pdf` | Generated |
+| `SB1` direct shear datasheet | 6 | `SB1 Datasheet <job ref>.pdf` | Generated |
+| `coral + org` | 1 | `coral + org.pdf` | Generated |
 | **Total** | **20** | | |
+
+The Summary and the test reports carry **the lab's own naming convention**, so
+an exported package is indistinguishable from one named by hand:
+`X-2026-1338 (AV-2620N_RAK SUMMARY)`, then `X-2026-1338 (AV-2620N_RAK1)`,
+`…_RAK2`, and so on, numbered in the order the workbook lists its reports. The
+job reference and voyage number are the package's own — read from the `Summary`
+sheet (`U10` and `U12`), falling back to the reports' covers (`CV1!K28` without
+its sample index, and `CV1!K30`) for a workbook with no Summary. That name is
+the document's title throughout: it is the archive entry's file name, what the
+dashboard and a share link display, and what a shared document downloads as
+(`planExportDocuments`/`conventionalName` in `src/workspace.js`,
+`packageEntryName` in `src/view-report.js`). A workbook stating neither
+reference falls back to a descriptive title.
 
 Inside the archive, documents are ordered **Summary first, then the test
 reports oldest sampling date first** — the same order a package link's

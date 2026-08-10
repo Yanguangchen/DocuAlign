@@ -13,7 +13,7 @@ This distinction is important:
 | ETL progress | Reflects real workbook reading, preparation, and validation states | Implemented |
 | Review or edit extracted data | No review form is connected | Not implemented |
 | Save reports | Saves report name, source filename, status, creator email, server timestamp, and a `documents` subcollection of the exported documents' own data | Implemented |
-| PDF export | Renders one PDF per document (Summary + one five-page overlay per `CV1`/`TR1` report group; `DS1`/`SB1`/`coral + org` are planned but currently withheld — see §1a) and packs them into one ZIP download | Implemented |
+| PDF export | Renders one PDF per document (Summary + one five-page overlay per `CV1`/`TR1` report group; `DS1`/`SB1`/`coral + org` are planned but currently withheld — see §1a), names each by the lab's convention (`X-2026-1338 (AV-2620N_RAK SUMMARY)`, `…_RAK1`, `…_RAK2`, …) and packs them into one ZIP download | Implemented |
 | Saved-report dashboard | Lists, date-filters, deletes, and shares report metadata and documents | Implemented |
 | Single public links | Publishes an immutable, sanitized Firestore snapshot per document | Implemented |
 | Package (group) public links | Publishes 1–25 single shares and a bundle of their tokens, with one-click "download all" and "print all" on the viewer | Implemented |
@@ -243,7 +243,7 @@ sequenceDiagram
 
     Staff->>Page: Select workbook
     Workspace->>Workspace: Parse cells/media, map every report group
-    Workspace->>Workspace: Plan documents (planExportDocuments), order them (exportOrder)
+    Workspace->>Workspace: Plan documents (planExportDocuments), name them by convention, order them (exportOrder)
     Staff->>Page: Export final PDF
     Workspace->>Workspace: Render each document (overlay or generic writer)
     Workspace->>Workspace: Pack every document into one ZIP (zip-writer.js)

@@ -448,17 +448,19 @@ describe("workspace controller", () => {
     expect(URL.createObjectURL.mock.calls[0][0].type).toBe("application/zip");
 
     // Each document is its own entry, named into a folder so the archive
-    // unpacks tidily. The Summary leads, then the six reports; the DS1/SB1
-    // datasheets and the coral + org worksheet are temporarily withheld.
+    // unpacks tidily, and named by the lab's own convention: the package job
+    // reference and voyage number, then RAK SUMMARY and RAK1..RAK6. The
+    // Summary leads; the DS1/SB1 datasheets and the coral + org worksheet are
+    // temporarily withheld.
     const names = (await downloadedArchiveEntries()).map((entry) => entry.name);
     expect(names).toEqual([
-      "Client-Sample-01/Client-Sample-01-Summary.pdf",
+      "Client-Sample-01/X-2026-522 (JH99-96N_RAK SUMMARY).pdf",
       ...[1, 2, 3, 4, 5, 6].map(
-        (group) => `Client-Sample-01/Client-Sample-01-X-2026-522-${group}.pdf`,
+        (report) => `Client-Sample-01/X-2026-522 (JH99-96N_RAK${report}).pdf`,
       ),
     ]);
-    expect(names.some((name) => /-DS1\.pdf$|-SB1\.pdf$/.test(name))).toBe(false);
-    expect(names).not.toContain("Client-Sample-01/Client-Sample-01-coral-org.pdf");
+    expect(names.some((name) => /DS1|SB1/.test(name))).toBe(false);
+    expect(names.some((name) => name.includes("coral"))).toBe(false);
     // Without the mapping renderer loaded, each report falls back to the
     // reference asset, so all six carry that marker.
     expect(await downloadedDocumentMarkers()).toEqual([
@@ -618,8 +620,18 @@ describe("workspace controller", () => {
       },
     ];
 
-    const plan = planExportDocuments({ sheetNames: ["Summary", "CV1", "TR1", "DS1 ", "SB1 "] }, reports);
+    const plan = planExportDocuments({
+      sheetNames: ["Summary", "CV1", "TR1", "DS1 ", "SB1 "],
+      sheets: new Map([
+        ["Summary", new Map([["U10", "X-2026-1338"], ["U12", "AV-2620N"]])],
+      ]),
+    }, reports);
     expect(plan.map((entry) => entry.slug)).toEqual(["X-1", "Summary"]);
+    // Both documents are named the way the lab names them by hand.
+    expect(plan.map((entry) => entry.title)).toEqual([
+      "X-2026-1338 (AV-2620N_RAK1)",
+      "X-2026-1338 (AV-2620N_RAK SUMMARY)",
+    ]);
     // The report keeps its established layout: served from the reference asset,
     // never re-rendered from the CV1/TR1 worksheet grids.
     expect(plan[0].assetPath).toBe("./SampleDocuments/SampleOutput.pdf");
@@ -627,12 +639,55 @@ describe("workspace controller", () => {
     // Its CV1 and TR1 sheets are claimed, so they never export on their own.
     expect(plan.some((entry) => entry.sheets.includes("CV1"))).toBe(false);
     expect(plan.some((entry) => entry.sheets.includes("TR1"))).toBe(false);
-    expect(plan[1].title).toBe("Summary");
     expect(plan[1].renderer).toBe("summary");
 
     // A report without a job reference falls back to its group number.
     expect(reportIdentifier({ group: 3 })).toBe("report-3");
     expect(reportIdentifier({ group: 1, job_ref: "X/2026 522" })).toBe("X-2026-522");
+  });
+
+  it("names every exported document the way the lab names them by hand", async () => {
+    const { conventionalName, documentFileName, packageIdentity, safeFileName } =
+      await loadWorkspace();
+
+    // The Summary states the package's identity outright: one job reference
+    // covering every sample, and the voyage number.
+    const identity = packageIdentity(
+      {
+        sheetNames: ["Summary", "CV1"],
+        sheets: new Map([
+          ["Summary", new Map([["U10", "X-2026-1338"], ["U12", " AV-2620N "]])],
+        ]),
+      },
+      [{ group: 1, job_ref: "X-2026-1338-1" }],
+      new Map(),
+    );
+    expect(identity).toEqual({ jobRef: "X-2026-1338", voyageNumber: "AV-2620N" });
+    expect(conventionalName(identity, "RAK SUMMARY")).toBe("X-2026-1338 (AV-2620N_RAK SUMMARY)");
+    expect(conventionalName(identity, "RAK2")).toBe("X-2026-1338 (AV-2620N_RAK2)");
+
+    // Without a Summary sheet the same identity is recovered from the covers:
+    // a cover's reference names one sample, so the sample index comes off.
+    expect(packageIdentity(
+      { sheetNames: ["CV1"] },
+      [{ group: 1, job_ref: "X-2026-1338-1" }, { group: 2, job_ref: "X-2026-1338-2" }],
+      new Map([[1, { cover: { voyageNumber: "AV-2620N" } }]]),
+    )).toEqual({ jobRef: "X-2026-1338", voyageNumber: "AV-2620N" });
+
+    // A workbook stating only one half of its identity still names its files;
+    // one stating neither has nothing to name them by.
+    expect(conventionalName({ jobRef: "X-2026-1338", voyageNumber: "" }, "RAK1"))
+      .toBe("X-2026-1338 (RAK1)");
+    expect(conventionalName({ jobRef: "", voyageNumber: "" }, "RAK1")).toBe("");
+
+    // The name is what the file saves as, so what a file name may not carry is
+    // dropped -- while the convention's own spaces and brackets stay.
+    expect(safeFileName("X/2026:1338 (AV*2620N_RAK1)")).toBe("X 2026 1338 (AV 2620N_RAK1)");
+    expect(documentFileName({ title: "X-2026-1338 (AV-2620N_RAK1)", slug: "x" }))
+      .toBe("X-2026-1338 (AV-2620N_RAK1).pdf");
+    // A title with nothing savable left in it falls back to the slug, which is
+    // sanitized by construction.
+    expect(documentFileName({ title: "***", slug: "X-2026-1338-1" })).toBe("X-2026-1338-1.pdf");
   });
 
   it("builds every test report from its own worksheet group", async () => {
@@ -795,7 +850,7 @@ describe("workspace controller", () => {
     // having, so the failure of one does not stop the merge.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Downloaded lab-data.zip with 6 documents; could not generate Test Report X-2026-522-1.",
+        "Downloaded lab-data.zip with 6 documents; could not generate X-2026-522 (JH99-96N_RAK1).",
       ),
     );
     expect(clickSpy).toHaveBeenCalledOnce();
@@ -865,6 +920,9 @@ describe("workspace controller", () => {
     // The fixed-format test report is asset-backed and publishes no data.
     expect(documents[0]).toMatchObject({
       slug: "X-2026-522-1",
+      // Persisted and published under its conventional name, so a shared
+      // package downloads as the same files the workspace exported.
+      title: "X-2026-522 (JH99-96N_RAK1)",
       assetPath: "./SampleDocuments/SampleOutput.pdf",
       data: null,
     });
@@ -872,6 +930,7 @@ describe("workspace controller", () => {
     expect(documents.some((entry) => entry.slug === "coral-org")).toBe(false);
 
     const summary = documents.find((entry) => entry.slug === "Summary");
+    expect(summary.title).toBe("X-2026-522 (JH99-96N_RAK SUMMARY)");
     const summaryData = JSON.parse(summary.data);
     expect(summary.data.length).toBeLessThanOrEqual(100000);
     expect(summaryData.renderer).toBe("summary");
@@ -903,8 +962,11 @@ describe("workspace controller", () => {
     // org worksheet, which the generic writer lays out landscape.
     const archived = (await downloadedArchiveEntries()).map((entry) => entry.name);
     expect(archived).toHaveLength(20);
-    expect(archived).toContain("lab-data/lab-data-X-2026-522-1-DS1.pdf");
-    expect(archived).toContain("lab-data/lab-data-coral-org.pdf");
+    expect(archived).toContain("lab-data/X-2026-522 (JH99-96N_RAK1).pdf");
+    // Only the Summary and the reports carry the naming convention; the
+    // withheld documents keep their own descriptive titles.
+    expect(archived).toContain("lab-data/DS1 Datasheet X-2026-522-1.pdf");
+    expect(archived).toContain("lab-data/coral + org.pdf");
     const markers = await downloadedDocumentMarkers();
     expect(markers.slice(0, 7)).toEqual([
       SUMMARY_MARKER,
@@ -1343,7 +1405,7 @@ describe("workspace controller", () => {
     // The report is still worth having even though the Summary failed.
     await vi.waitFor(() =>
       expect(document.querySelector("#feedback").textContent).toBe(
-        "Downloaded summary-error.zip with 1 document; could not generate Summary.",
+        "Downloaded summary-error.zip with 1 document; could not generate X (RAK SUMMARY).",
       ),
     );
     expect(clickSpy).toHaveBeenCalledOnce();
