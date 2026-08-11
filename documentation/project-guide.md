@@ -301,7 +301,7 @@ sequenceDiagram
     Share->>DB: Get bundle + every member share (or one share)
     DB-->>Viewer: Sanitized snapshot(s)
     Viewer->>Viewer: Rebuild each document's PDF from its published data
-    Viewer-->>Visitor: One card per document; "Download all" saves each\nfile separately, "Print all" merges them into one print job only
+    Viewer-->>Visitor: One card per document; "Download all" saves one ZIP\nholding each PDF, "Print all" merges them into one print job only
 ```
 
 ## 6. Data model
@@ -528,9 +528,9 @@ even opened directly from disk, and that embedded copy is checked byte-for-byte
 against the source PDF too.
 
 **Every delivered PDF is either copied-and-overlaid or generated from parsed
-data — never a merge of several documents into one.** The export button packs
-each document's own PDF into one ZIP (`src/zip-writer.js`); a public package
-link's "download all" saves each document as its own file. `src/pdf-merge.js`
+data — never a merge of several documents into one.** Both the export button and a
+public package link's "download all" pack each document's own PDF into one ZIP
+(`src/zip-writer.js`). `src/pdf-merge.js`
 is the one exception, and a narrow one: it exists solely so the public
 viewer's **print-all** button can send a whole package to the printer as a
 single job (a print job is one document by definition), and its merged bytes

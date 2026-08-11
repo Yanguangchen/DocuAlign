@@ -78,11 +78,12 @@ describe("PDF export", () => {
     expect(indexSource).toContain('src="./src/zip-writer.js"');
     expect(viteConfigSource).toContain('"zip-writer.js"');
     expect(zipWriterSource).not.toMatch(/^\s*(import|export)\s/m);
-    // The public share viewer's one button saves each document as its own
-    // file, so it bundles nothing at all -- not even into an archive.
+    // The public share viewer packs its package the same way: each document
+    // stays its own PDF inside one ZIP, so the recipient gets a single
+    // download instead of a burst the browser throttles and asks to allow.
     expect(viewReportSource).toContain("downloadEveryDocument");
-    expect(viewReportSource).not.toContain("docuAlignZip");
-    expect(viewSource).not.toContain("zip-writer.js");
+    expect(viewReportSource).toContain("docuAlignZip.createArchive");
+    expect(viewSource).toContain('src="./src/zip-writer.js"');
     // No delivered file is ever a merge of several documents.
     expect(workspaceSource).not.toContain("docuAlignPdfMerge");
   });

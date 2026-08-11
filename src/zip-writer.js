@@ -21,6 +21,12 @@
   /** ZIP needs a DOS timestamp; entries carry a fixed one so archives are reproducible. */
   const DOS_TIME = 0;
   const DOS_DATE = 0x2821; // 2000-01-01
+  /**
+   * General-purpose bit 11: entry names are UTF-8 rather than the legacy DOS
+   * code page. Names carry document titles staff typed, so an unzipper has to
+   * be told how to read anything outside ASCII.
+   */
+  const UTF8_NAMES = 0x0800;
 
   const CRC_TABLE = (() => {
     const table = new Uint32Array(256);
@@ -86,7 +92,7 @@
       const localView = new DataView(local.buffer);
       localView.setUint32(0, LOCAL_HEADER_SIGNATURE, true);
       localView.setUint16(4, 20, true);
-      localView.setUint16(6, 0, true);
+      localView.setUint16(6, UTF8_NAMES, true);
       localView.setUint16(8, METHOD_STORE, true);
       localView.setUint16(10, DOS_TIME, true);
       localView.setUint16(12, DOS_DATE, true);
@@ -103,7 +109,7 @@
       centralView.setUint32(0, CENTRAL_HEADER_SIGNATURE, true);
       centralView.setUint16(4, 20, true);
       centralView.setUint16(6, 20, true);
-      centralView.setUint16(8, 0, true);
+      centralView.setUint16(8, UTF8_NAMES, true);
       centralView.setUint16(10, METHOD_STORE, true);
       centralView.setUint16(12, DOS_TIME, true);
       centralView.setUint16(14, DOS_DATE, true);
