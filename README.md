@@ -213,6 +213,16 @@ Saving a workbook persists its exported documents to a `documents` subcollection
 A package link's viewer page lists every document as its own card, in the export's own order (Summary first, then reports oldest sampling date first), plus two buttons above the list:
 
 * **Download all N documents (ZIP)** rebuilds each document and packs them into **one ZIP** — each document is still its own PDF inside it, nothing is merged. The archive is only a wrapper, so the recipient gets a single download and a single browser prompt rather than a burst the browser throttles and asks to allow. It downloads as `<job ref> (<voyage no>).zip`, taking the package's own name from the documents it holds (falling back to the name the sender gave it), and entries are named into a folder of that name so it unpacks tidily.
+
+  **A link holding more than one package nests them.** A package is one saved report's document set, and a group link can carry several. Rather than tipping every document into one flat archive, each package is sealed into a ZIP of its own and those go into a parent ZIP, so the recipient still takes one download but unpacks the packages apart:
+
+  ```text
+  X-2026-1338 + X-2026-1402.zip
+  ├── X-2026-1338 (AV-2620N).zip     → that package's PDFs at its root
+  └── X-2026-1402 (BX-7710S).zip     → that package's PDFs at its root
+  ```
+
+  Packages are split by `reportId`, which every share payload carries, so two reports sharing a job reference are still told apart. The parent is named for the job references it holds, counting the remainder (`X-2026-0001 + 4 more.zip`) once listing them all would run past a usable file name, and falling back to the sender's link name when no package was named the lab's way. Child archives put their PDFs at the root — the archive's own name already identifies the package — while a **single**-package link is unchanged: one ZIP, documents inside a folder of that name. If several packages were requested and only one survives a failed rebuild, it downloads as that one package rather than as a parent wrapping a single child.
 * **Print all N documents** sends the whole package to the printer as **one job**. This is the one place documents are merged: a print job is one document by definition, so printing separately would open one dialog per report. The merged PDF is built only in memory for the print dialog and is **never saved or offered as a download**.
 
 A document that cannot be rebuilt is skipped and named in the button's status line rather than failing the rest of the package.

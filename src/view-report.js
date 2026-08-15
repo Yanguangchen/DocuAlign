@@ -531,6 +531,79 @@ function packageArchiveName(shares, bundleName) {
 }
 
 /**
+ * Split a bundle's documents into the packages they were exported as.
+ *
+ * A package is one saved report's document set -- its Summary and its test
+ * reports -- and a group link can hold several. `reportId` travels on every
+ * share payload, so the split is exact rather than inferred from names, which
+ * matters because two reports can carry the same job reference.
+ *
+ * First appearance decides order, so the packages come out in the order
+ * `bundleOrder` already put their documents in.
+ * @param {Array<Object>} shares - The bundle's documents, already ordered.
+ * @returns {Array<Array<Object>>} One list of documents per package.
+ */
+/**
+ * How long a joined list of job references may run before the parent archive
+ * counts the remainder instead of naming every one.
+ */
+const PARENT_NAME_LIMIT = 60;
+
+function packagesOf(shares) {
+  const byReport = new Map();
+  for (const share of shares) {
+    // Shares predating `reportId` are gathered under one key rather than each
+    // standing alone: splitting on absent information would turn one package
+    // into an archive per document, which is worse than not splitting at all.
+    // `undefined` is a perfectly good Map key, so they group without a default.
+    const key = share?.reportId;
+    if (!byReport.has(key)) byReport.set(key, []);
+    byReport.get(key).push(share);
+  }
+  return [...byReport.values()];
+}
+
+/**
+ * The job reference a package was exported under.
+ *
+ * The lab's own name is `X-2026-1338 (AV-2620N_RAK1)`, whose leading part is
+ * the job reference. A package named some other way has none to give.
+ * @param {Array<Object>} shares - The package's documents.
+ * @returns {string} The job reference, or an empty string.
+ */
+function packageJobRef(shares) {
+  for (const share of shares) {
+    // An absent name stringifies to something the pattern cannot match, so it
+    // needs no default of its own.
+    const named = /^([^(]+?)\s*\(.*_RAK[^)]*\)$/.exec(String(share?.reportName).trim());
+    if (named) return named[1].trim();
+  }
+  return "";
+}
+
+/**
+ * The name a multi-package parent archive downloads under.
+ *
+ * Named for the job references it carries, so the download says which jobs are
+ * inside without being opened. Beyond a few that would run past what a file
+ * name can usefully hold, the rest are counted instead of listed.
+ * @param {Array<Array<Object>>} packages - The packages going into the archive.
+ * @param {string|null} bundleName - The name the sender gave the group link.
+ * @returns {string} A file name safe to save under.
+ */
+function parentArchiveName(packages, bundleName) {
+  const refs = packages.map(packageJobRef).filter(Boolean);
+  const joined = refs.join(" + ");
+  let preferred = bundleName;
+  if (refs.length > 0) {
+    preferred = joined.length <= PARENT_NAME_LIMIT
+      ? joined
+      : `${refs[0]} + ${packages.length - 1} more`;
+  }
+  return safeFileName(preferred) || "reports";
+}
+
+/**
  * Save one built file under a name of its own.
  * @param {Uint8Array} bytes - The file's bytes.
  * @param {string} name - File name to save it under.
@@ -564,25 +637,65 @@ function saveFile(bytes, name, mimeType) {
  */
 async function downloadEveryDocument(sharedBundle) {
   const ordered = bundleOrder(sharedBundle.reports);
-  const baseName = packageArchiveName(ordered, sharedBundle.bundleName);
-  const claimed = new Set();
-  const entries = [];
+  const packages = packagesOf(ordered);
   const failed = [];
 
-  for (const [index, share] of ordered.entries()) {
-    try {
-      const data = await sharedDocumentBytes(share);
-      entries.push({ name: `${baseName}/${packageEntryName(share, index, claimed)}`, data });
-    } catch (error) {
-      logDocumentRebuildFailure(error);
-      failed.push(share?.reportName || "Untitled report");
+  // Build each package's own entries once. A single package keeps the layout
+  // it has always had -- its documents inside a folder named for it -- while
+  // several are each sealed into an archive of their own below, where that
+  // folder would only repeat the archive's name.
+  const nested = packages.length > 1;
+  const built = [];
+  for (const shares of packages) {
+    const baseName = packageArchiveName(shares, sharedBundle.bundleName);
+    const claimed = new Set();
+    const entries = [];
+    for (const [index, share] of shares.entries()) {
+      try {
+        const data = await sharedDocumentBytes(share);
+        const entryName = packageEntryName(share, index, claimed);
+        entries.push({ name: nested ? entryName : `${baseName}/${entryName}`, data });
+      } catch (error) {
+        logDocumentRebuildFailure(error);
+        failed.push(share?.reportName || "Untitled report");
+      }
     }
+    if (entries.length > 0) built.push({ baseName, entries });
   }
 
-  if (entries.length === 0) throw new Error("No document in this package could be rebuilt.");
-  const archiveName = `${baseName}.zip`;
-  saveFile(globalThis.docuAlignZip.createArchive(entries), archiveName, "application/zip");
-  return { saved: entries.length, failed, archiveName };
+  if (built.length === 0) throw new Error("No document in this package could be rebuilt.");
+  const saved = built.reduce((total, entry) => total + entry.entries.length, 0);
+
+  if (!nested || built.length === 1) {
+    // One package's worth of documents, however many packages were asked for:
+    // wrapping a lone archive inside another would add a click and tell the
+    // recipient nothing.
+    const [only] = built;
+    const flat = nested
+      ? only.entries.map((entry) => ({ ...entry, name: `${only.baseName}/${entry.name}` }))
+      : only.entries;
+    const archiveName = `${only.baseName}.zip`;
+    saveFile(globalThis.docuAlignZip.createArchive(flat), archiveName, "application/zip");
+    return { saved, failed, archiveName };
+  }
+
+  // Each package becomes an archive of its own, and those go into the parent,
+  // so the recipient still takes one download but unpacks the packages apart.
+  const claimedArchives = new Set();
+  const children = built.map(({ baseName, entries }) => {
+    let name = `${baseName}.zip`;
+    let attempt = 1;
+    while (claimedArchives.has(name)) {
+      attempt += 1;
+      name = `${baseName} (${attempt}).zip`;
+    }
+    claimedArchives.add(name);
+    return { name, data: globalThis.docuAlignZip.createArchive(entries) };
+  });
+
+  const archiveName = `${parentArchiveName(packages, sharedBundle.bundleName)}.zip`;
+  saveFile(globalThis.docuAlignZip.createArchive(children), archiveName, "application/zip");
+  return { saved, failed, archiveName };
 }
 
 /**

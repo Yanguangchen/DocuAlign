@@ -888,7 +888,7 @@ describe("view-report module", () => {
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           {
-            reportId: "doc-r",
+            reportId: "report-1",
             reportName: "X-2026-1338 (AV-2620N_RAK1)",
             status: "complete",
             pdfUrl: null,
@@ -898,14 +898,14 @@ describe("view-report module", () => {
             }),
           },
           {
-            reportId: "doc-s",
+            reportId: "report-1",
             reportName: "X-2026-1338 (AV-2620N_RAK SUMMARY)",
             status: "complete",
             pdfUrl: null,
             documentData: JSON.stringify({ renderer: "summary", cells: [] }),
           },
           // Asset-backed: nothing to rebuild, so it is fetched instead.
-          { reportId: "doc-a", reportName: "Legacy report", status: "saved", pdfUrl: null },
+          { reportId: "report-1", reportName: "Legacy report", status: "saved", pdfUrl: null },
         ],
       }));
       const { initViewer } = await import("./view-report.js");
@@ -955,14 +955,14 @@ describe("view-report module", () => {
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           {
-            reportId: "doc-r",
+            reportId: "report-1",
             reportName: "Broken report",
             status: "complete",
             pdfUrl: null,
             documentData: JSON.stringify({ renderer: "report", report: { jobRef: "X-1" } }),
           },
           {
-            reportId: "doc-s",
+            reportId: "report-1",
             reportName: "Summary",
             status: "complete",
             pdfUrl: null,
@@ -988,14 +988,248 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
+    it("nests each package in its own ZIP when a link carries more than one", async () => {
+      const { blobs } = await stubPackageRuntime();
+      globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async ([report]) => new Blob(
+          [await markerPdf(Number(report.marker))],
+          { type: "application/pdf" },
+        )),
+      };
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // Two saved reports behind one group link: `reportId` is what tells them
+      // apart, since both packages name their documents the same way.
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          {
+            reportId: "report-1",
+            reportName: "X-2026-1338 (AV-2620N_RAK1)",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({
+              renderer: "report",
+              report: { marker: 601, cover: { samplingDate: "08/04/2026" } },
+            }),
+          },
+          {
+            reportId: "report-2",
+            reportName: "X-2026-1402 (BX-7710S_RAK1)",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({
+              renderer: "report",
+              report: { marker: 602, cover: { samplingDate: "09/04/2026" } },
+            }),
+          },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      // One download still, named for the jobs it carries, and holding one
+      // archive per package rather than a single flat pile of documents.
+      expect(anchorClick.mock.contexts[0].download).toBe("X-2026-1338 + X-2026-1402.zip");
+      const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
+      expect(parent.map((entry) => entry.name)).toEqual([
+        "X-2026-1338 (AV-2620N).zip",
+        "X-2026-1402 (BX-7710S).zip",
+      ]);
+
+      // Each child holds its own package's documents at its root -- no folder
+      // repeating the archive's own name -- and they are real PDFs, not
+      // placeholders, which the marker width confirms.
+      const [first, second] = parent;
+      expect(readZipEntries(first.data).map((entry) => entry.name))
+        .toEqual(["X-2026-1338 (AV-2620N_RAK1).pdf"]);
+      expect(readZipEntries(second.data).map((entry) => entry.name))
+        .toEqual(["X-2026-1402 (BX-7710S_RAK1).pdf"]);
+      const firstPdf = await PDFLib.PDFDocument.load(readZipEntries(first.data)[0].data);
+      expect(Math.round(firstPdf.getPage(0).getWidth())).toBe(601);
+
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
+          "Downloaded X-2026-1338 + X-2026-1402.zip with 2 documents.",
+        ),
+      );
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("counts the packages a parent archive cannot name, and keeps their ZIPs apart", async () => {
+      const { blobs } = await stubPackageRuntime();
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // Five packages: too many job references to list in a file name. Two of
+      // them share a reference -- the slug-collision case -- so their child
+      // archives would collide unless numbered.
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          ...[1, 2, 3, 4].map((n) => ({
+            reportId: `report-${n}`,
+            reportName: `X-2026-000${n} (AV-262${n}N_RAK1)`,
+            status: "saved",
+            pdfUrl: null,
+          })),
+          {
+            reportId: "report-5",
+            reportName: "X-2026-0001 (AV-2621N_RAK1)",
+            status: "saved",
+            pdfUrl: null,
+          },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      expect(anchorClick.mock.contexts[0].download).toBe("X-2026-0001 + 4 more.zip");
+      const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
+      expect(parent.map((entry) => entry.name)).toEqual([
+        "X-2026-0001 (AV-2621N).zip",
+        "X-2026-0002 (AV-2622N).zip",
+        "X-2026-0003 (AV-2623N).zip",
+        "X-2026-0004 (AV-2624N).zip",
+        "X-2026-0001 (AV-2621N) (2).zip",
+      ]);
+    });
+
+    it("does not nest when only one of several packages survives", async () => {
+      const { blobs } = await stubPackageRuntime();
+      globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
+      globalThis.docuAlignRakReportPdf = {
+        createRakReportPdf: vi.fn(async () => {
+          throw new Error("Template unavailable");
+        }),
+      };
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // No asset to fall back to, so the report package yields nothing.
+      fetch.mockReset().mockResolvedValue({ ok: false, status: 404 });
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          {
+            reportId: "report-1",
+            reportName: "X-2026-1338 (AV-2620N_RAK SUMMARY)",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "summary", cells: [] }),
+          },
+          {
+            reportId: "report-2",
+            reportName: "X-2026-1402 (BX-7710S_RAK1)",
+            status: "complete",
+            pdfUrl: null,
+            documentData: JSON.stringify({ renderer: "report", report: { jobRef: "X-2" } }),
+          },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      // Two packages were asked for and one came back, so there is nothing to
+      // nest: it downloads as that package's own archive, folder and all.
+      expect(anchorClick.mock.contexts[0].download).toBe("X-2026-1338 (AV-2620N).zip");
+      expect((await savedDocuments(blobs)).map((entry) => entry.name)).toEqual([
+        "X-2026-1338 (AV-2620N)/X-2026-1338 (AV-2620N_RAK SUMMARY).pdf",
+      ]);
+      await vi.waitFor(() =>
+        expect(document.querySelector("#share-bundle-download-note").textContent).toContain(
+          "could not prepare X-2026-1402 (BX-7710S_RAK1)",
+        ),
+      );
+      delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("falls back to the sender's link name when no package names a job", async () => {
+      const { blobs } = await stubPackageRuntime();
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // Two packages, neither named the lab's way, so there is no job
+      // reference to build a parent name from.
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          { reportId: "report-1", reportName: "Legacy one", status: "saved", pdfUrl: null },
+          { reportId: "report-2", reportName: "Legacy two", status: "saved", pdfUrl: null },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      expect(anchorClick.mock.contexts[0].download).toBe("Customer pack.zip");
+      expect(
+        readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()))
+          .map((entry) => entry.name),
+      ).toEqual(["Customer pack.zip", "Customer pack (2).zip"]);
+    });
+
+    it("names an unnameable parent archive rather than saving a bare .zip", async () => {
+      const { blobs } = await stubPackageRuntime();
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // No job references and a link name with nothing savable in it: without
+      // a fallback the download would be offered as ".zip".
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        bundleName: "***",
+        reports: [
+          { reportId: "report-1", reportName: "Legacy one", status: "saved", pdfUrl: null },
+          { reportId: "report-2", reportName: "Legacy two", status: "saved", pdfUrl: null },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      expect(anchorClick.mock.contexts[0].download).toBe("reports.zip");
+      expect(blobs.at(-1).type).toBe("application/zip");
+    });
+
+    it("numbers two documents a package named identically", async () => {
+      const { blobs } = await stubPackageRuntime();
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+      // One package holding two documents of the same name: neither may
+      // overwrite the other inside the archive.
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          { reportId: "report-1", reportName: "Same name", status: "saved", pdfUrl: null },
+          { reportId: "report-1", reportName: "Same name", status: "saved", pdfUrl: null },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      document.querySelector("#share-bundle-download").click();
+      await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
+
+      expect((await savedDocuments(blobs)).map((entry) => entry.name)).toEqual([
+        "Customer pack/Same name.pdf",
+        "Customer pack/Same name (2).pdf",
+      ]);
+    });
+
     it("names a packaged document whose title has no usable characters", async () => {
       const { blobs } = await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
-          { reportId: "doc-1", reportName: "***", status: null, pdfUrl: null },
-          { reportId: "doc-2", reportName: null, status: null, pdfUrl: null },
+          // Both belong to one package, so both carry that report's id.
+          { reportId: "report-1", reportName: "***", status: null, pdfUrl: null },
+          { reportId: "report-1", reportName: null, status: null, pdfUrl: null },
         ],
       }));
       const { initViewer } = await import("./view-report.js");
@@ -1053,7 +1287,7 @@ describe("view-report module", () => {
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           {
-            reportId: "doc-r",
+            reportId: "report-1",
             reportName: "Test Report X-1",
             status: "complete",
             pdfUrl: null,
@@ -1063,7 +1297,7 @@ describe("view-report module", () => {
             }),
           },
           {
-            reportId: "doc-s",
+            reportId: "report-1",
             reportName: "Summary",
             status: "complete",
             pdfUrl: null,
@@ -1119,7 +1353,7 @@ describe("view-report module", () => {
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           {
-            reportId: "doc-r",
+            reportId: "report-1",
             reportName: "Broken report",
             status: "complete",
             pdfUrl: null,
@@ -1129,7 +1363,7 @@ describe("view-report module", () => {
           // recipient somehow.
           { reportId: "doc-n", reportName: null, status: "complete", pdfUrl: null },
           {
-            reportId: "doc-s",
+            reportId: "report-1",
             reportName: "Summary",
             status: "complete",
             pdfUrl: null,
