@@ -1005,7 +1005,7 @@ describe("view-report module", () => {
         reports: [
           {
             reportId: "report-1",
-            reportName: "X-2026-1338 (AV-2620N_RAK1)",
+            reportName: "X-2026-522 (JH99-96N_RAK1)",
             status: "complete",
             pdfUrl: null,
             documentData: JSON.stringify({
@@ -1015,7 +1015,7 @@ describe("view-report module", () => {
           },
           {
             reportId: "report-2",
-            reportName: "X-2026-1402 (BX-7710S_RAK1)",
+            reportName: "X-2026-113 (JH99-999N_RAK1)",
             status: "complete",
             pdfUrl: null,
             documentData: JSON.stringify({
@@ -1031,13 +1031,16 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      // One download still, named for the jobs it carries, and holding one
-      // archive per package rather than a single flat pile of documents.
-      expect(anchorClick.mock.contexts[0].download).toBe("X-2026-1338 + X-2026-1402.zip");
+      // One download still, named by joining the complete names of the child
+      // package archives, and holding one archive per package rather than a
+      // single flat pile of documents.
+      expect(anchorClick.mock.contexts[0].download).toBe(
+        "X-2026-522 (JH99-96N) + X-2026-113 (JH99-999N).zip",
+      );
       const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
       expect(parent.map((entry) => entry.name)).toEqual([
-        "X-2026-1338 (AV-2620N).zip",
-        "X-2026-1402 (BX-7710S).zip",
+        "X-2026-522 (JH99-96N).zip",
+        "X-2026-113 (JH99-999N).zip",
       ]);
 
       // Each child holds its own package's documents at its root -- no folder
@@ -1045,15 +1048,15 @@ describe("view-report module", () => {
       // placeholders, which the marker width confirms.
       const [first, second] = parent;
       expect(readZipEntries(first.data).map((entry) => entry.name))
-        .toEqual(["X-2026-1338 (AV-2620N_RAK1).pdf"]);
+        .toEqual(["X-2026-522 (JH99-96N_RAK1).pdf"]);
       expect(readZipEntries(second.data).map((entry) => entry.name))
-        .toEqual(["X-2026-1402 (BX-7710S_RAK1).pdf"]);
+        .toEqual(["X-2026-113 (JH99-999N_RAK1).pdf"]);
       const firstPdf = await PDFLib.PDFDocument.load(readZipEntries(first.data)[0].data);
       expect(Math.round(firstPdf.getPage(0).getWidth())).toBe(601);
 
       await vi.waitFor(() =>
         expect(document.querySelector("#share-bundle-download-note").textContent).toBe(
-          "Downloaded X-2026-1338 + X-2026-1402.zip with 2 documents.",
+          "Downloaded X-2026-522 (JH99-96N) + X-2026-113 (JH99-999N).zip with 2 documents.",
         ),
       );
       delete globalThis.docuAlignRakReportPdf;
@@ -1088,7 +1091,9 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      expect(anchorClick.mock.contexts[0].download).toBe("X-2026-0001 + 4 more.zip");
+      expect(anchorClick.mock.contexts[0].download).toBe(
+        "X-2026-0001 (AV-2621N) + 4 more.zip",
+      );
       const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
       expect(parent.map((entry) => entry.name)).toEqual([
         "X-2026-0001 (AV-2621N).zip",
@@ -1149,12 +1154,12 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("falls back to the sender's link name when no package names a job", async () => {
+    it("joins the numbered child ZIP names when packages use the sender's link name", async () => {
       const { blobs } = await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
-      // Two packages, neither named the lab's way, so there is no job
-      // reference to build a parent name from.
+      // Two packages, neither named the lab's way, share the sender's link
+      // name. The second child ZIP is numbered, and the parent names both.
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           { reportId: "report-1", reportName: "Legacy one", status: "saved", pdfUrl: null },
@@ -1167,19 +1172,21 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      expect(anchorClick.mock.contexts[0].download).toBe("Customer pack.zip");
+      expect(anchorClick.mock.contexts[0].download).toBe(
+        "Customer pack + Customer pack (2).zip",
+      );
       expect(
         readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()))
           .map((entry) => entry.name),
       ).toEqual(["Customer pack.zip", "Customer pack (2).zip"]);
     });
 
-    it("names an unnameable parent archive rather than saving a bare .zip", async () => {
+    it("uses numbered document fallbacks when neither package has a usable name", async () => {
       const { blobs } = await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
-      // No job references and a link name with nothing savable in it: without
-      // a fallback the download would be offered as ".zip".
+      // No package names and a link name with nothing savable in it: each
+      // child receives the `documents` fallback and the parent names both.
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         bundleName: "***",
         reports: [
@@ -1193,7 +1200,9 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      expect(anchorClick.mock.contexts[0].download).toBe("reports.zip");
+      expect(anchorClick.mock.contexts[0].download).toBe(
+        "documents + documents (2).zip",
+      );
       expect(blobs.at(-1).type).toBe("application/zip");
     });
 

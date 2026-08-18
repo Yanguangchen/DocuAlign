@@ -544,7 +544,7 @@ function packageArchiveName(shares, bundleName) {
  * @returns {Array<Array<Object>>} One list of documents per package.
  */
 /**
- * How long a joined list of job references may run before the parent archive
+ * How long a joined list of package names may run before the parent archive
  * counts the remainder instead of naming every one.
  */
 const PARENT_NAME_LIMIT = 60;
@@ -564,43 +564,23 @@ function packagesOf(shares) {
 }
 
 /**
- * The job reference a package was exported under.
- *
- * The lab's own name is `X-2026-1338 (AV-2620N_RAK1)`, whose leading part is
- * the job reference. A package named some other way has none to give.
- * @param {Array<Object>} shares - The package's documents.
- * @returns {string} The job reference, or an empty string.
- */
-function packageJobRef(shares) {
-  for (const share of shares) {
-    // An absent name stringifies to something the pattern cannot match, so it
-    // needs no default of its own.
-    const named = /^([^(]+?)\s*\(.*_RAK[^)]*\)$/.exec(String(share?.reportName).trim());
-    if (named) return named[1].trim();
-  }
-  return "";
-}
-
-/**
  * The name a multi-package parent archive downloads under.
  *
- * Named for the job references it carries, so the download says which jobs are
- * inside without being opened. Beyond a few that would run past what a file
- * name can usefully hold, the rest are counted instead of listed.
- * @param {Array<Array<Object>>} packages - The packages going into the archive.
- * @param {string|null} bundleName - The name the sender gave the group link.
+ * Named by joining the complete child archive names, so both the job reference
+ * and voyage number remain visible. Beyond a few that would run past what a
+ * file name can usefully hold, the rest are counted instead of listed.
+ * @param {Array<string>} packageNames - Child ZIP names without their extension.
  * @returns {string} A file name safe to save under.
  */
-function parentArchiveName(packages, bundleName) {
-  const refs = packages.map(packageJobRef).filter(Boolean);
-  const joined = refs.join(" + ");
-  let preferred = bundleName;
-  if (refs.length > 0) {
-    preferred = joined.length <= PARENT_NAME_LIMIT
-      ? joined
-      : `${refs[0]} + ${packages.length - 1} more`;
-  }
-  return safeFileName(preferred) || "reports";
+function parentArchiveName(packageNames) {
+  const joined = packageNames.join(" + ");
+  if (joined.length <= PARENT_NAME_LIMIT) return joined;
+
+  const remainder = ` + ${packageNames.length - 1} more`;
+  const first = packageNames[0]
+    .slice(0, PARENT_NAME_LIMIT - remainder.length)
+    .trim();
+  return `${first}${remainder}`;
 }
 
 /**
@@ -693,7 +673,9 @@ async function downloadEveryDocument(sharedBundle) {
     return { name, data: globalThis.docuAlignZip.createArchive(entries) };
   });
 
-  const archiveName = `${parentArchiveName(packages, sharedBundle.bundleName)}.zip`;
+  const archiveName = `${parentArchiveName(
+    children.map((entry) => entry.name.slice(0, -".zip".length)),
+  )}.zip`;
   saveFile(globalThis.docuAlignZip.createArchive(children), archiveName, "application/zip");
   return { saved, failed, archiveName };
 }
