@@ -200,6 +200,7 @@ The generated PDF should match the intended RAK report layout, including:
 Any document can be shared publicly, and documents are grouped into **packages** — one capability URL that shows several documents to the recipient.
 
 * Every document is **individually selectable** on the dashboard. Each saved report expands into its stored documents (test report, DS1, SB1, summary, coral + org), and each has its own tick-box, so a package can mix documents from different reports.
+* The card-level **Add document package** checkbox is the select-all shortcut for that saved report. Selecting two of these publishes both complete stored document sets under the new share link; the viewer then keeps them apart as two child ZIPs inside the one downloaded parent ZIP. Reports saved before per-document storage existed still contribute their single legacy report PDF.
 * A package holds up to **25 documents** (`MAX_BUNDLE_REPORTS`), enforced on both the client and in the Firestore rules.
 * Each document in a package is published as its **own** share token, so any single document stays individually revocable by deleting its share. The package document stores only the tokens — never embedded snapshots — which keeps rules evaluation far below Firestore's 1000-expression cap.
 

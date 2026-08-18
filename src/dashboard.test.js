@@ -674,6 +674,43 @@ describe("dashboard module", () => {
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
     });
 
+    it("expands two report-level package choices into both complete document sets", async () => {
+      const storedDocuments = new Map([
+        ["doc-1", [
+          { slug: "X-1", title: "Test Report X-1", data: "report-1" },
+          { slug: "Summary", title: "Summary X-1", data: "summary-1" },
+        ]],
+        ["doc-2", [
+          { slug: "X-2", title: "Test Report X-2", data: "report-2" },
+          { slug: "Summary", title: "Summary X-2", data: "summary-2" },
+        ]],
+      ]);
+      mockFetchReportDocuments.mockImplementation((db, reportId) =>
+        Promise.resolve(storedDocuments.get(reportId)),
+      );
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(twoReports);
+
+      // The card-level checkbox represents the complete stored package, while
+      // the nested checkboxes remain available for selecting individual PDFs.
+      toggle("doc-1");
+      toggle("doc-2");
+      expect(document.querySelector("#bundle-count").textContent).toBe(
+        "4 documents selected",
+      );
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(mockPublishBundle).toHaveBeenCalledWith(expect.anything(), [
+        { report: expect.objectContaining({ id: "doc-1" }), document: storedDocuments.get("doc-1")[0] },
+        { report: expect.objectContaining({ id: "doc-1" }), document: storedDocuments.get("doc-1")[1] },
+        { report: expect.objectContaining({ id: "doc-2" }), document: storedDocuments.get("doc-2")[0] },
+        { report: expect.objectContaining({ id: "doc-2" }), document: storedDocuments.get("doc-2")[1] },
+      ]);
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
     it("keeps working for reports saved before documents were persisted", async () => {
       mockFetchReportDocuments.mockRejectedValueOnce(new Error("no subcollection"));
       const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

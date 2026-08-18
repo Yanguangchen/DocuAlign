@@ -36,8 +36,10 @@ const bundleLink = document.querySelector("#bundle-link");
 
 let allReports = [];
 let loadedForUser = null;
-// Documents ticked for grouping into one package, keyed `reportId::slug`; a
-// bare reportId means the report itself. Survives re-renders.
+// Documents ticked for grouping into one share link, keyed `reportId::slug`;
+// a bare reportId means every stored document in that report's package (or the
+// report itself for legacy saves with no document subcollection). Survives
+// re-renders.
 const bundleSelection = new Set();
 // Exported documents per report id, loaded alongside the reports.
 const reportDocuments = new Map();
@@ -69,12 +71,21 @@ function documentsFor(reportId) {
 export function selectedEntries() {
   const entries = [];
   allReports.forEach((report) => {
-    documentsFor(report.id).forEach((entry) => {
-      if (bundleSelection.has(selectionKey(report.id, entry.slug))) {
+    const documents = documentsFor(report.id);
+    const wholePackageSelected = bundleSelection.has(report.id);
+    documents.forEach((entry) => {
+      if (
+        wholePackageSelected
+        || bundleSelection.has(selectionKey(report.id, entry.slug))
+      ) {
         entries.push({ report, document: entry });
       }
     });
-    if (bundleSelection.has(report.id)) entries.push({ report, document: null });
+    // Old saves have no persisted document set to expand, so their card-level
+    // selection keeps publishing the one legacy report snapshot.
+    if (wholePackageSelected && documents.length === 0) {
+      entries.push({ report, document: null });
+    }
   });
   return entries;
 }
@@ -235,6 +246,9 @@ export function reportCard(report) {
   const shareLabel = documentCount > 1
     ? `Create public link (${documentCount} documents)`
     : "Create public link";
+  const packageLabel = documentCount > 0
+    ? `Add document package (${documentCount} ${documentCount === 1 ? "document" : "documents"})`
+    : "Add report to package";
   const share = report.id
     ? `
       <div class="report-share">
@@ -247,7 +261,7 @@ export function reportCard(report) {
             class="bundle-checkbox"
             data-report-id="${escapeHtml(report.id)}"
           />
-          Add to package
+          ${escapeHtml(packageLabel)}
         </label>
         ${documentPicker(report)}
         <p class="share-link" aria-live="polite" hidden></p>
@@ -283,7 +297,9 @@ export function reportCard(report) {
 // re-arms the create button and hides a previously produced link, since the
 // selection it referred to has changed.
 export function updateBundleBar() {
-  const count = bundleSelection.size;
+  // A report-level choice expands to every stored PDF, so show the number that
+  // will actually be published rather than the number of boxes clicked.
+  const count = selectedEntries().length;
   bundleBar.hidden = count === 0;
   bundleCount.textContent = `${count} ${count === 1 ? "document" : "documents"} selected`;
   bundleCreate.disabled = false;
