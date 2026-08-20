@@ -115,7 +115,7 @@ While designing public "group link" share bundles (`docuAlignPublicBundles`),
 the first implementation embedded a full sanitized report snapshot
 (`reportId`, `reportName`, `sourceFileName`, `status`, `pdfUrl`) per grouped
 report directly inside the bundle document, validated by a per-entry function
-called up to `MAX_BUNDLE_REPORTS` (25) times.
+called up to `MAX_BUNDLE_REPORTS` times.
 
 Probing against the Firestore emulator showed writes were denied at as few as
 10 embedded entries with:
@@ -127,13 +127,41 @@ evaluate has been reached. for 'create' @ L1534
 
 **Fix (shipped design):** bundles store only the **share tokens** (32-character
 strings, already-validated pattern match) referencing existing
-`docuAlignPublicShares` documents, not embedded report content. Validating 25
-short token strings costs a small fraction of the budget that validating 25
+`docuAlignPublicShares` documents, not embedded report content. Validating
+short token strings costs a small fraction of the budget that validating
 embedded snapshots did, and per-report content is validated exactly once, by
-the `docuAlignPublicShares` create rule. See `isValidDocuAlignBundleToken`,
-`isValidDocuAlignBundleTokens`, and `isValidDocuAlignPublicBundle` in
+the `docuAlignPublicShares` create rule. See
+`isValidDocuAlignBundleTokens` and `isValidDocuAlignPublicBundle` in
 `firestore.rules`, and `publishBundle`/`fetchSharedBundle` in
 `src/lib/share.js`.
+
+### DocuAlign package cap: the unrolled validator (2026-08-20)
+
+The token-only design above kept bundles well inside the budget, but the
+validator it shipped with spent expressions **in proportion to the cap**: it
+unrolled one `(value.size() > n ? isValidDocuAlignBundleToken(value[n]) : true)`
+branch per allowed member, 25 of them. That is affordable but not free, and it
+made the cap a rules-budget number rather than a product one.
+
+Staff hit the consequence from the other side. A saved report expands to about
+seven documents, so ticking a fifth report pushed a package past 25 members and
+`publishBundle` refused it client-side — reported as *"I'm not able to create a
+package link when I select more than 4 reports"*. Nothing was broken; the cap
+was simply set by what the validator cost.
+
+**Fix:** validate the whole list as one joined string, at constant cost:
+
+```
+value.join(',').size() == value.size() * 33 - 1 &&
+value.join(',').matches('^[A-Za-z0-9]{32}(,[A-Za-z0-9]{32})*$')
+```
+
+Both halves are required. The regex forces the joined string into groups of
+exactly 32 alphanumerics separated by commas; the length check pins the number
+of groups to the list size, so no single member can smuggle a separator and
+pass as two tokens on its own. A non-string member makes `join()` error, which
+denies the write. Emulator probing put 250 members comfortably inside the
+budget, so the shipped cap of 100 is a product choice with headroom.
 
 ## Guidance for future rules changes
 
@@ -152,3 +180,9 @@ the `docuAlignPublicShares` create rule. See `isValidDocuAlignBundleToken`,
 5. If a change could plausibly run close to the cap, probe it: write a
    temporary emulator test that attempts increasing sizes (e.g. 10, 15, 20, 25
    entries) and confirms the largest allowed size still succeeds.
+6. **Watch for a cap that exists only to pay for its own validator.** An
+   unrolled per-index check makes the limit a function of rules cost, so the
+   product limit drifts down to whatever the budget affords. Where a list's
+   members share one shape, collapse the check into a single `join()` + regex
+   whose cost is flat — and pin the joined length to the list size, or one
+   member can impersonate several.
