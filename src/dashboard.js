@@ -12,7 +12,13 @@ import {
   fetchReports,
   filterReportsByDate,
 } from "./lib/reports.js";
-import { buildBundleUrl, buildPublicUrl, publishBundle, publishReport } from "./lib/share.js";
+import {
+  MAX_BUNDLE_REPORTS,
+  buildBundleUrl,
+  buildPublicUrl,
+  publishBundle,
+  publishReport,
+} from "./lib/share.js";
 import { copyToClipboard, openShareModal } from "./lib/share-ui.js";
 import { logWarn, trackOperation } from "./lib/logger.js";
 import { initObservability } from "./lib/observability.js";
@@ -301,8 +307,14 @@ export function updateBundleBar() {
   // will actually be published rather than the number of boxes clicked.
   const count = selectedEntries().length;
   bundleBar.hidden = count === 0;
-  bundleCount.textContent = `${count} ${count === 1 ? "document" : "documents"} selected`;
-  bundleCreate.disabled = false;
+  // Ticking one more report can push a selection past the cap, and the count is
+  // the only place staff can see that: a card shows how many documents it adds,
+  // never the running total. Say so here rather than letting the click fail.
+  const overCap = count > MAX_BUNDLE_REPORTS;
+  bundleCount.textContent = overCap
+    ? `${count} documents selected — a package holds at most ${MAX_BUNDLE_REPORTS}.`
+    : `${count} ${count === 1 ? "document" : "documents"} selected`;
+  bundleCreate.disabled = overCap;
   bundleCreate.textContent = "Create package link";
   bundleLink.hidden = true;
 }
@@ -352,10 +364,14 @@ export async function handleBundleClick() {
 
     await copyToClipboard(url, "handleBundleClick");
     openShareModal(url);
-  } catch {
-    // Failure already logged by trackOperation; recover the UI.
+  } catch (error) {
+    // Failure already logged by trackOperation; recover the UI. A selection the
+    // cap rejects needs its own wording, because retrying cannot help -- the
+    // same distinction the single-report share button already draws.
     bundleCreate.disabled = false;
-    bundleLink.textContent = "Could not create the group link. Try again.";
+    bundleLink.textContent = error instanceof TypeError
+      ? error.message
+      : "Could not create the group link. Try again.";
     bundleLink.hidden = false;
   }
 }

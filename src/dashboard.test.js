@@ -38,7 +38,10 @@ const mockBuildPublicUrl = vi.fn(() => SHARE_URL);
 const mockPublishBundle = vi.fn();
 const mockBuildBundleUrl = vi.fn(() => BUNDLE_URL);
 
-vi.mock("./lib/share.js", () => ({
+vi.mock("./lib/share.js", async (importOriginal) => ({
+  // The cap is a real constant the dashboard reads, not a collaborator to stub:
+  // take it from the module under mock so the two cannot drift apart.
+  MAX_BUNDLE_REPORTS: (await importOriginal()).MAX_BUNDLE_REPORTS,
   publishReport: (...args) => mockPublishReport(...args),
   buildPublicUrl: (...args) => mockBuildPublicUrl(...args),
   publishBundle: (...args) => mockPublishBundle(...args),
@@ -385,7 +388,7 @@ describe("dashboard module", () => {
       mockFetchReportDocuments.mockImplementation(() =>
         Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
       mockPublishBundle.mockRejectedValueOnce(
-        new TypeError("A package can hold at most 25 documents."),
+        new TypeError("A package can hold at most 100 documents."),
       );
       await renderOneReport();
 
@@ -394,7 +397,7 @@ describe("dashboard module", () => {
       await new Promise((r) => setTimeout(r, 15));
 
       expect(document.querySelector(".share-link").textContent).toBe(
-        "A package can hold at most 25 documents.",
+        "A package can hold at most 100 documents.",
       );
       consoleSpy.mockRestore();
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
@@ -892,6 +895,68 @@ describe("dashboard module", () => {
         "[DocuAlign] Publish group link failed",
         expect.any(Error),
         expect.objectContaining({ feature: "PublicShare", function: "handleBundleClick" }),
+      );
+      consoleSpy.mockRestore();
+    });
+
+    it("explains an over-cap selection instead of failing on the click", async () => {
+      // Four saved reports of seven documents each is an ordinary package and
+      // used to be refused outright; it now has to publish. Only a selection
+      // past the raised cap may be blocked, and it must say why.
+      const documentsFor = (reportId, count) =>
+        Array.from({ length: count }, (_, i) => ({
+          slug: `${reportId}-D${i}`,
+          title: `Document ${i}`,
+          data: "[]",
+        }));
+      const reports = Array.from({ length: 20 }, (_, i) => ({
+        id: `doc-${i}`,
+        reportName: `Report ${i}`,
+        matchFilter: true,
+      }));
+      mockFetchReportDocuments.mockImplementation((db, reportId) =>
+        Promise.resolve(documentsFor(reportId, 7)));
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderReports(reports);
+
+      const button = document.querySelector("#bundle-create");
+      const count = document.querySelector("#bundle-count");
+
+      for (let i = 0; i < 4; i += 1) toggle(`doc-${i}`);
+      expect(count.textContent).toBe("28 documents selected");
+      expect(button.disabled).toBe(false);
+
+      // 15 reports x 7 documents = 105, past the 100 cap.
+      for (let i = 4; i < 15; i += 1) toggle(`doc-${i}`);
+      expect(count.textContent).toBe(
+        "105 documents selected — a package holds at most 100.",
+      );
+      expect(button.disabled).toBe(true);
+
+      // Unticking one report brings it back under the cap and re-arms the button.
+      toggle("doc-14", false);
+      expect(count.textContent).toBe("98 documents selected");
+      expect(button.disabled).toBe(false);
+
+      button.click();
+      await new Promise((r) => setTimeout(r, 15));
+      expect(mockPublishBundle.mock.calls[0][1]).toHaveLength(98);
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+    });
+
+    it("surfaces a group failure that retrying cannot fix", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockPublishBundle.mockRejectedValueOnce(
+        new TypeError("A package can hold at most 100 documents."),
+      );
+      await renderReports(twoReports);
+      toggle("doc-1");
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(document.querySelector("#bundle-link").textContent).toBe(
+        "A package can hold at most 100 documents.",
       );
       consoleSpy.mockRestore();
     });

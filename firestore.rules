@@ -1258,45 +1258,32 @@ service cloud.firestore {
     // PDF export grouped for them. The bundle deliberately stores TOKENS, not
     // embedded report snapshots: per-report content is already validated by
     // the docuAlignPublicShares rules (PII allowlist included), each grouped
-    // report stays individually revocable, and validating 25 short strings
-    // stays far below the 1000-expressions-per-evaluation rules limit that an
-    // embedded-snapshot design was measured to exceed.
+    // report stays individually revocable, and an embedded-snapshot design was
+    // measured to exceed the 1000-expressions-per-evaluation rules limit.
     // Identical access contract to single shares: public get, no list,
-    // staff-only create/delete, immutable. Keep the 25 cap in sync with
+    // staff-only create/delete, immutable. Keep the 100 cap in sync with
     // MAX_BUNDLE_REPORTS in src/lib/share.js.
-    function isValidDocuAlignBundleToken(value) {
-      return value is string && value.matches('^[A-Za-z0-9]{32}$');
-    }
-
+    // Validated with a single joined-string match rather than one indexed check
+    // per member. An unrolled per-index validator costs expressions in
+    // proportion to the cap, which is what held the cap down to 25 documents --
+    // roughly four saved reports, well under what staff actually group into one
+    // customer package. This form costs the same handful of expressions at any
+    // size, so the cap is a product decision rather than a rules-budget one.
+    //
+    // The two checks are load-bearing together, and neither may be dropped:
+    //   * the regex forces the joined string to be groups of exactly 32
+    //     alphanumerics separated by commas;
+    //   * the length check pins the number of those groups to the list size.
+    // Without the length check a single member could smuggle a comma
+    // ("<32 chars>,<32 chars>") and satisfy the regex on its own. Together they
+    // prove every member is exactly one well-formed token. A non-string member
+    // makes join() error, which denies the write.
     function isValidDocuAlignBundleTokens(value) {
       return value is list &&
         value.size() >= 1 &&
-        value.size() <= 25 &&
-        (value.size() > 0 ? isValidDocuAlignBundleToken(value[0]) : true) &&
-        (value.size() > 1 ? isValidDocuAlignBundleToken(value[1]) : true) &&
-        (value.size() > 2 ? isValidDocuAlignBundleToken(value[2]) : true) &&
-        (value.size() > 3 ? isValidDocuAlignBundleToken(value[3]) : true) &&
-        (value.size() > 4 ? isValidDocuAlignBundleToken(value[4]) : true) &&
-        (value.size() > 5 ? isValidDocuAlignBundleToken(value[5]) : true) &&
-        (value.size() > 6 ? isValidDocuAlignBundleToken(value[6]) : true) &&
-        (value.size() > 7 ? isValidDocuAlignBundleToken(value[7]) : true) &&
-        (value.size() > 8 ? isValidDocuAlignBundleToken(value[8]) : true) &&
-        (value.size() > 9 ? isValidDocuAlignBundleToken(value[9]) : true) &&
-        (value.size() > 10 ? isValidDocuAlignBundleToken(value[10]) : true) &&
-        (value.size() > 11 ? isValidDocuAlignBundleToken(value[11]) : true) &&
-        (value.size() > 12 ? isValidDocuAlignBundleToken(value[12]) : true) &&
-        (value.size() > 13 ? isValidDocuAlignBundleToken(value[13]) : true) &&
-        (value.size() > 14 ? isValidDocuAlignBundleToken(value[14]) : true) &&
-        (value.size() > 15 ? isValidDocuAlignBundleToken(value[15]) : true) &&
-        (value.size() > 16 ? isValidDocuAlignBundleToken(value[16]) : true) &&
-        (value.size() > 17 ? isValidDocuAlignBundleToken(value[17]) : true) &&
-        (value.size() > 18 ? isValidDocuAlignBundleToken(value[18]) : true) &&
-        (value.size() > 19 ? isValidDocuAlignBundleToken(value[19]) : true) &&
-        (value.size() > 20 ? isValidDocuAlignBundleToken(value[20]) : true) &&
-        (value.size() > 21 ? isValidDocuAlignBundleToken(value[21]) : true) &&
-        (value.size() > 22 ? isValidDocuAlignBundleToken(value[22]) : true) &&
-        (value.size() > 23 ? isValidDocuAlignBundleToken(value[23]) : true) &&
-        (value.size() > 24 ? isValidDocuAlignBundleToken(value[24]) : true);
+        value.size() <= 100 &&
+        value.join(',').size() == value.size() * 33 - 1 &&
+        value.join(',').matches('^[A-Za-z0-9]{32}(,[A-Za-z0-9]{32})*$');
     }
 
     function isValidDocuAlignPublicBundle(data) {

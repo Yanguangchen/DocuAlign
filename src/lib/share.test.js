@@ -190,7 +190,8 @@ describe("publishReport", () => {
 describe("bundle constants", () => {
   it("targets the dedicated public bundles collection with a sane cap", () => {
     expect(PUBLIC_BUNDLES_COLLECTION).toBe("docuAlignPublicBundles");
-    expect(MAX_BUNDLE_REPORTS).toBe(25);
+    // Four saved reports' worth of documents used to exhaust the old cap of 25.
+    expect(MAX_BUNDLE_REPORTS).toBe(100);
   });
 });
 

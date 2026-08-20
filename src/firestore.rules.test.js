@@ -288,6 +288,10 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       return `S${String(index).padStart(3, "0")}EfGh1JkLmNoPqRsTuVwXyZ012345`;
     }
 
+    function shareTokens(count) {
+      return Array.from({ length: count }, (_, i) => shareTokenFor(i));
+    }
+
     function bundlePayload(overrides = {}) {
       return {
         bundleName: "Customer pack",
@@ -329,16 +333,17 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
         setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload()),
       );
 
-      const fullPayload = bundlePayload({
-        shareTokens: Array.from({ length: 25 }, (_, i) => shareTokenFor(i)),
-      });
+      // A saved report expands to roughly seven documents, so a package of any
+      // realistic size sits far above the 25 members the unrolled validator
+      // could afford. Assert the whole cap, not a token sample of it.
+      const fullPayload = bundlePayload({ shareTokens: shareTokens(100) });
       const fullToken = "Cc3dEfGh1JkLmNoPqRsTuVwXyZ012345";
       await assertSucceeds(
         setDoc(doc(context.firestore(), BUNDLES, fullToken), fullPayload),
       );
     });
 
-    it("denies bundles that are empty or above the 25 report cap", async () => {
+    it("denies bundles that are empty or above the 100 document cap", async () => {
       const context = staffContext();
       await assertFails(
         setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload({ shareTokens: [] })),
@@ -346,9 +351,7 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       await assertFails(
         setDoc(
           doc(context.firestore(), BUNDLES, TOKEN),
-          bundlePayload({
-            shareTokens: Array.from({ length: 26 }, (_, i) => shareTokenFor(i)),
-          }),
+          bundlePayload({ shareTokens: shareTokens(101) }),
         ),
       );
     });
@@ -359,6 +362,23 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
         setDoc(
           doc(context.firestore(), BUNDLES, TOKEN),
           bundlePayload({ shareTokens: [shareTokenFor(1), "guessable"] }),
+        ),
+      );
+      // Members are validated as one joined string, so a member carrying the
+      // separator would satisfy the pattern on its own if the joined length
+      // were not pinned to the list size. Keep that hole shut.
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), BUNDLES, TOKEN),
+          bundlePayload({
+            shareTokens: [`${shareTokenFor(1)},${shareTokenFor(2)}`],
+          }),
+        ),
+      );
+      await assertFails(
+        setDoc(
+          doc(context.firestore(), BUNDLES, TOKEN),
+          bundlePayload({ shareTokens: [shareTokenFor(1), 42] }),
         ),
       );
       await assertFails(

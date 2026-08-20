@@ -291,13 +291,20 @@ The report card's own button now publishes the report's whole document set as
 a single package link and says how many documents it carries; reports saved
 before per-document storage still publish as a plain share. The package
 checkboxes remain for the narrower job of mixing documents across reports. A
-package over `MAX_BUNDLE_REPORTS` (25) surfaces that reason rather than
+package over `MAX_BUNDLE_REPORTS` (100) surfaces that reason rather than
 inviting a retry that cannot succeed.
 
 Two consequences to keep in mind: a recipient now sees every document in a
 report rather than only what was ticked, and re-enabling the DS1/SB1 and
-standalone-worksheet exports takes a workbook from 7 documents back to 20+,
-which will approach that 25-document ceiling.
+standalone-worksheet exports takes a workbook from 7 documents back to 20+.
+
+The 25-document ceiling that warning anticipated was reached first from the
+other direction: at ~7 documents per report it stopped staff at four reports
+per package. The cap existed to keep an unrolled per-member rules validator
+inside Firestore's expression budget, so §17 replaces that validator with a
+constant-cost one and raises the cap to 100. The dashboard's selection count
+now says when a selection is over the cap, and the group button explains the
+refusal instead of offering a retry.
 
 ## 11. What to check before touching this again
 
@@ -671,3 +678,74 @@ behaviour.
 The rule this defect produced, and what to check before touching picture
 handling again, is written up separately in
 **[workbook-picture-identification.md](./workbook-picture-identification.md)**.
+
+## 17. Four reports was the whole package
+
+### Symptom
+
+Selecting more than four reports on the dashboard and pressing **Create package
+link** produced *"Could not create the group link. Try again."* Retrying never
+worked. Fewer reports published fine.
+
+### Root cause
+
+Two separate things, one behind the other.
+
+`MAX_BUNDLE_REPORTS` was 25 and `publishBundle` throws above it. A card-level
+tick expands to every document the report stored, and a saved report is
+currently about seven documents, so the fifth report crossed the cap. The
+number staff were choosing (reports) and the number the cap counted
+(documents) were never the same number, and only the second one was enforced.
+
+The cap itself was not a product decision. `isValidDocuAlignBundleTokens` in
+`firestore.rules` validated the list by unrolling one indexed check per allowed
+member, so its expression cost grew with the cap — and Firestore allows 1,000
+expressions per evaluation (see
+[firestore-rules-expression-limit.md](./firestore-rules-expression-limit.md)).
+25 was what that shape could afford.
+
+### Fix
+
+The validator now checks the whole list as one joined string, at a cost that
+does not change with the list's length:
+
+```
+value.join(',').size() == value.size() * 33 - 1 &&
+value.join(',').matches('^[A-Za-z0-9]{32}(,[A-Za-z0-9]{32})*$')
+```
+
+Both lines are load-bearing. The regex forces the joined string into groups of
+exactly 32 alphanumerics separated by commas; the length check pins the number
+of those groups to the list size, so a member holding `<token>,<token>` cannot
+satisfy the pattern by itself and pass as two. A non-string member makes
+`join()` error, which denies the write. The token pattern is unchanged and the
+access contract — public `get`, denied `list`, staff-only `create`/`delete`,
+immutable — is untouched.
+
+With cost flat, the cap becomes a product number: `MAX_BUNDLE_REPORTS` is 100,
+roughly fourteen reports' worth of documents. Emulator probing put 250 members
+inside the budget, so there is real headroom above what shipped.
+
+Two UI changes finish it. The selection count in the bundle bar now says when a
+selection is over the cap and disables the button, because a card shows how
+many documents it adds but never the running total. And `handleBundleClick`
+surfaces a `TypeError` message the way the single-report share button already
+did, so a refusal that retrying cannot fix stops inviting a retry.
+
+### Verification performed
+
+`src/firestore.rules.test.js` publishes a full 100-member bundle against the
+emulator and asserts denial at 101, at zero members, for a malformed member,
+for a non-string member, and for the comma-carrying member the length check
+exists to stop. `src/dashboard.test.js` ticks four seven-document reports and
+expects the button armed at 28 documents, blocked with the cap named at 105,
+and re-armed at 98.
+
+### What to check before touching this again
+
+The cap lives in two places — `MAX_BUNDLE_REPORTS` in `src/lib/share.js` and
+the literal in `isValidDocuAlignBundleTokens`. They must match; the client
+check is the one that produces a readable message, the rules check is the one
+that is actually enforced. Raising it further is safe as far as the rules go,
+but the viewer fetches one document per member and builds every PDF in the
+browser, so the next ceiling is the customer's page, not Firestore.

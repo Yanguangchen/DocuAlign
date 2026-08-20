@@ -16,7 +16,7 @@ This distinction is important:
 | PDF export | Renders one PDF per document (Summary + one five-page overlay per `CV1`/`TR1` report group; `DS1`/`SB1`/`coral + org` are planned but currently withheld — see §1a), names each by the lab's convention (`X-2026-1338 (AV-2620N_RAK SUMMARY)`, `…_RAK1`, `…_RAK2`, …) and packs them into one ZIP download | Implemented |
 | Saved-report dashboard | Lists, date-filters, deletes, and shares report metadata and documents | Implemented |
 | Single public links | Publishes an immutable, sanitized Firestore snapshot per document | Implemented |
-| Package (group) public links | Publishes 1–25 single shares and a bundle of their tokens, with one-click "download all" and "print all" on the viewer | Implemented |
+| Package (group) public links | Publishes 1–100 single shares and a bundle of their tokens, with one-click "download all" and "print all" on the viewer | Implemented |
 
 Workbook parsing and PDF generation stay local to the browser; workbook bytes
 are not uploaded. Each complete report group is mapped into its own five-page
@@ -271,7 +271,7 @@ The dashboard fetches every `docuAlignReports` document ordered by `createdAt` d
 
 `publishReport` creates a random 32-character alphanumeric token using `crypto.getRandomValues` with rejection sampling. It writes only `reportId`, display name, nullable source filename, status, a `documentData`/`pdfUrl` pair for that one document, and server publication timestamp. The staff creator email and unknown report fields are excluded.
 
-`publishBundle` first publishes every selected `{report, document}` pair as an ordinary single share (so each stays individually revocable), then stores 1–25 of the resulting share tokens in one bundle document. Fetching a bundle performs one read for the bundle and one read for each member. Missing or revoked member shares are dropped rather than failing the whole page.
+`publishBundle` first publishes every selected `{report, document}` pair as an ordinary single share (so each stays individually revocable), then stores 1–100 of the resulting share tokens in one bundle document. Fetching a bundle performs one read for the bundle and one read for each member. Missing or revoked member shares are dropped rather than failing the whole page.
 
 ```mermaid
 sequenceDiagram
@@ -342,7 +342,7 @@ Firestore is schemaless; the shapes below are the application and rules contract
 | --- | --- | --- |
 | document ID | string | Exactly 32 alphanumeric characters |
 | `bundleName` | string/null | Optional, at most 200 characters |
-| `shareTokens` | list<string> | 1–25 valid share tokens |
+| `shareTokens` | list<string> | 1–100 valid share tokens |
 | `publishedAt` | timestamp | Server timestamp/current request time |
 
 ### 6.2 E/R diagram: implemented persistence
@@ -373,7 +373,7 @@ erDiagram
     PUBLIC_BUNDLE {
         string bundleToken PK
         string bundleName
-        string shareTokens FK "list of 1..25 tokens"
+        string shareTokens FK "list of 1..100 tokens"
         timestamp publishedAt
     }
 
@@ -507,7 +507,7 @@ Protected reports use the shared staff decision through `isDocuAlignStaff()` →
 - updates are always denied;
 - token IDs remain 32-character alphanumeric strings;
 - payload keys are allowlisted, excluding staff email and arbitrary PII;
-- bundles contain tokens only and are limited to 25 members.
+- bundles contain tokens only and are limited to 100 members, each proven to be exactly one 32-character token by the joined-length and pattern checks in `isValidDocuAlignBundleTokens`.
 
 `view-report.js` additionally accepts only simple relative paths or `https://` PDF URLs. Unsafe, malformed, plain-HTTP, protocol-relative, `data:`, and `javascript:` values fall back to `SampleDocuments/SampleOutput.pdf`. This is defense in depth; the rules currently constrain length and keys but do not constrain the URL scheme.
 
