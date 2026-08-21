@@ -388,7 +388,7 @@ describe("dashboard module", () => {
       mockFetchReportDocuments.mockImplementation(() =>
         Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
       mockPublishBundle.mockRejectedValueOnce(
-        new TypeError("A package can hold at most 100 documents."),
+        new TypeError("A package can hold at most 250 documents."),
       );
       await renderOneReport();
 
@@ -397,7 +397,7 @@ describe("dashboard module", () => {
       await new Promise((r) => setTimeout(r, 15));
 
       expect(document.querySelector(".share-link").textContent).toBe(
-        "A package can hold at most 100 documents.",
+        "A package can hold at most 250 documents.",
       );
       consoleSpy.mockRestore();
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
@@ -909,8 +909,8 @@ describe("dashboard module", () => {
           title: `Document ${i}`,
           data: "[]",
         }));
-      const reports = Array.from({ length: 20 }, (_, i) => ({
-        id: `doc-${i}`,
+      const reports = Array.from({ length: 40 }, (_, i) => ({
+        id: `doc-${String(i).padStart(2, "0")}`,
         reportName: `Report ${i}`,
         matchFilter: true,
       }));
@@ -921,33 +921,37 @@ describe("dashboard module", () => {
 
       const button = document.querySelector("#bundle-create");
       const count = document.querySelector("#bundle-count");
+      const tickReports = (from, to) => {
+        for (let i = from; i < to; i += 1) toggle(`doc-${String(i).padStart(2, "0")}`);
+      };
 
-      for (let i = 0; i < 4; i += 1) toggle(`doc-${i}`);
+      // Four reports is what used to be refused outright; it has to publish now.
+      tickReports(0, 4);
       expect(count.textContent).toBe("28 documents selected");
       expect(button.disabled).toBe(false);
 
-      // 15 reports x 7 documents = 105, past the 100 cap.
-      for (let i = 4; i < 15; i += 1) toggle(`doc-${i}`);
+      // 36 reports x 7 documents = 252, past the 250 cap.
+      tickReports(4, 36);
       expect(count.textContent).toBe(
-        "105 documents selected — a package holds at most 100.",
+        "252 documents selected — a package holds at most 250.",
       );
       expect(button.disabled).toBe(true);
 
       // Unticking one report brings it back under the cap and re-arms the button.
-      toggle("doc-14", false);
-      expect(count.textContent).toBe("98 documents selected");
+      toggle("doc-35", false);
+      expect(count.textContent).toBe("245 documents selected");
       expect(button.disabled).toBe(false);
 
       button.click();
       await new Promise((r) => setTimeout(r, 15));
-      expect(mockPublishBundle.mock.calls[0][1]).toHaveLength(98);
+      expect(mockPublishBundle.mock.calls[0][1]).toHaveLength(245);
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
     });
 
     it("surfaces a group failure that retrying cannot fix", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockPublishBundle.mockRejectedValueOnce(
-        new TypeError("A package can hold at most 100 documents."),
+        new TypeError("A package can hold at most 250 documents."),
       );
       await renderReports(twoReports);
       toggle("doc-1");
@@ -956,7 +960,7 @@ describe("dashboard module", () => {
       await new Promise((r) => setTimeout(r, 15));
 
       expect(document.querySelector("#bundle-link").textContent).toBe(
-        "A package can hold at most 100 documents.",
+        "A package can hold at most 250 documents.",
       );
       consoleSpy.mockRestore();
     });

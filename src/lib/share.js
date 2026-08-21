@@ -21,12 +21,17 @@ export const PUBLIC_BUNDLES_COLLECTION = "docuAlignPublicBundles";
 //
 // A saved report expands to roughly seven documents, so the previous cap of 25
 // stopped staff at four reports per package -- the ceiling was set by how
-// expensive the rules were to evaluate, not by anything about the product. The
-// rules now validate the token list at constant cost (see
-// isValidDocuAlignBundleTokens in firestore.rules), which was measured to still
-// pass at 250 members; 100 leaves that headroom while keeping a customer-facing
-// bundle page to a size the viewer can render and zip comfortably.
-export const MAX_BUNDLE_REPORTS = 100;
+// expensive the rules were to evaluate, not by anything about the product.
+//
+// The rules now validate the token list at constant cost (see
+// isValidDocuAlignBundleTokens in firestore.rules): 10,000 members were
+// measured to validate as fast as 250, so the rules no longer bound this at
+// all. What bounds it now is downstream of the write -- publishing fires one
+// Firestore write per document, and the viewer then reads one document per
+// member, rebuilds every PDF in the browser, and holds them all in memory to
+// build the ZIP. 250 is ~35 saved reports, which keeps that page comfortable;
+// raising it further is a question about the customer's browser, not Firestore.
+export const MAX_BUNDLE_REPORTS = 250;
 
 // Upper bound on a published document's serialised worksheet data. Generated
 // documents (summary, coral + org, DS1, SB1) travel inside the share document
