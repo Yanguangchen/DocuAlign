@@ -774,7 +774,11 @@ a:focus-visible {
   color: var(--muted);
 }
 
-.date-filter input[type="date"] {
+/* Covers every date-ish input the filter has used, so restyling the control
+   never silently drops it back to the browser default again. */
+.date-filter input[type="date"],
+.date-filter input[type="month"],
+.date-filter input[type="datetime-local"] {
   padding: 9px 12px;
   border: 1px solid var(--line);
   background: var(--paper);
@@ -783,7 +787,43 @@ a:focus-visible {
   font-size: 0.86rem;
 }
 
-.date-filter input[type="date"]:focus-visible {
+.date-filter input[type="date"]:focus-visible,
+.date-filter input[type="month"]:focus-visible,
+.date-filter input[type="datetime-local"]:focus-visible {
+  outline: 3px solid rgba(216, 86, 58, 0.38);
+  outline-offset: 2px;
+}
+
+/* "Today" sits at the same height as the month field it stands beside, and
+   carries its pressed state visibly -- it is a filter that stays on, not a
+   command that fires once, so it has to look different while it is active. */
+.period-button {
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background var(--hover-out) var(--ease),
+    border-color var(--hover-out) var(--ease),
+    color var(--hover-out) var(--ease);
+}
+
+.period-button:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.period-button.is-active {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: var(--paper);
+}
+
+.period-button:focus-visible {
   outline: 3px solid rgba(216, 86, 58, 0.38);
   outline-offset: 2px;
 }
@@ -795,7 +835,7 @@ a:focus-visible {
   letter-spacing: 0.04em;
 }
 
-/* "Package every document in this date range" -- takes the toolbar's full
+/* "Package every document saved in <period>" -- takes the toolbar's full
    width so it reads as an action on the filter above it, not a third field. */
 .select-all {
   display: flex;

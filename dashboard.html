@@ -83,13 +83,17 @@
 
           <section class="dashboard-toolbar" aria-label="Filter saved reports">
             <form class="date-filter" id="date-filter">
+              <button
+                class="period-button"
+                type="button"
+                id="filter-today"
+                aria-pressed="false"
+              >
+                Today
+              </button>
               <div class="field">
-                <label for="filter-from">From</label>
-                <input type="datetime-local" id="filter-from" name="from" />
-              </div>
-              <div class="field">
-                <label for="filter-to">To</label>
-                <input type="datetime-local" id="filter-to" name="to" />
+                <label for="filter-month">Month</label>
+                <input type="month" id="filter-month" name="month" />
               </div>
               <button class="text-button" type="reset" id="filter-clear">Clear</button>
             </form>
@@ -97,7 +101,7 @@
             <div class="select-all">
               <label class="bundle-select">
                 <input type="checkbox" id="select-all-documents" disabled />
-                Package every document in this date range
+                <span id="select-all-label">Package every document in this period</span>
               </label>
               <p class="select-all-note" id="select-all-note" aria-live="polite"></p>
             </div>

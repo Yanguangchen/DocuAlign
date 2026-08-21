@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  dayRange,
   filterReportsByDate,
+  monthRange,
   toDate,
   saveReport,
   saveReportDocuments,
@@ -49,6 +51,82 @@ describe("toDate", () => {
     expect(toDate(undefined)).toBeNull();
     expect(toDate("not-a-date")).toBeNull();
     expect(toDate(new Date("nope"))).toBeNull();
+  });
+});
+
+describe("dayRange", () => {
+  it("covers a whole single day", () => {
+    expect(dayRange(new Date(2026, 5, 15, 14, 30))).toEqual({
+      from: "2026-06-15",
+      to: "2026-06-15",
+    });
+  });
+
+  it("reads the day in local time, not UTC", () => {
+    // 00:30 local on the 15th is still the 14th in UTC anywhere east of it.
+    // Formatting via toISOString would report the wrong day and drop every
+    // report saved before the UTC offset each morning.
+    expect(dayRange(new Date(2026, 5, 15, 0, 30)).from).toBe("2026-06-15");
+    expect(dayRange(new Date(2026, 5, 15, 23, 30)).to).toBe("2026-06-15");
+  });
+
+  it("defaults to today", () => {
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(dayRange()).toEqual({ from: expected, to: expected });
+  });
+
+  it("bounds a day inclusively once run through the filter", () => {
+    const sameDay = [
+      report("start", new Date(2026, 5, 15, 0, 0, 0)),
+      report("end", new Date(2026, 5, 15, 23, 59, 59)),
+      report("next", new Date(2026, 5, 16, 0, 0, 0)),
+    ];
+    expect(
+      filterReportsByDate(sameDay, dayRange(new Date(2026, 5, 15))).map((r) => r.id),
+    ).toEqual(["start", "end"]);
+  });
+});
+
+describe("monthRange", () => {
+  it("covers a whole 30-day month", () => {
+    expect(monthRange("2026-06")).toEqual({ from: "2026-06-01", to: "2026-06-30" });
+  });
+
+  it("covers a whole 31-day month", () => {
+    expect(monthRange("2026-07")).toEqual({ from: "2026-07-01", to: "2026-07-31" });
+  });
+
+  it("gets February right in a common year and a leap year", () => {
+    expect(monthRange("2026-02").to).toBe("2026-02-28");
+    expect(monthRange("2028-02").to).toBe("2028-02-29");
+  });
+
+  it("covers December without rolling into the next year", () => {
+    expect(monthRange("2026-12")).toEqual({ from: "2026-12-01", to: "2026-12-31" });
+  });
+
+  it("rejects a missing or malformed month", () => {
+    expect(monthRange("")).toBeNull();
+    expect(monthRange(null)).toBeNull();
+    expect(monthRange(undefined)).toBeNull();
+    expect(monthRange("2026")).toBeNull();
+    expect(monthRange("2026-6")).toBeNull();
+    expect(monthRange("2026-06-01")).toBeNull();
+    expect(monthRange("2026-13")).toBeNull();
+    expect(monthRange("2026-00")).toBeNull();
+  });
+
+  it("bounds a month inclusively once run through the filter", () => {
+    const spanning = [
+      report("may-end", new Date(2026, 4, 31, 23, 59)),
+      report("jun-start", new Date(2026, 5, 1, 0, 0)),
+      report("jun-end", new Date(2026, 5, 30, 23, 59)),
+      report("jul-start", new Date(2026, 6, 1, 0, 0)),
+    ];
+    expect(
+      filterReportsByDate(spanning, monthRange("2026-06")).map((r) => r.id),
+    ).toEqual(["jun-start", "jun-end"]);
   });
 });
 

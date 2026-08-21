@@ -7,10 +7,12 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "./lib/firebase.js";
 import {
+  dayRange,
   deleteReport,
   fetchReportDocuments,
   fetchReports,
   filterReportsByDate,
+  monthRange,
 } from "./lib/reports.js";
 import {
   MAX_BUNDLE_REPORTS,
@@ -30,8 +32,8 @@ export { closeShareModal, openShareModal } from "./lib/share-ui.js";
 initObservability();
 
 const filterForm = document.querySelector("#date-filter");
-const fromInput = document.querySelector("#filter-from");
-const toInput = document.querySelector("#filter-to");
+const todayButton = document.querySelector("#filter-today");
+const monthInput = document.querySelector("#filter-month");
 const status = document.querySelector("#dashboard-status");
 const grid = document.querySelector("#report-grid");
 const resultCount = document.querySelector("#result-count");
@@ -41,6 +43,7 @@ const bundleCreate = document.querySelector("#bundle-create");
 const bundleLink = document.querySelector("#bundle-link");
 const selectAll = document.querySelector("#select-all-documents");
 const selectAllNote = document.querySelector("#select-all-note");
+const selectAllLabel = document.querySelector("#select-all-label");
 
 let allReports = [];
 let loadedForUser = null;
@@ -76,31 +79,73 @@ function documentsFor(reportId) {
   return reportDocuments.get(reportId) ?? [];
 }
 
+// Whether the Today button is the active period. The month selector carries its
+// own value in the DOM, but "today" is a choice rather than a typed value, so it
+// needs somewhere to live.
+let todayActive = false;
+
+const monthFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "long",
+  year: "numeric",
+});
+
 /**
- * Read the date-time range currently typed into the filter.
- * @returns {{from: string, to: string}} Raw input values.
+ * The period the dashboard is filtered to.
+ *
+ * Exactly one of Today and a month can be active, and each resolves to a pair
+ * of inclusive date-only bounds -- the shape `filterReportsByDate` already
+ * reads as midnight through 23:59:59.999. That is what makes both periods
+ * complete by construction: unlike a hand-typed range, neither can be left
+ * half-specified, so "package everything in this period" is always bounded.
+ * @returns {{kind: "today"|"month"|"none", from: string, to: string, label: string}}
  */
-function currentDateRange() {
-  return { from: fromInput.value, to: toInput.value };
+function currentPeriod() {
+  if (todayActive) {
+    return { kind: "today", ...dayRange(), label: "today" };
+  }
+  const bounds = monthRange(monthInput.value);
+  if (bounds) {
+    // Build the label from the month's own first day so the name never drifts
+    // from the bounds; `${month}-01` is exactly what monthRange returned.
+    const [year, monthNumber] = monthInput.value.split("-").map(Number);
+    return {
+      kind: "month",
+      ...bounds,
+      label: monthFormatter.format(new Date(year, monthNumber - 1, 1)),
+    };
+  }
+  return { kind: "none", from: "", to: "", label: "" };
 }
 
 /**
  * The reports the grid is currently showing.
- * @returns {Array<Object>} Reports inside the filter's date-time range.
+ * @returns {Array<Object>} Reports inside the active period.
  */
 function reportsInRange() {
-  return filterReportsByDate(allReports, currentDateRange());
+  const { from, to } = currentPeriod();
+  return filterReportsByDate(allReports, { from, to });
 }
 
 /**
- * Whether a complete range is pinned down. "Package everything" is only
- * offered against a range with both ends specified: an open-ended bound would
- * quietly mean "and every report saved before/after this", which is exactly the
- * unbounded selection the checkbox exists to avoid.
- * @returns {boolean} True when both bounds carry a value.
+ * Whether a period is chosen at all. "Package everything" is offered only
+ * against one, because with no period the selection would be every report the
+ * dashboard has ever loaded.
+ * @returns {boolean} True when Today or a month is active.
  */
 function hasDateRange() {
-  return Boolean(fromInput.value && toInput.value);
+  return currentPeriod().kind !== "none";
+}
+
+/**
+ * Reflect the active period on the two controls, keeping them mutually
+ * exclusive: choosing one clears the other, so the filter always reads as a
+ * single answer to "which period?".
+ * @returns {void}
+ */
+function syncPeriodControls() {
+  todayButton.setAttribute("aria-pressed", todayActive ? "true" : "false");
+  todayButton.classList.toggle("is-active", todayActive);
+  if (todayActive) monthInput.value = "";
 }
 
 /**
@@ -354,7 +399,7 @@ export function reportCard(report) {
 
 // Shown while the checkbox is unavailable, so the reason is on screen rather
 // than left for staff to infer from a control that will not respond.
-const SELECT_ALL_HINT = "Set both From and To to package everything saved in a range.";
+const SELECT_ALL_HINT = "Choose Today or a month to package everything saved in it.";
 
 /**
  * Reflect the state of the "package everything in this range" checkbox: it is
@@ -363,7 +408,15 @@ const SELECT_ALL_HINT = "Set both From and To to package everything saved in a r
  * @returns {void}
  */
 export function updateSelectAll() {
-  if (!hasDateRange()) {
+  const period = currentPeriod();
+  // Name the period on the label itself. "Everything in this period" is only
+  // unambiguous while the filter is in view; "everything saved in June 2026"
+  // still says what will be published when the grid has been scrolled past.
+  selectAllLabel.textContent = period.kind === "none"
+    ? "Package every document in this period"
+    : `Package every document saved ${period.kind === "today" ? "today" : `in ${period.label}`}`;
+
+  if (period.kind === "none") {
     selectAll.disabled = true;
     selectAll.checked = false;
     selectAllNote.textContent = SELECT_ALL_HINT;
@@ -570,9 +623,11 @@ export async function handleDeleteClick(button) {
 }
 
 export function render() {
+  syncPeriodControls();
+  const period = currentPeriod();
   const filtered = reportsInRange();
 
-  const hasFilter = Boolean(fromInput.value || toInput.value);
+  const hasFilter = period.kind !== "none";
 
   // Emptying the grid matters as much as hiding it: a selection left standing
   // behind a hidden grid would still be counted and still be published, so the
@@ -590,7 +645,7 @@ export function render() {
     grid.innerHTML = "";
     setStatus(
       hasFilter
-        ? "No reports match the selected date range."
+        ? `No reports saved ${period.kind === "today" ? "today" : `in ${period.label}`}.`
         : "No saved reports yet.",
     );
     syncBundleSelection();
@@ -601,9 +656,9 @@ export function render() {
     ? `${filtered.length} of ${allReports.length} reports`
     : `${allReports.length} ${allReports.length === 1 ? "report" : "reports"}`;
   grid.innerHTML = filtered.map(reportCard).join("");
-  // "Everything in this range" is a live statement, not a one-off action: while
-  // it is ticked, narrowing or widening the range re-selects against the range
-  // now on screen instead of silently keeping the old set.
+  // "Everything in this period" is a live statement, not a one-off action:
+  // while it is ticked, switching period re-selects against the period now on
+  // screen instead of silently keeping the old set.
   if (selectAll.checked && hasDateRange()) selectEveryReportInRange();
   syncBundleSelection();
   setStatus("");
@@ -703,8 +758,25 @@ selectAll.addEventListener("change", () => {
 // before the first render rather than only once reports arrive.
 updateSelectAll();
 
+// Today toggles: a second click clears it, so the button both sets the period
+// and gets back out of it without reaching for Clear.
+todayButton.addEventListener("click", () => {
+  todayActive = !todayActive;
+  render();
+});
+
+// Picking a month is the other period, so it takes over from Today.
+monthInput.addEventListener("input", () => {
+  todayActive = false;
+  render();
+});
+
 filterForm.addEventListener("input", render);
 filterForm.addEventListener("reset", () => {
+  // A native reset clears the month input but knows nothing about Today, which
+  // lives outside the form's value model -- clear it here or Clear would leave
+  // the period half-standing.
+  todayActive = false;
   // Let the native reset clear the inputs first, then re-render.
   requestAnimationFrame(render);
 });
