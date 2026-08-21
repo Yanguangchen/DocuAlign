@@ -86,6 +86,44 @@ describe("filterReportsByDate", () => {
     expect(result.map((r) => r.id)).toEqual(["jun-start", "jun-mid", "jun-end"]);
   });
 
+  it("accepts a date-time bound and filters to the minute", () => {
+    // The datetime-local shape the dashboard's From/To inputs now produce.
+    const result = filterReportsByDate(reports, {
+      from: "2026-06-01T00:00",
+      to: "2026-06-15T14:30",
+    });
+    expect(result.map((r) => r.id)).toEqual(["jun-start", "jun-mid"]);
+  });
+
+  it("keeps a date-time bound inclusive of the minute the user typed", () => {
+    // jun-mid was saved at 14:30:00. A `to` of 14:30 must include the whole
+    // minute, and a `from` of 14:31 must fall past it.
+    expect(
+      filterReportsByDate(reports, { to: "2026-06-15T14:30" }).map((r) => r.id),
+    ).toEqual(["jan", "jun-start", "jun-mid"]);
+    expect(
+      filterReportsByDate(reports, { from: "2026-06-15T14:31" }).map((r) => r.id),
+    ).toEqual(["jun-end", "dec"]);
+  });
+
+  it("accepts a seconds-precision bound", () => {
+    const seconds = [report("early", new Date("2026-06-15T14:30:29"))].concat(
+      report("late", new Date("2026-06-15T14:30:31")),
+    );
+    expect(
+      filterReportsByDate(seconds, { to: "2026-06-15T14:30:30" }).map((r) => r.id),
+    ).toEqual(["early"]);
+  });
+
+  it("ignores a bound it cannot parse, leaving that end open", () => {
+    expect(filterReportsByDate(reports, { from: "not-a-date" })).toHaveLength(
+      reports.length,
+    );
+    expect(filterReportsByDate(reports, { from: "2026-6-1" })).toHaveLength(
+      reports.length,
+    );
+  });
+
   it("returns nothing when the range excludes everything", () => {
     expect(filterReportsByDate(reports, { from: "2027-01-01" })).toHaveLength(0);
   });

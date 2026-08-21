@@ -14,7 +14,7 @@ This distinction is important:
 | Review or edit extracted data | No review form is connected | Not implemented |
 | Save reports | Saves report name, source filename, status, creator email, server timestamp, and a `documents` subcollection of the exported documents' own data | Implemented |
 | PDF export | Renders one PDF per document (Summary + one five-page overlay per `CV1`/`TR1` report group; `DS1`/`SB1`/`coral + org` are planned but currently withheld — see §1a), names each by the lab's convention (`X-2026-1338 (AV-2620N_RAK SUMMARY)`, `…_RAK1`, `…_RAK2`, …) and packs them into one ZIP download | Implemented |
-| Saved-report dashboard | Lists, date-filters, deletes, and shares report metadata and documents | Implemented |
+| Saved-report dashboard | Lists, date-time-filters, deletes, and shares report metadata and documents | Implemented |
 | Single public links | Publishes an immutable, sanitized Firestore snapshot per document | Implemented |
 | Package (group) public links | Publishes 1–250 single shares and a bundle of their tokens, with one-click "download all" and "print all" on the viewer | Implemented |
 
@@ -69,7 +69,7 @@ The HTML pages contain an import map for direct browser module loading from the 
 | `src/view-report.js` | Resolves public share/package tokens, rebuilds PDFs from published data, renders safe text, guards PDF URLs, drives download-all/print-all |
 | `src/workbook-pdf.js` | Legacy `xlsx`-package-backed reader kept only for test fixtures — **not** loaded by any HTML page; `src/xlsx-reader.js` is the runtime parser |
 | `src/lib/firebase.js` | Firebase singleton initialization |
-| `src/lib/reports.js` | Firestore report CRUD, timestamp normalization, inclusive date filtering |
+| `src/lib/reports.js` | Firestore report CRUD, timestamp normalization, inclusive date-time filtering |
 | `src/lib/share.js` | Token generation, public payload allowlisting, share and bundle persistence |
 | `src/lib/excel-mapping.js` | Queries the checked-in logical mapping dictionary |
 | `src/lib/logger.js` | Central structured logger (`logInfo`/`logWarn`/`logError`) and `trackOperation` latency wrapper |
@@ -265,9 +265,11 @@ subcollection under the report — see §6.1.
 
 ### 5.4 Dashboard and sharing
 
-The dashboard fetches every `docuAlignReports` document ordered by `createdAt` descending, normalizes timestamps, and filters dates in browser memory. Delete uses a two-click arm/confirm interaction and permanently deletes only the report document; it does not discover or revoke existing public shares.
+The dashboard fetches every `docuAlignReports` document ordered by `createdAt` descending, normalizes timestamps, and filters dates in browser memory. The From/To inputs are `datetime-local`, so a range can be pinned to a time of day as well as a date. `filterReportsByDate` accepts both granularities — a bare `YYYY-MM-DD` and a `YYYY-MM-DDTHH:mm` (seconds optional) — and places each bound at the start or end of whatever precision the value itself carries, so both ends stay inclusive of the unit typed: a `to` of `2026-06-30` covers that whole day, and a `to` of `2026-06-30T17:30` covers that whole minute. A bound it cannot parse leaves that end open. Delete uses a two-click arm/confirm interaction and permanently deletes only the report document; it does not discover or revoke existing public shares.
 
 **"Create public link" publishes the whole report as a package, not a single share.** `handleShareClick` in `src/dashboard.js` checks whether the report has any persisted documents: if it does (the normal case for anything exported after per-document storage existed), it calls `publishBundle` with every one of the report's documents and shows a `view.html?bundle=<token>` URL. Only a report with **no** stored documents — saved before that existed — falls back to `publishReport`, a plain single share at `view.html?share=<token>`. The card-level **Add document package** checkbox is also a whole-set operation: when several saved reports are selected, `selectedEntries` expands each one to all of its persisted documents before publishing the combined group link. The nested document checkboxes remain the narrower option for mixing individual documents across reports. A legacy report with no document subcollection contributes its one report snapshot.
+
+**Packaging a whole date range.** One checkbox above the grid — *Package every document in this date range* — selects every report the filter is currently showing, each at card level so it contributes its whole document set. It is deliberately gated on a **complete** range: both From and To must carry a value, and until they do the checkbox is disabled with the reason on screen. An open-ended bound would quietly mean "and everything saved before/after this", which is the unbounded selection the control exists to avoid. While ticked it is a live statement rather than a one-off action: changing either bound re-selects against the range now on screen. Unticking any single report drops it back to unchecked, and emptying the range clears the selection entirely — `render` blanks the grid on an empty result so `syncBundleSelection` prunes what those cards were holding, since a selection surviving behind a hidden grid would still be counted and still be published.
 
 `publishReport` creates a random 32-character alphanumeric token using `crypto.getRandomValues` with rejection sampling. It writes only `reportId`, display name, nullable source filename, status, a `documentData`/`pdfUrl` pair for that one document, and server publication timestamp. The staff creator email and unknown report fields are excluded.
 

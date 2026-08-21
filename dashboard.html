@@ -85,15 +85,22 @@
             <form class="date-filter" id="date-filter">
               <div class="field">
                 <label for="filter-from">From</label>
-                <input type="date" id="filter-from" name="from" />
+                <input type="datetime-local" id="filter-from" name="from" />
               </div>
               <div class="field">
                 <label for="filter-to">To</label>
-                <input type="date" id="filter-to" name="to" />
+                <input type="datetime-local" id="filter-to" name="to" />
               </div>
               <button class="text-button" type="reset" id="filter-clear">Clear</button>
             </form>
             <p class="result-count" id="result-count" aria-live="polite"></p>
+            <div class="select-all">
+              <label class="bundle-select">
+                <input type="checkbox" id="select-all-documents" disabled />
+                Package every document in this date range
+              </label>
+              <p class="select-all-note" id="select-all-note" aria-live="polite"></p>
+            </div>
           </section>
 
           <section class="bundle-bar" id="bundle-bar" aria-label="Group selected reports into one link" hidden>
