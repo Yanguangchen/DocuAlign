@@ -78,6 +78,53 @@ function parseBound(value, edge) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Format a Date as the `YYYY-MM-DD` string the filter bounds use, read in the
+ * viewer's own timezone. `toISOString()` would convert to UTC first, which puts
+ * "today" on the wrong calendar day for anyone east or west of it -- in
+ * Singapore (UTC+8) every report saved before 08:00 would drop out of Today.
+ * @param {Date} date - The date to format.
+ * @returns {string} `YYYY-MM-DD` in local time.
+ */
+function toLocalDateString(date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Inclusive filter bounds covering one whole day.
+ *
+ * Both bounds are date-only, which `filterReportsByDate` already reads as
+ * midnight through 23:59:59.999 -- so a single day needs no special casing in
+ * the filter itself.
+ * @param {Date} [date] - The day to cover; defaults to now.
+ * @returns {{from: string, to: string}} Inclusive bounds.
+ */
+export function dayRange(date = new Date()) {
+  const day = toLocalDateString(date);
+  return { from: day, to: day };
+}
+
+/**
+ * Inclusive filter bounds covering one whole calendar month.
+ *
+ * The last day is found by asking for day 0 of the FOLLOWING month, which the
+ * Date constructor resolves to the last day of the one asked for. That handles
+ * 28/29/30/31 without a lookup table, February and leap years included.
+ * @param {string} month - `YYYY-MM`, as an `<input type="month">` produces.
+ * @returns {{from: string, to: string}|null} Inclusive bounds, or null when
+ *   the value is missing or malformed.
+ */
+export function monthRange(month) {
+  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
+  const [year, monthNumber] = month.split("-").map(Number);
+  if (monthNumber < 1 || monthNumber > 12) return null;
+  const lastDay = new Date(year, monthNumber, 0);
+  if (Number.isNaN(lastDay.getTime())) return null;
+  return { from: `${month}-01`, to: toLocalDateString(lastDay) };
+}
+
 // Pure, client-side filter so it is easy to test and reuse. `from` and `to` are
 // inclusive `YYYY-MM-DD` or `YYYY-MM-DDTHH:mm` strings; either may be omitted
 // to leave that bound open. Reports without a usable createdAt are dropped once
