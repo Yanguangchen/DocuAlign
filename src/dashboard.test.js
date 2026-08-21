@@ -24,19 +24,26 @@ const mockFilterReportsByDate = vi.fn(defaultDateFilter);
 const mockDeleteReport = vi.fn();
 
 vi.mock("./lib/reports.js", async (importOriginal) => {
-  // dayRange/monthRange are pure period arithmetic the dashboard reads, not
+  // dayRange/todayValue are pure date arithmetic the dashboard reads, not
   // collaborators to stub: take them from the module under mock so the two
   // cannot drift apart.
   const actual = await importOriginal();
   return {
     dayRange: actual.dayRange,
-    monthRange: actual.monthRange,
+    todayValue: actual.todayValue,
     fetchReports: (...args) => mockFetchReports(...args),
     fetchReportDocuments: (...args) => mockFetchReportDocuments(...args),
     filterReportsByDate: (...args) => mockFilterReportsByDate(...args),
     deleteReport: (...args) => mockDeleteReport(...args),
   };
 });
+
+// The dashboard names dates with Intl in the VIEWER's locale, deliberately --
+// so the tests derive the expected wording the same way instead of assuming an
+// ordering that only holds in some regions.
+const formatDay = (value) =>
+  new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", year: "numeric" })
+    .format(new Date(`${value}T00:00:00`));
 
 const SHARE_TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
 const SHARE_URL = `https://example.com/view.html?share=${SHARE_TOKEN}`;
@@ -64,7 +71,7 @@ describe("dashboard module", () => {
     document.body.innerHTML = `
       <form id="date-filter">
         <button type="button" id="filter-today" aria-pressed="false">Today</button>
-        <input type="month" id="filter-month" name="month" value="" />
+        <input type="date" id="filter-day" name="day" value="" />
       </form>
       <div id="dashboard-status"></div>
       <ul id="report-grid"></ul>
@@ -213,11 +220,11 @@ describe("dashboard module", () => {
     if (authStateCallback) authStateCallback({ uid: "user-filter" });
     await new Promise((r) => setTimeout(r, 15));
 
-    document.querySelector("#filter-month").value = "2026-06";
+    document.querySelector("#filter-day").value = "2026-06-15";
     render();
 
     expect(document.querySelector("#dashboard-status").textContent).toBe(
-      "No reports saved in June 2026."
+      `No reports saved on ${formatDay("2026-06-15")}.`
     );
   });
 
@@ -291,7 +298,7 @@ describe("dashboard module", () => {
     if (authStateCallback) authStateCallback({ uid: "user-subset" });
     await new Promise((r) => setTimeout(r, 15));
 
-    document.querySelector("#filter-month").value = "2026-06";
+    document.querySelector("#filter-day").value = "2026-06-15";
     render();
 
     expect(document.querySelector("#result-count").textContent).toBe("1 of 2 reports");
@@ -987,7 +994,7 @@ describe("dashboard module", () => {
       toggle("doc-2");
       expect(document.querySelector("#bundle-count").textContent).toBe("2 documents selected");
 
-      document.querySelector("#filter-month").value = "2026-06";
+      document.querySelector("#filter-day").value = "2026-06-15";
       render();
 
       // doc-2 is filtered out of the grid, so only doc-1 stays selected.
@@ -1005,11 +1012,15 @@ describe("dashboard module", () => {
     });
   });
 
-  describe("packaging a whole period", () => {
-    const MONTH = "2026-06";
+  describe("packaging a whole day", () => {
+    const DAY = "2026-06-15";
+    const today = () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    };
 
-    // doc-3 sits outside the period, so it must never reach a package built
-    // from that period even though the dashboard has it loaded.
+    // doc-3 sits outside the day, so it must never reach a package built from
+    // that day even though the dashboard has it loaded.
     const reports = [
       { id: "doc-1", reportName: "Report 1", matchFilter: true },
       { id: "doc-2", reportName: "Report 2", matchFilter: true },
@@ -1020,6 +1031,7 @@ describe("dashboard module", () => {
     const label = () => document.querySelector("#select-all-label").textContent;
     const note = () => document.querySelector("#select-all-note").textContent;
     const todayButton = () => document.querySelector("#filter-today");
+    const dayInput = () => document.querySelector("#filter-day");
     const count = () => document.querySelector("#bundle-count").textContent;
 
     async function renderAll() {
@@ -1033,15 +1045,14 @@ describe("dashboard module", () => {
         ));
       mockFetchReports.mockResolvedValueOnce(reports);
       const dashboard = await import("./dashboard.js");
-      if (authStateCallback) authStateCallback({ uid: "user-period" });
+      if (authStateCallback) authStateCallback({ uid: "user-day" });
       await new Promise((r) => setTimeout(r, 15));
       return dashboard;
     }
 
-    function pickMonth(month) {
-      const input = document.querySelector("#filter-month");
-      input.value = month;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+    function pickDay(day) {
+      dayInput().value = day;
+      dayInput().dispatchEvent(new Event("input", { bubbles: true }));
     }
 
     function clickToday() {
@@ -1058,57 +1069,68 @@ describe("dashboard module", () => {
       mockFilterReportsByDate.mockImplementation(defaultDateFilter);
     });
 
-    it("stays unavailable until a period is chosen", async () => {
+    it("stays unavailable until a date is picked", async () => {
       await renderAll();
 
       expect(selectAll().disabled).toBe(true);
-      expect(note()).toBe("Choose Today or a month to package everything saved in it.");
-      expect(label()).toBe("Package every document in this period");
+      expect(note()).toBe("Pick a date to package everything saved on it.");
+      expect(label()).toBe("Package every document saved on a date");
 
-      pickMonth(MONTH);
+      pickDay(DAY);
       expect(selectAll().disabled).toBe(false);
       expect(note()).toBe("");
-      // The label names the period, so it still reads correctly once the
-      // filter has been scrolled past.
-      expect(label()).toBe("Package every document saved in June 2026");
+      // The label names the day, so it still reads correctly once the filter
+      // has been scrolled past.
+      expect(label()).toBe(`Package every document saved on ${formatDay(DAY)}`);
     });
 
-    it("names Today on the label and marks the button pressed", async () => {
+    it("fills the calendar from the Today button and clears it again", async () => {
       await renderAll();
 
       clickToday();
+      // Today is a shortcut into the one calendar, not a second mode: the date
+      // input is what actually holds the answer.
+      expect(dayInput().value).toBe(today());
       expect(todayButton().getAttribute("aria-pressed")).toBe("true");
-      expect(selectAll().disabled).toBe(false);
       expect(label()).toBe("Package every document saved today");
 
-      // Today toggles off on a second click, back to no period at all.
       clickToday();
+      expect(dayInput().value).toBe("");
       expect(todayButton().getAttribute("aria-pressed")).toBe("false");
       expect(selectAll().disabled).toBe(true);
     });
 
-    it("keeps Today and the month selector mutually exclusive", async () => {
+    it("lights Today up when today is picked by hand in the calendar", async () => {
       await renderAll();
 
-      pickMonth(MONTH);
-      clickToday();
-      // Choosing Today clears the month, so the filter reads as one answer.
-      expect(document.querySelector("#filter-month").value).toBe("");
+      // The button reports the filter's state rather than remembering how it
+      // was set, so reaching today through the calendar counts.
+      pickDay(today());
       expect(todayButton().getAttribute("aria-pressed")).toBe("true");
+      expect(label()).toBe("Package every document saved today");
 
-      pickMonth(MONTH);
+      pickDay(DAY);
       expect(todayButton().getAttribute("aria-pressed")).toBe("false");
-      expect(label()).toBe("Package every document saved in June 2026");
     });
 
-    it("packages every document in the period from the one checkbox", async () => {
+    it("ignores a half-typed or impossible date", async () => {
+      await renderAll();
+
+      // A date input reports "" mid-entry, and 31 February is well-shaped but
+      // not a day; neither may arm the packaging checkbox.
+      pickDay("2026-02-31");
+      expect(selectAll().disabled).toBe(true);
+      expect(note()).toBe("Pick a date to package everything saved on it.");
+    });
+
+    it("packages every document saved on the day from the one checkbox", async () => {
       mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
       await renderAll();
-      pickMonth(MONTH);
+      pickDay(DAY);
 
       tickSelectAll(true);
 
-      // Two in-period reports of three documents each; doc-3 is outside it.
+      // Two in-day reports of three documents each; doc-3 is outside it.
       expect(count()).toBe("6 documents selected");
 
       document.querySelector("#bundle-create").click();
@@ -1122,28 +1144,28 @@ describe("dashboard module", () => {
       ]);
     });
 
-    it("follows the period while it stays ticked", async () => {
+    it("follows the date while it stays ticked", async () => {
       await renderAll();
-      pickMonth(MONTH);
+      pickDay(DAY);
       tickSelectAll(true);
       expect(count()).toBe("6 documents selected");
 
-      // Switch to a month holding one report: the package follows the period
-      // rather than holding on to the set it was ticked against.
+      // Move to a day holding one report: the package follows the date rather
+      // than holding on to the set it was ticked against.
       mockFilterReportsByDate.mockImplementation((all, range) => {
         if (!range.from && !range.to) return all;
-        if (range.from === "2026-07-01") return all.slice(0, 1);
+        if (range.from === "2026-06-16") return all.slice(0, 1);
         return all.filter((r) => r.matchFilter);
       });
-      pickMonth("2026-07");
+      pickDay("2026-06-16");
 
       expect(selectAll().checked).toBe(true);
       expect(count()).toBe("3 documents selected");
     });
 
-    it("unticks itself once any report in the period is deselected", async () => {
+    it("unticks itself once any report on the day is deselected", async () => {
       await renderAll();
-      pickMonth(MONTH);
+      pickDay(DAY);
       tickSelectAll(true);
       expect(selectAll().checked).toBe(true);
 
@@ -1159,7 +1181,7 @@ describe("dashboard module", () => {
 
     it("clears the selection when unticked", async () => {
       await renderAll();
-      pickMonth(MONTH);
+      pickDay(DAY);
       tickSelectAll(true);
       expect(count()).toBe("6 documents selected");
 
@@ -1168,22 +1190,22 @@ describe("dashboard module", () => {
       expect(selectAll().checked).toBe(false);
     });
 
-    it("drops the selection when the period stops matching anything", async () => {
+    it("drops the selection when the day stops matching anything", async () => {
       await renderAll();
-      pickMonth(MONTH);
+      pickDay(DAY);
       tickSelectAll(true);
       expect(count()).toBe("6 documents selected");
 
       mockFilterReportsByDate.mockImplementation((all, range) =>
         (!range.from && !range.to ? all : []));
-      pickMonth("2027-01");
+      pickDay("2027-01-04");
 
       // Nothing on screen means nothing selected: a package must never carry
       // documents the staff member can no longer see.
       expect(document.querySelector("#bundle-bar").hidden).toBe(true);
       expect(selectAll().checked).toBe(false);
       expect(document.querySelector("#dashboard-status").textContent).toBe(
-        "No reports saved in January 2027.",
+        `No reports saved on ${formatDay("2027-01-04")}.`,
       );
     });
   });
