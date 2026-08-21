@@ -78,51 +78,44 @@ function parseBound(value, edge) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// The shape an `<input type="date">` produces, and the shape a filter bound
+// takes. One pattern serves both because they are the same string.
+const DAY_VALUE = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Format a Date as the `YYYY-MM-DD` string the filter bounds use, read in the
- * viewer's own timezone. `toISOString()` would convert to UTC first, which puts
- * "today" on the wrong calendar day for anyone east or west of it -- in
- * Singapore (UTC+8) every report saved before 08:00 would drop out of Today.
- * @param {Date} date - The date to format.
+ * Today as the `YYYY-MM-DD` string the day picker uses.
+ *
+ * Read in the viewer's own timezone. `toISOString()` would convert to UTC
+ * first, which puts "today" on the wrong calendar day for anyone east or west
+ * of it -- in Singapore (UTC+8) every report saved before 08:00 would fall
+ * outside today.
+ * @param {Date} [date] - The day to name; defaults to now.
  * @returns {string} `YYYY-MM-DD` in local time.
  */
-function toLocalDateString(date) {
+export function todayValue(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /**
- * Inclusive filter bounds covering one whole day.
+ * Inclusive filter bounds covering the whole of one picked day.
  *
- * Both bounds are date-only, which `filterReportsByDate` already reads as
+ * Both bounds are the day itself, which `filterReportsByDate` already reads as
  * midnight through 23:59:59.999 -- so a single day needs no special casing in
- * the filter itself.
- * @param {Date} [date] - The day to cover; defaults to now.
- * @returns {{from: string, to: string}} Inclusive bounds.
+ * the filter, and a report saved at any hour of it is inside.
+ * @param {string} value - `YYYY-MM-DD`, as a date input produces.
+ * @returns {{from: string, to: string}|null} Inclusive bounds, or null when the
+ *   value is missing or malformed.
  */
-export function dayRange(date = new Date()) {
-  const day = toLocalDateString(date);
-  return { from: day, to: day };
-}
-
-/**
- * Inclusive filter bounds covering one whole calendar month.
- *
- * The last day is found by asking for day 0 of the FOLLOWING month, which the
- * Date constructor resolves to the last day of the one asked for. That handles
- * 28/29/30/31 without a lookup table, February and leap years included.
- * @param {string} month - `YYYY-MM`, as an `<input type="month">` produces.
- * @returns {{from: string, to: string}|null} Inclusive bounds, or null when
- *   the value is missing or malformed.
- */
-export function monthRange(month) {
-  if (typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) return null;
-  const [year, monthNumber] = month.split("-").map(Number);
-  if (monthNumber < 1 || monthNumber > 12) return null;
-  const lastDay = new Date(year, monthNumber, 0);
-  if (Number.isNaN(lastDay.getTime())) return null;
-  return { from: `${month}-01`, to: toLocalDateString(lastDay) };
+export function dayRange(value) {
+  if (typeof value !== "string" || !DAY_VALUE.test(value)) return null;
+  // Reject a well-shaped but impossible date (2026-02-31, 2026-13-01): the
+  // Date constructor rolls those into the following month rather than failing,
+  // so compare the round trip against what was asked for.
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime()) || todayValue(parsed) !== value) return null;
+  return { from: value, to: value };
 }
 
 // Pure, client-side filter so it is easy to test and reuse. `from` and `to` are

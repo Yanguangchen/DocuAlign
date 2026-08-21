@@ -794,9 +794,9 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
-/* "Today" sits at the same height as the month field it stands beside, and
-   carries its pressed state visibly -- it is a filter that stays on, not a
-   command that fires once, so it has to look different while it is active. */
+/* "Today" sits at the same height as the date field it fills, and carries its
+   pressed state visibly -- it reports that the picked day IS today, not that
+   the button was the thing clicked, so it lights up either way. */
 .period-button {
   padding: 9px 16px;
   border: 1px solid var(--line);
@@ -835,8 +835,8 @@ a:focus-visible {
   letter-spacing: 0.04em;
 }
 
-/* "Package every document saved in <period>" -- takes the toolbar's full
-   width so it reads as an action on the filter above it, not a third field. */
+/* "Package every document saved on <date>" -- takes the toolbar's full width
+   so it reads as an action on the filter above it, not a third field. */
 .select-all {
   display: flex;
   flex-wrap: wrap;
