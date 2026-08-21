@@ -291,7 +291,7 @@ The report card's own button now publishes the report's whole document set as
 a single package link and says how many documents it carries; reports saved
 before per-document storage still publish as a plain share. The package
 checkboxes remain for the narrower job of mixing documents across reports. A
-package over `MAX_BUNDLE_REPORTS` (100) surfaces that reason rather than
+package over `MAX_BUNDLE_REPORTS` (250) surfaces that reason rather than
 inviting a retry that cannot succeed.
 
 Two consequences to keep in mind: a recipient now sees every document in a
@@ -302,7 +302,7 @@ The 25-document ceiling that warning anticipated was reached first from the
 other direction: at ~7 documents per report it stopped staff at four reports
 per package. The cap existed to keep an unrolled per-member rules validator
 inside Firestore's expression budget, so §17 replaces that validator with a
-constant-cost one and raises the cap to 100. The dashboard's selection count
+constant-cost one and raises the cap to 250. The dashboard's selection count
 now says when a selection is over the cap, and the group button explains the
 refusal instead of offering a retry.
 
@@ -722,9 +722,13 @@ satisfy the pattern by itself and pass as two. A non-string member makes
 access contract — public `get`, denied `list`, staff-only `create`/`delete`,
 immutable — is untouched.
 
-With cost flat, the cap becomes a product number: `MAX_BUNDLE_REPORTS` is 100,
-roughly fourteen reports' worth of documents. Emulator probing put 250 members
-inside the budget, so there is real headroom above what shipped.
+With cost flat, the cap becomes a product number. Emulator probing found no
+rules ceiling worth calling one: 10,000 members validate as fast as 250, in the
+same ~130ms. What bounds a package now sits downstream of the write --
+publishing fires one Firestore write per document, and the viewer then reads one
+document per member, rebuilds every PDF in the browser, and holds them all in
+memory to build the ZIP. `MAX_BUNDLE_REPORTS` is 250, roughly 35 saved reports;
+raising it further is a question about the customer's browser, not Firestore.
 
 Two UI changes finish it. The selection count in the bundle bar now says when a
 selection is over the cap and disables the button, because a card shows how
@@ -734,18 +738,19 @@ did, so a refusal that retrying cannot fix stops inviting a retry.
 
 ### Verification performed
 
-`src/firestore.rules.test.js` publishes a full 100-member bundle against the
-emulator and asserts denial at 101, at zero members, for a malformed member,
+`src/firestore.rules.test.js` publishes a full 250-member bundle against the
+emulator and asserts denial at 251, at zero members, for a malformed member,
 for a non-string member, and for the comma-carrying member the length check
-exists to stop. `src/dashboard.test.js` ticks four seven-document reports and
-expects the button armed at 28 documents, blocked with the cap named at 105,
-and re-armed at 98.
+exists to stop. `src/dashboard.test.js` ticks seven-document reports and
+expects the button armed at 28 documents, blocked with the cap named at 252,
+and re-armed at 245.
 
 ### What to check before touching this again
 
 The cap lives in two places — `MAX_BUNDLE_REPORTS` in `src/lib/share.js` and
 the literal in `isValidDocuAlignBundleTokens`. They must match; the client
 check is the one that produces a readable message, the rules check is the one
-that is actually enforced. Raising it further is safe as far as the rules go,
-but the viewer fetches one document per member and builds every PDF in the
-browser, so the next ceiling is the customer's page, not Firestore.
+that is actually enforced. Raising it further is safe as far as the rules go --
+they were measured flat to 10,000 members -- but the viewer fetches one document
+per member and builds every PDF in the browser, so the next ceiling is the
+customer's page, not Firestore.

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 let authStateCallback = null;
 vi.mock("firebase/auth", () => ({
@@ -15,10 +15,11 @@ vi.mock("./lib/firebase.js", () => ({
 
 const mockFetchReports = vi.fn();
 const mockFetchReportDocuments = vi.fn(() => Promise.resolve([]));
-const mockFilterReportsByDate = vi.fn((reports, range) => {
+const defaultDateFilter = (reports, range) => {
   if (!range.from && !range.to) return reports;
   return reports.filter((r) => r.matchFilter);
-});
+};
+const mockFilterReportsByDate = vi.fn(defaultDateFilter);
 
 const mockDeleteReport = vi.fn();
 
@@ -60,6 +61,10 @@ describe("dashboard module", () => {
       <div id="dashboard-status"></div>
       <ul id="report-grid"></ul>
       <span id="result-count"></span>
+      <div class="select-all">
+        <label><input type="checkbox" id="select-all-documents" disabled /> Package every document in this date range</label>
+        <p id="select-all-note"></p>
+      </div>
       <section id="bundle-bar" hidden>
         <span id="bundle-count"></span>
         <button id="bundle-create" type="button">Create group link</button>
@@ -388,7 +393,7 @@ describe("dashboard module", () => {
       mockFetchReportDocuments.mockImplementation(() =>
         Promise.resolve([{ slug: "X-1", title: "Test Report X-1" }]));
       mockPublishBundle.mockRejectedValueOnce(
-        new TypeError("A package can hold at most 100 documents."),
+        new TypeError("A package can hold at most 250 documents."),
       );
       await renderOneReport();
 
@@ -397,7 +402,7 @@ describe("dashboard module", () => {
       await new Promise((r) => setTimeout(r, 15));
 
       expect(document.querySelector(".share-link").textContent).toBe(
-        "A package can hold at most 100 documents.",
+        "A package can hold at most 250 documents.",
       );
       consoleSpy.mockRestore();
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
@@ -909,8 +914,8 @@ describe("dashboard module", () => {
           title: `Document ${i}`,
           data: "[]",
         }));
-      const reports = Array.from({ length: 20 }, (_, i) => ({
-        id: `doc-${i}`,
+      const reports = Array.from({ length: 40 }, (_, i) => ({
+        id: `doc-${String(i).padStart(2, "0")}`,
         reportName: `Report ${i}`,
         matchFilter: true,
       }));
@@ -921,33 +926,37 @@ describe("dashboard module", () => {
 
       const button = document.querySelector("#bundle-create");
       const count = document.querySelector("#bundle-count");
+      const tickReports = (from, to) => {
+        for (let i = from; i < to; i += 1) toggle(`doc-${String(i).padStart(2, "0")}`);
+      };
 
-      for (let i = 0; i < 4; i += 1) toggle(`doc-${i}`);
+      // Four reports is what used to be refused outright; it has to publish now.
+      tickReports(0, 4);
       expect(count.textContent).toBe("28 documents selected");
       expect(button.disabled).toBe(false);
 
-      // 15 reports x 7 documents = 105, past the 100 cap.
-      for (let i = 4; i < 15; i += 1) toggle(`doc-${i}`);
+      // 36 reports x 7 documents = 252, past the 250 cap.
+      tickReports(4, 36);
       expect(count.textContent).toBe(
-        "105 documents selected — a package holds at most 100.",
+        "252 documents selected — a package holds at most 250.",
       );
       expect(button.disabled).toBe(true);
 
       // Unticking one report brings it back under the cap and re-arms the button.
-      toggle("doc-14", false);
-      expect(count.textContent).toBe("98 documents selected");
+      toggle("doc-35", false);
+      expect(count.textContent).toBe("245 documents selected");
       expect(button.disabled).toBe(false);
 
       button.click();
       await new Promise((r) => setTimeout(r, 15));
-      expect(mockPublishBundle.mock.calls[0][1]).toHaveLength(98);
+      expect(mockPublishBundle.mock.calls[0][1]).toHaveLength(245);
       mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
     });
 
     it("surfaces a group failure that retrying cannot fix", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockPublishBundle.mockRejectedValueOnce(
-        new TypeError("A package can hold at most 100 documents."),
+        new TypeError("A package can hold at most 250 documents."),
       );
       await renderReports(twoReports);
       toggle("doc-1");
@@ -956,7 +965,7 @@ describe("dashboard module", () => {
       await new Promise((r) => setTimeout(r, 15));
 
       expect(document.querySelector("#bundle-link").textContent).toBe(
-        "A package can hold at most 100 documents.",
+        "A package can hold at most 250 documents.",
       );
       consoleSpy.mockRestore();
     });
@@ -985,6 +994,160 @@ describe("dashboard module", () => {
       document.querySelector("#bundle-create").click();
       await new Promise((r) => setTimeout(r, 15));
       expect(mockPublishBundle).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("packaging a whole date range", () => {
+    const RANGE_FROM = "2026-06-01T08:00";
+    const RANGE_TO = "2026-06-30T17:30";
+
+    // doc-3 sits outside the range, so it must never reach a package built from
+    // the range even though the dashboard has it loaded.
+    const reports = [
+      { id: "doc-1", reportName: "Report 1", matchFilter: true },
+      { id: "doc-2", reportName: "Report 2", matchFilter: true },
+      { id: "doc-3", reportName: "Report 3", matchFilter: false },
+    ];
+
+    const selectAll = () => document.querySelector("#select-all-documents");
+    const note = () => document.querySelector("#select-all-note");
+    const count = () => document.querySelector("#bundle-count").textContent;
+
+    async function renderAll() {
+      mockFetchReportDocuments.mockImplementation((db, reportId) =>
+        Promise.resolve(
+          Array.from({ length: 3 }, (_, i) => ({
+            slug: `${reportId}-D${i}`,
+            title: `Document ${i}`,
+            data: "[]",
+          })),
+        ));
+      mockFetchReports.mockResolvedValueOnce(reports);
+      const dashboard = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-range" });
+      await new Promise((r) => setTimeout(r, 15));
+      return dashboard;
+    }
+
+    function setRange(from, to) {
+      document.querySelector("#filter-from").value = from;
+      document.querySelector("#filter-to").value = to;
+      document
+        .querySelector("#date-filter")
+        .dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    function tickSelectAll(checked) {
+      selectAll().checked = checked;
+      selectAll().dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    afterEach(() => {
+      mockFetchReportDocuments.mockImplementation(() => Promise.resolve([]));
+      mockFilterReportsByDate.mockImplementation(defaultDateFilter);
+    });
+
+    it("stays unavailable until both ends of the range are specified", async () => {
+      await renderAll();
+
+      expect(selectAll().disabled).toBe(true);
+      expect(note().textContent).toBe(
+        "Set both From and To to package everything saved in a range.",
+      );
+
+      // One bound is a filter, not a range: still no "package everything".
+      setRange(RANGE_FROM, "");
+      expect(selectAll().disabled).toBe(true);
+
+      setRange(RANGE_FROM, RANGE_TO);
+      expect(selectAll().disabled).toBe(false);
+      expect(note().textContent).toBe("");
+    });
+
+    it("packages every document in the range from the one checkbox", async () => {
+      mockPublishBundle.mockResolvedValueOnce(BUNDLE_TOKEN);
+      await renderAll();
+      setRange(RANGE_FROM, RANGE_TO);
+
+      tickSelectAll(true);
+
+      // Two in-range reports of three documents each; doc-3 is out of range.
+      expect(count()).toBe("6 documents selected");
+
+      document.querySelector("#bundle-create").click();
+      await new Promise((r) => setTimeout(r, 15));
+
+      const entries = mockPublishBundle.mock.calls[0][1];
+      expect(entries).toHaveLength(6);
+      expect([...new Set(entries.map((entry) => entry.report.id))]).toEqual([
+        "doc-1",
+        "doc-2",
+      ]);
+    });
+
+    it("follows the range while it stays ticked", async () => {
+      await renderAll();
+      setRange(RANGE_FROM, RANGE_TO);
+      tickSelectAll(true);
+      expect(count()).toBe("6 documents selected");
+
+      // Narrow the range to a single report: the package follows the range
+      // rather than holding on to the set it was ticked against.
+      mockFilterReportsByDate.mockImplementation((all, range) => {
+        if (!range.from && !range.to) return all;
+        if (range.to === "2026-06-10T12:00") return all.slice(0, 1);
+        return all.filter((r) => r.matchFilter);
+      });
+      setRange(RANGE_FROM, "2026-06-10T12:00");
+
+      expect(selectAll().checked).toBe(true);
+      expect(count()).toBe("3 documents selected");
+    });
+
+    it("unticks itself once any report in the range is deselected", async () => {
+      await renderAll();
+      setRange(RANGE_FROM, RANGE_TO);
+      tickSelectAll(true);
+      expect(selectAll().checked).toBe(true);
+
+      const box = document.querySelector(
+        '.bundle-checkbox[data-report-id="doc-1"]:not([data-document-slug])',
+      );
+      box.checked = false;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+
+      expect(selectAll().checked).toBe(false);
+      expect(count()).toBe("3 documents selected");
+    });
+
+    it("clears the selection when unticked", async () => {
+      await renderAll();
+      setRange(RANGE_FROM, RANGE_TO);
+      tickSelectAll(true);
+      expect(count()).toBe("6 documents selected");
+
+      tickSelectAll(false);
+      expect(document.querySelector("#bundle-bar").hidden).toBe(true);
+      expect(selectAll().checked).toBe(false);
+    });
+
+    it("drops the range selection when the range stops matching anything", async () => {
+      await renderAll();
+      setRange(RANGE_FROM, RANGE_TO);
+      tickSelectAll(true);
+      expect(count()).toBe("6 documents selected");
+
+      mockFilterReportsByDate.mockImplementation((all, range) =>
+        (!range.from && !range.to ? all : []));
+      setRange("2027-01-01T00:00", "2027-01-02T00:00");
+
+      // Nothing on screen means nothing selected: a package must never carry
+      // documents the staff member can no longer see.
+      expect(document.querySelector("#bundle-bar").hidden).toBe(true);
+      expect(selectAll().checked).toBe(false);
+      expect(document.querySelector("#dashboard-status").textContent).toBe(
+        "No reports match the selected date range.",
+      );
     });
   });
 

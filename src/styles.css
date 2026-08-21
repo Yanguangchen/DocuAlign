@@ -795,6 +795,34 @@ a:focus-visible {
   letter-spacing: 0.04em;
 }
 
+/* "Package every document in this date range" -- takes the toolbar's full
+   width so it reads as an action on the filter above it, not a third field. */
+.select-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  flex-basis: 100%;
+}
+
+.select-all input:disabled {
+  cursor: not-allowed;
+}
+
+/* Dim the label alongside its own disabled box, so the pair reads as one
+   unavailable control rather than a live label with a dead checkbox. */
+.select-all:has(input:disabled) .bundle-select {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.select-all-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
 /* Saved report list */
 .dashboard-status {
   color: var(--muted);

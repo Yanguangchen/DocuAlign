@@ -336,14 +336,14 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       // A saved report expands to roughly seven documents, so a package of any
       // realistic size sits far above the 25 members the unrolled validator
       // could afford. Assert the whole cap, not a token sample of it.
-      const fullPayload = bundlePayload({ shareTokens: shareTokens(100) });
+      const fullPayload = bundlePayload({ shareTokens: shareTokens(250) });
       const fullToken = "Cc3dEfGh1JkLmNoPqRsTuVwXyZ012345";
       await assertSucceeds(
         setDoc(doc(context.firestore(), BUNDLES, fullToken), fullPayload),
       );
     });
 
-    it("denies bundles that are empty or above the 100 document cap", async () => {
+    it("denies bundles that are empty or above the 250 document cap", async () => {
       const context = staffContext();
       await assertFails(
         setDoc(doc(context.firestore(), BUNDLES, TOKEN), bundlePayload({ shareTokens: [] })),
@@ -351,7 +351,7 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
       await assertFails(
         setDoc(
           doc(context.firestore(), BUNDLES, TOKEN),
-          bundlePayload({ shareTokens: shareTokens(101) }),
+          bundlePayload({ shareTokens: shareTokens(251) }),
         ),
       );
     });

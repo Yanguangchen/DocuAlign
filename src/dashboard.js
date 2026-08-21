@@ -39,6 +39,8 @@ const bundleBar = document.querySelector("#bundle-bar");
 const bundleCount = document.querySelector("#bundle-count");
 const bundleCreate = document.querySelector("#bundle-create");
 const bundleLink = document.querySelector("#bundle-link");
+const selectAll = document.querySelector("#select-all-documents");
+const selectAllNote = document.querySelector("#select-all-note");
 
 let allReports = [];
 let loadedForUser = null;
@@ -72,6 +74,57 @@ export function selectionKey(reportId, slug) {
  */
 function documentsFor(reportId) {
   return reportDocuments.get(reportId) ?? [];
+}
+
+/**
+ * Read the date-time range currently typed into the filter.
+ * @returns {{from: string, to: string}} Raw input values.
+ */
+function currentDateRange() {
+  return { from: fromInput.value, to: toInput.value };
+}
+
+/**
+ * The reports the grid is currently showing.
+ * @returns {Array<Object>} Reports inside the filter's date-time range.
+ */
+function reportsInRange() {
+  return filterReportsByDate(allReports, currentDateRange());
+}
+
+/**
+ * Whether a complete range is pinned down. "Package everything" is only
+ * offered against a range with both ends specified: an open-ended bound would
+ * quietly mean "and every report saved before/after this", which is exactly the
+ * unbounded selection the checkbox exists to avoid.
+ * @returns {boolean} True when both bounds carry a value.
+ */
+function hasDateRange() {
+  return Boolean(fromInput.value && toInput.value);
+}
+
+/**
+ * Whether every document of one report is already in the selection, whether it
+ * was ticked as a whole package or one document at a time.
+ * @param {Object} report - A saved report.
+ * @returns {boolean} True when nothing in the report is left unselected.
+ */
+function isWhollySelected(report) {
+  if (bundleSelection.has(report.id)) return true;
+  const documents = documentsFor(report.id);
+  if (documents.length === 0) return false;
+  return documents.every((entry) => bundleSelection.has(selectionKey(report.id, entry.slug)));
+}
+
+/**
+ * Replace the selection with every report in the current range, ticked at card
+ * level so each one contributes its whole document set -- the same expansion
+ * `selectedEntries` already performs for a card-level tick.
+ * @returns {void}
+ */
+function selectEveryReportInRange() {
+  bundleSelection.clear();
+  for (const report of reportsInRange()) bundleSelection.add(report.id);
 }
 
 export function selectedEntries() {
@@ -299,6 +352,39 @@ export function reportCard(report) {
   `;
 }
 
+// Shown while the checkbox is unavailable, so the reason is on screen rather
+// than left for staff to infer from a control that will not respond.
+const SELECT_ALL_HINT = "Set both From and To to package everything saved in a range.";
+
+/**
+ * Reflect the state of the "package everything in this range" checkbox: it is
+ * only offered once a complete range is specified, and it stays ticked only
+ * while the selection really does cover every report in that range.
+ * @returns {void}
+ */
+export function updateSelectAll() {
+  if (!hasDateRange()) {
+    selectAll.disabled = true;
+    selectAll.checked = false;
+    selectAllNote.textContent = SELECT_ALL_HINT;
+    return;
+  }
+
+  selectAll.disabled = false;
+  const inRange = reportsInRange();
+  selectAll.checked = inRange.length > 0 && inRange.every(isWhollySelected);
+  selectAllNote.textContent = "";
+}
+
+/**
+ * Bring both selection controls back in step after the selection changes.
+ * @returns {void}
+ */
+function refreshSelectionUi() {
+  updateSelectAll();
+  updateBundleBar();
+}
+
 // Reflect the current group selection in the bundle bar. Any selection change
 // re-arms the create button and hides a previously produced link, since the
 // selection it referred to has changed.
@@ -333,7 +419,7 @@ function syncBundleSelection() {
   for (const box of boxes) {
     box.checked = bundleSelection.has(selectionKey(box.dataset.reportId, box.dataset.documentSlug));
   }
-  updateBundleBar();
+  refreshSelectionUi();
 }
 
 // Publish every selected report behind one group URL: each report becomes an
@@ -484,26 +570,30 @@ export async function handleDeleteClick(button) {
 }
 
 export function render() {
-  const filtered = filterReportsByDate(allReports, {
-    from: fromInput.value,
-    to: toInput.value,
-  });
+  const filtered = reportsInRange();
 
   const hasFilter = Boolean(fromInput.value || toInput.value);
 
+  // Emptying the grid matters as much as hiding it: a selection left standing
+  // behind a hidden grid would still be counted and still be published, so the
+  // cards go and `syncBundleSelection` prunes what they were holding.
   if (allReports.length === 0) {
     resultCount.textContent = "";
+    grid.innerHTML = "";
     setStatus("No saved reports yet. Saved reports will appear here.");
+    syncBundleSelection();
     return;
   }
 
   if (filtered.length === 0) {
     resultCount.textContent = "";
+    grid.innerHTML = "";
     setStatus(
       hasFilter
         ? "No reports match the selected date range."
         : "No saved reports yet.",
     );
+    syncBundleSelection();
     return;
   }
 
@@ -511,6 +601,10 @@ export function render() {
     ? `${filtered.length} of ${allReports.length} reports`
     : `${allReports.length} ${allReports.length === 1 ? "report" : "reports"}`;
   grid.innerHTML = filtered.map(reportCard).join("");
+  // "Everything in this range" is a live statement, not a one-off action: while
+  // it is ticked, narrowing or widening the range re-selects against the range
+  // now on screen instead of silently keeping the old set.
+  if (selectAll.checked && hasDateRange()) selectEveryReportInRange();
   syncBundleSelection();
   setStatus("");
 }
@@ -591,10 +685,23 @@ grid.addEventListener("change", (event) => {
   } else {
     bundleSelection.delete(key);
   }
-  updateBundleBar();
+  // Unticking a single card is also the answer to "is everything selected?",
+  // so the select-all box has to be recomputed alongside the count.
+  refreshSelectionUi();
 });
 
 bundleCreate.addEventListener("click", handleBundleClick);
+
+selectAll.addEventListener("change", () => {
+  if (selectAll.disabled) return;
+  if (selectAll.checked) selectEveryReportInRange();
+  else bundleSelection.clear();
+  syncBundleSelection();
+});
+
+// The hint explains a control that starts out disabled, so put it on screen
+// before the first render rather than only once reports arrive.
+updateSelectAll();
 
 filterForm.addEventListener("input", render);
 filterForm.addEventListener("reset", () => {
@@ -610,6 +717,9 @@ onAuthStateChanged(auth, (user) => {
     loadedForUser = null;
     resultCount.textContent = "";
     grid.innerHTML = "";
+    // Signing out must not leave a selection behind for whoever signs in next.
+    bundleSelection.clear();
+    refreshSelectionUi();
     setStatus("Sign in to view your saved reports.");
   }
 });

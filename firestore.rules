@@ -1269,14 +1269,16 @@ service cloud.firestore {
     // report stays individually revocable, and an embedded-snapshot design was
     // measured to exceed the 1000-expressions-per-evaluation rules limit.
     // Identical access contract to single shares: public get, no list,
-    // staff-only create/delete, immutable. Keep the 100 cap in sync with
+    // staff-only create/delete, immutable. Keep the 250 cap in sync with
     // MAX_BUNDLE_REPORTS in src/lib/share.js.
     // Validated with a single joined-string match rather than one indexed check
     // per member. An unrolled per-index validator costs expressions in
     // proportion to the cap, which is what held the cap down to 25 documents --
     // roughly four saved reports, well under what staff actually group into one
     // customer package. This form costs the same handful of expressions at any
-    // size, so the cap is a product decision rather than a rules-budget one.
+    // size: 10,000 members were measured to validate as fast as 250. The cap
+    // below is therefore a product decision about how much the customer's
+    // browser is asked to rebuild, not a rules-budget one.
     //
     // The two checks are load-bearing together, and neither may be dropped:
     //   * the regex forces the joined string to be groups of exactly 32
@@ -1289,7 +1291,7 @@ service cloud.firestore {
     function isValidDocuAlignBundleTokens(value) {
       return value is list &&
         value.size() >= 1 &&
-        value.size() <= 100 &&
+        value.size() <= 250 &&
         value.join(',').size() == value.size() * 33 - 1 &&
         value.join(',').matches('^[A-Za-z0-9]{32}(,[A-Za-z0-9]{32})*$');
     }

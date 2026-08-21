@@ -160,8 +160,10 @@ Both halves are required. The regex forces the joined string into groups of
 exactly 32 alphanumerics separated by commas; the length check pins the number
 of groups to the list size, so no single member can smuggle a separator and
 pass as two tokens on its own. A non-string member makes `join()` error, which
-denies the write. Emulator probing put 250 members comfortably inside the
-budget, so the shipped cap of 100 is a product choice with headroom.
+denies the write. Emulator probing found no rules ceiling worth calling one:
+10,000 members validate as fast as 250, in the same ~130ms. The shipped cap of
+250 is therefore a product choice about how much the customer's browser is asked
+to rebuild, not a rules-budget one.
 
 ## Guidance for future rules changes
 
