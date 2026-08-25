@@ -375,11 +375,16 @@
 
   function drawText(page, operation, fonts, pdfLib) {
     const font = operation.bold ? fonts.bold : fonts.regular;
+    // A requirement read from the workbook can carry a comparison symbol the
+    // standard fonts cannot encode, so every value is drawn as font runs.
+    // Anything WinAnsi covers stays a single run placed exactly as before.
+    const pdfText = globalThis.docuAlignPdfText;
+    const runs = pdfText.fontRuns(operation.text, font, fonts.symbol);
     let x = operation.x;
     // Axis values are right-aligned so their digits end on a common edge, as
     // the reference sets them; without this they ragged-left instead.
     const slack = operation.width
-      ? operation.width - font.widthOfTextAtSize(operation.text, operation.size)
+      ? operation.width - pdfText.runsWidth(runs, operation.size)
       : 0;
     if (operation.align === "center") x += slack / 2;
     else if (operation.align === "right") x += slack;
@@ -391,7 +396,7 @@
       color: color(pdfLib, BLACK),
     };
     if (operation.rotate) options.rotate = pdfLib.degrees(operation.rotate);
-    page.drawText(operation.text, options);
+    pdfText.drawRuns(page, runs, options);
   }
 
   function numeric(value) {
@@ -756,6 +761,8 @@
     const fonts = {
       regular: await outputDocument.embedFont(pdfLib.StandardFonts.Helvetica),
       bold: await outputDocument.embedFont(pdfLib.StandardFonts.HelveticaBold),
+      // Carries the comparison symbols WinAnsi cannot encode; see pdf-text.js.
+      symbol: await outputDocument.embedFont(pdfLib.StandardFonts.Symbol),
     };
     let overlayReportCount = 0;
     let valueMaskCount = 0;

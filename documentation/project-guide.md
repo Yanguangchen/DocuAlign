@@ -62,6 +62,7 @@ The HTML pages contain an import map for direct browser module loading from the 
 | `src/rak-report-pdf.js` | Copies the 5-page `SampleOutput.pdf` reference and overlays a report model's mapped values/charts/images at measured coordinates |
 | `src/summary-pdf.js` | Copies the 1-page `sample_summary.pdf` reference and overlays the Summary worksheet's own rows |
 | `src/pdf-writer.js` | Generic renderer for `DS1`/`SB1`/`coral + org`, built from parsed worksheet data (no PDF library) |
+| `src/pdf-text.js` | Shared font-run splitting for the two pdf-lib overlay renderers; draws `≤`/`≥` from the Symbol font, which WinAnsi cannot encode |
 | `src/zip-writer.js` | Dependency-free ZIP archive builder; packs the export's separate PDFs into one download |
 | `src/pdf-merge.js` | Page-copying PDF merger used **only** by the package viewer's print-all button; its output is never saved or downloaded |
 | `src/save-report.js` | Persists report metadata and each exported document's own data to Firestore |
@@ -113,6 +114,7 @@ flowchart LR
         rakPdf[rak-report-pdf.js]
         summaryPdf[summary-pdf.js]
         pdfWriter[pdf-writer.js]
+        pdfText[pdf-text.js]
         zipWriter[zip-writer.js]
         pdfMerge[pdf-merge.js\nprint-all only]
     end
@@ -186,7 +188,10 @@ authenticated export and the public viewer's rebuild path:
 `report-mapping.js` applies the repeated-group coordinate contract;
 `rak-report-pdf.js` copies all five approved `SampleOutput.pdf` pages and
 `summary-pdf.js` copies the one `sample_summary.pdf` page, each overlaying
-only what a report's mapped values change. `pdf-writer.js` renders the
+only what a report's mapped values change; both draw their text through
+`pdf-text.js`, which hands the standard fonts' WinAnsi encoding the
+characters it has (`°` among them) and the Symbol font the ones it does
+not (`≤`, `≥`). `pdf-writer.js` renders the
 remaining `DS1`/`SB1`/`coral + org` documents from parsed grid data with no
 external PDF library. `zip-writer.js` packs the export's separate PDFs into
 one download; `pdf-merge.js` is reached **only** from the public viewer's

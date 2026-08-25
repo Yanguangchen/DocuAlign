@@ -36,8 +36,11 @@ function templateOptions(overrides = {}) {
 }
 
 describe("RAK sample-template PDF renderer", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Both pages load the shared text helper before the renderer, as `drawText`
+    // reads it from the global scope the way the classic scripts do.
+    await import("./pdf-text.js");
     delete globalThis.docuAlignWorkbookPdf;
     delete globalThis.docuAlignReportMapping;
     delete globalThis.docuAlignRakReportPdf;
@@ -241,6 +244,34 @@ describe("RAK sample-template PDF renderer", () => {
     // Signatures are identical across every report RAK issues, so the
     // reference's own are still correct and are deliberately kept.
     expect(plan[3].images.every((image) => image.evidence)).toBe(false);
+  });
+
+  it("draws a workbook requirement's comparison symbol from the Symbol font", async () => {
+    const reports = await sampleReports();
+    const sample = reports.find((report) => report.groupIndex === 1);
+    // A workbook is free to write this requirement the way the Summary writes
+    // its own limit -- as an underlined "<", which the reader resolves to a
+    // symbol Helvetica's WinAnsi encoding has no glyph for. pdf-lib rejects the
+    // page outright on such a character, so this renders at all only because
+    // the renderer hands that one character to the Symbol font.
+    const withSymbol = {
+      ...sample,
+      siltCoral: { ...sample.siltCoral, requirement: "\u2264 15%" },
+    };
+
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [withSymbol],
+      templateOptions(),
+    );
+    const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+
+    expect(output.getPageCount()).toBe(5);
+    const baseFonts = output.context
+      .enumerateIndirectObjects()
+      .map(([, object]) => object?.get?.(PDFLib.PDFName.of("BaseFont")))
+      .filter(Boolean)
+      .map(String);
+    expect(baseFonts).toContain("/Symbol");
   });
 
   it("combines all six workbook reports into 30 copied template pages", async () => {

@@ -201,6 +201,55 @@ describe("xlsx reader", () => {
     expect(cells.has("'CV1'!F1")).toBe(false);
   });
 
+  it("reads the symbols Excel writes as run formatting rather than characters", async () => {
+    // The Summary's own limits row: `\u2264` is an underlined `<` and each degree
+    // sign a superscript `o`, because Excel offers no keyboard route to either.
+    const runProperties = (extra) =>
+      `<rPr>${extra}<sz val="9"/><color indexed="8"/><rFont val="Arial"/></rPr>`;
+    const sheet = `<worksheet><sheetData><row>
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+      <c r="C1" t="s"><v>2</v></c>
+      <c r="D1" t="s"><v>3</v></c>
+      <c r="E1" t="inlineStr"><is><r>${runProperties('<b/><u/>')}<t>&gt;</t></r>` +
+      `<r>${runProperties('<b/>')}<t xml:space="preserve"> 32%</t></r></is></c>
+    </row></sheetData></worksheet>`;
+    const archive = buildZip([
+      ...minimalWorkbookParts(sheet),
+      {
+        name: "xl/sharedStrings.xml",
+        data:
+          "<sst>" +
+          `<si><r>${runProperties('<b/><u/>')}<t>&lt;</t></r>` +
+          `<r>${runProperties('<b/>')}<t xml:space="preserve"> 15%</t></r></si>` +
+          `<si><r><t>32</t></r>` +
+          `<r>${runProperties('<b/><vertAlign val="superscript"/>')}<t>o</t></r>` +
+          `<r>${runProperties('<b/>')}<t xml:space="preserve"> - 45</t></r>` +
+          `<r>${runProperties('<b/><vertAlign val="superscript"/>')}<t>O</t></r></si>` +
+          // Formatting only stands in for a symbol when the run is nothing but
+          // the stand-in letter: this is underlined prose, and a superscript
+          // ordinal is an ordinal.
+          `<si><r>${runProperties('<u/>')}<t>Not more than 15%</t></r></si>` +
+          `<si><r><t>4</t></r>` +
+          `<r>${runProperties('<vertAlign val="superscript"/>')}<t>th</t></r></si>` +
+          "</sst>",
+      },
+    ]);
+
+    const { cells } = await reader.readWorkbook(new Blob([archive]));
+    expect(cells.get("'CV1'!A1")).toBe("\u2264 15%");
+    expect(cells.get("'CV1'!B1")).toBe("32\u00b0 - 45\u00b0");
+    expect(cells.get("'CV1'!C1")).toBe("Not more than 15%");
+    expect(cells.get("'CV1'!D1")).toBe("4th");
+    expect(cells.get("'CV1'!E1")).toBe("\u2265 32%");
+  });
+
+  it("reads the sample workbook's Summary limits as the symbols they mean", () => {
+    const summary = parsed.sheets.get("Summary");
+    expect(summary.get("L17")).toBe("\u2264 15%");
+    expect(summary.get("M17")).toBe("32\u00b0 - 45\u00b0");
+  });
+
   it("skips worksheets whose part is absent and scans past a trailing comment", async () => {
     const archive = buildZip([
       {

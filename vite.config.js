@@ -12,6 +12,7 @@ const classicScripts = [
   "early-observability.js",
   "xlsx-reader.js",
   "pdf-writer.js",
+  "pdf-text.js",
   "summary-pdf.js",
   "report-mapping.js",
   "rak-report-pdf.js",

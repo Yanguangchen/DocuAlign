@@ -25,8 +25,11 @@ async function sampleSummaryCells() {
 }
 
 describe("Summary sample-template PDF renderer", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
+    // Both pages load the shared text helper before the renderer, as
+    // `fittedText` reads it from the global scope the classic scripts share.
+    await import("./pdf-text.js");
     delete globalThis.docuAlignSummaryPdf;
     delete globalThis.docuAlignSummaryTemplateBase64;
     delete globalThis.docuAlignXlsx;
@@ -79,8 +82,10 @@ describe("Summary sample-template PDF renderer", () => {
       "30-85",
       "60-100",
       "85-100",
-      "< 15%",
-      "32o - 45o",
+      // Excel spells these with formatting, not characters: an underlined "<"
+      // and superscript "o"s. The reference page reads them as symbols.
+      "\u2264 15%",
+      "32\u00b0 - 45\u00b0",
       "-",
       "30",
       "200",
@@ -215,6 +220,70 @@ describe("Summary sample-template PDF renderer", () => {
         templateSource: "injected",
       }),
     );
+  });
+
+  it("draws the limits row's comparison symbol from the Symbol font", async () => {
+    const cells = await sampleSummaryCells();
+    await import("./summary-pdf.js");
+
+    // Helvetica's WinAnsi encoding has no glyph for the symbol, and pdf-lib
+    // refuses the whole page rather than dropping it, so the renderer has to
+    // hand that one character to the Symbol font and keep the rest in place.
+    const drawn = [];
+    const page = {
+      drawRectangle: () => {},
+      drawText: (text, options) => drawn.push({ text, ...options }),
+    };
+    const recordingPdfLib = {
+      PDFDocument: {
+        load: async () => ({
+          getPageCount: () => 1,
+          getPage: () => page,
+          embedFont: async (name) => ({ name, widthOfTextAtSize: (text) => text.length * 4 }),
+          save: async () => new Uint8Array([37, 80, 68, 70]),
+        }),
+      },
+      StandardFonts: {
+        Helvetica: "Helvetica",
+        HelveticaBold: "Helvetica-Bold",
+        Symbol: "Symbol",
+      },
+      rgb: (red, green, blue) => `rgb(${red},${green},${blue})`,
+    };
+
+    await globalThis.docuAlignSummaryPdf.createDocument(cells, {
+      pdfLib: recordingPdfLib,
+      templateBytes,
+    });
+
+    const symbol = drawn.find((operation) => operation.text === "\u2264");
+    expect(symbol.font.name).toBe("Symbol");
+    // The rest of the limit stays in the bold face the reference sets, drawn
+    // from where the symbol ended rather than back at the cell's own origin.
+    const remainder = drawn.find((operation) => operation.text === " 15%");
+    expect(remainder.font.name).toBe("Helvetica-Bold");
+    // The stub measures every character at 4pt, so the symbol advances by 4.
+    expect(remainder.x).toBeCloseTo(symbol.x + 4, 5);
+    expect(remainder.y).toBe(symbol.y);
+
+    // The degree signs need no such help: WinAnsi encodes them directly.
+    const shearAngle = drawn.find((operation) => operation.text === "32\u00b0 - 45\u00b0");
+    expect(shearAngle.font.name).toBe("Helvetica-Bold");
+  });
+
+  it("renders the sample workbook's limits through the real standard fonts", async () => {
+    const cells = await sampleSummaryCells();
+    await import("./summary-pdf.js");
+
+    // Guards the encoding end to end: pdf-lib throws on an unencodable
+    // character, so a Summary carrying "\u2264 15%" fails outright without the
+    // Symbol fallback rather than degrading to a wrong limit.
+    const bytes = await globalThis.docuAlignSummaryPdf.createDocument(cells, {
+      pdfLib: PDFLib,
+      templateBytes,
+    });
+
+    expect((await PDFLib.PDFDocument.load(bytes)).getPageCount()).toBe(1);
   });
 
   it("rules the result body at the reference page's own weight", async () => {
