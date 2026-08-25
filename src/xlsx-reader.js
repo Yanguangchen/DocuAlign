@@ -385,6 +385,14 @@
   const RELATIONSHIP_TAG = /<Relationship\s[^>]*\/?>/g;
   const SHARED_ITEM = /<si>([\s\S]*?)<\/si>/g;
   const TEXT_RUN = /<t[^>]*>([\s\S]*?)<\/t>/g;
+  // A rich-text run's own `<rPr>` block immediately precedes its `<t>`, and is
+  // read off the fragment rather than captured: nesting the block's quantifier
+  // inside an optional group is exactly the shape a catastrophic backtrack
+  // needs, and `security/detect-unsafe-regex` rejects it on sight.
+  const RUN_PROPERTIES_OPEN = "<rPr>";
+  const RUN_PROPERTIES_CLOSE = "</rPr>";
+  const SUPERSCRIPT_RUN = /<vertAlign[^>]*val="superscript"/;
+  const UNDERLINED_RUN = /<u[\s/>]/;
   // The leading whitespace stays inside the capture so the attribute patterns,
   // which all anchor on a preceding space, match the first attribute too.
   const CELL = /<c(\s[^>]*?)\/>|<c(\s[^>]*?)>([\s\S]*?)<\/c>/g;
@@ -428,13 +436,59 @@
   }
 
   /**
+   * Symbols this lab's workbooks write as run formatting rather than as the
+   * character itself, keyed by the formatting that stands in for them.
+   *
+   * Excel offers no keyboard route to either symbol, so the sheets spell a
+   * degree sign as a superscript `o` and `<=` as an underlined `<`. Both read
+   * back as the bare letter, which is why the Summary's limits row rendered
+   * `32o - 45o` and `< 15%` where the approved reference reads `32° - 45°`
+   * and `≤ 15%`. The run's formatting is the only record of what was meant,
+   * so it is resolved here, once, for every renderer downstream.
+   */
+  const SUPERSCRIPT_SYMBOLS = new Map([["o", "°"], ["O", "°"]]);
+  const UNDERLINED_SYMBOLS = new Map([["<", "≤"], [">", "≥"]]);
+
+  /**
+   * Read the formatting of the run whose text starts at `index`.
+   * @param {string} fragment - XML fragment holding the run.
+   * @param {number} index - Offset of the run's `<t>` element.
+   * @returns {string|undefined} The run's raw `<rPr>` contents, if it has any.
+   */
+  function runProperties(fragment, index) {
+    const before = fragment.slice(0, index);
+    if (!before.endsWith(RUN_PROPERTIES_CLOSE)) return undefined;
+    const start = before.lastIndexOf(RUN_PROPERTIES_OPEN) + RUN_PROPERTIES_OPEN.length;
+    return before.slice(start, -RUN_PROPERTIES_CLOSE.length);
+  }
+
+  /**
+   * Resolve the symbol one formatted run stands for.
+   *
+   * Only a run that is nothing but the stand-in letter counts: an underlined
+   * sentence is underlined text, not a comparison operator.
+   * @param {string} text - The run's decoded text.
+   * @param {string|undefined} properties - The run's raw `<rPr>` contents.
+   * @returns {string|null} The symbol the run means, or null when it means itself.
+   */
+  function runSymbol(text, properties) {
+    if (properties === undefined) return null;
+    if (SUPERSCRIPT_RUN.test(properties)) return SUPERSCRIPT_SYMBOLS.get(text) ?? null;
+    if (UNDERLINED_RUN.test(properties)) return UNDERLINED_SYMBOLS.get(text) ?? null;
+    return null;
+  }
+
+  /**
    * Concatenate every text run inside an XML fragment.
    * @param {string} fragment - XML fragment containing `<t>` elements.
    * @returns {string} Combined decoded text.
    */
   function readTextRuns(fragment) {
     let combined = "";
-    for (const run of fragment.matchAll(TEXT_RUN)) combined += decodeEntities(run[1]);
+    for (const run of fragment.matchAll(TEXT_RUN)) {
+      const text = decodeEntities(run[1]);
+      combined += runSymbol(text, runProperties(fragment, run.index)) ?? text;
+    }
     return combined;
   }
 

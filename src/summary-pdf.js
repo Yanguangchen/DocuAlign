@@ -311,6 +311,10 @@
 
   /**
    * Draw fitted text inside a bounded horizontal region.
+   *
+   * The text is split into font runs first, so a limit carrying `\u2264` is
+   * measured, fitted, and centred as the reader read it. Values without such a
+   * character stay one run and are drawn exactly as before.
    * @param {object} page - pdf-lib page.
    * @param {string} text - Text to draw.
    * @param {number} left - Region left edge.
@@ -320,21 +324,24 @@
    * @param {number} size - Preferred font size.
    * @param {"left"|"center"} align - Horizontal alignment.
    * @param {object} pdfLib - pdf-lib API.
+   * @param {object} symbolFont - Embedded pdf-lib Symbol font.
    * @returns {void}
    */
-  function fittedText(page, text, left, right, y, font, size, align, pdfLib) {
+  function fittedText(page, text, left, right, y, font, size, align, pdfLib, symbolFont) {
     const value = String(text);
     if (value === "") return;
+    const pdfText = globalThis.docuAlignPdfText;
+    const runs = pdfText.fontRuns(value, font, symbolFont);
     const available = Math.max(1, right - left - 2);
-    const naturalWidth = font.widthOfTextAtSize(value, size);
+    const naturalWidth = pdfText.runsWidth(runs, size);
     const fittedSize = naturalWidth > available
       ? Math.max(4.5, size * (available / naturalWidth))
       : size;
-    const width = font.widthOfTextAtSize(value, fittedSize);
+    const width = pdfText.runsWidth(runs, fittedSize);
     const x = align === "center"
       ? left + Math.max(1, (right - left - width) / 2)
       : left + 1;
-    page.drawText(value, {
+    pdfText.drawRuns(page, runs, {
       x,
       y,
       size: fittedSize,
@@ -366,11 +373,11 @@
 
     leftRows.forEach(([text, y]) => {
       whiteout(page, pdfLib, 172, y - 2, 310, 10.4);
-      fittedText(page, text, 173.4, 482, y, fonts.regular, 8.28, "left", pdfLib);
+      fittedText(page, text, 173.4, 482, y, fonts.regular, 8.28, "left", pdfLib, fonts.symbol);
     });
     rightRows.forEach(([text, y, font]) => {
       whiteout(page, pdfLib, 597, y - 2, 116, 10.4);
-      fittedText(page, text, 598, 713, y, font, 8.28, "left", pdfLib);
+      fittedText(page, text, 598, 713, y, font, 8.28, "left", pdfLib, fonts.symbol);
     });
   }
 
@@ -412,14 +419,16 @@
       // 363.55 clipped 0.15pt off its top, rendering it at 0.75 where every
       // other rule in the table is 0.88.
       whiteout(page, pdfLib, left, 363.7, right - left, 12.45);
-      fittedText(page, text, left, right, 367.66, fonts.regular, 7.44, "center", pdfLib);
+      fittedText(
+        page, text, left, right, 367.66, fonts.regular, 7.44, "center", pdfLib, fonts.symbol,
+      );
     });
 
     plan.limits.forEach((text, index) => {
       const slot = index + 3;
       const { left, right } = cellInterior(slot);
       whiteout(page, pdfLib, left, 352.65, right - left, 9.7);
-      fittedText(page, text, left, right, 354.58, fonts.bold, 7.44, "center", pdfLib);
+      fittedText(page, text, left, right, 354.58, fonts.bold, 7.44, "center", pdfLib, fonts.symbol);
     });
   }
 
@@ -492,7 +501,7 @@
       row.forEach((text, slot) => {
         const font = slot === 2 ? fonts.bold : fonts.regular;
         const { left, right } = cellInterior(slot);
-        fittedText(page, text, left, right, baseline, font, 7.44, "center", pdfLib);
+        fittedText(page, text, left, right, baseline, font, 7.44, "center", pdfLib, fonts.symbol);
       });
     });
   }
@@ -552,6 +561,9 @@
     const fonts = {
       regular: await document.embedFont(pdfLib.StandardFonts.Helvetica),
       bold: await document.embedFont(pdfLib.StandardFonts.HelveticaBold),
+      // Draws the comparison symbols in the limits row; WinAnsi has no glyph
+      // for them and pdf-lib rejects the page rather than dropping one.
+      symbol: await document.embedFont(pdfLib.StandardFonts.Symbol),
     };
     const page = document.getPage(0);
     drawMetadata(page, plan.metadata, fonts, pdfLib);
