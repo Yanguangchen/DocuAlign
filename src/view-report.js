@@ -42,6 +42,7 @@ const bundleName = document.querySelector("#share-bundle-name");
 const bundleCount = document.querySelector("#share-bundle-count");
 const bundlePublished = document.querySelector("#share-bundle-published");
 const bundleList = document.querySelector("#share-bundle-list");
+const bundleToggle = document.querySelector("#share-bundle-toggle");
 const bundleDownload = document.querySelector("#share-bundle-download");
 const bundlePrint = document.querySelector("#share-bundle-print");
 const bundleDownloadNote = document.querySelector("#share-bundle-download-note");
@@ -501,6 +502,17 @@ function safeFileName(value) {
 function packageEntryName(share, index, used = new Set()) {
   const preferred = safeFileName(share?.reportName)
     || `document-${String(index + 1).padStart(2, "0")}`;
+  return `${claimName(preferred, used)}.pdf`;
+}
+
+/**
+ * Claim one name inside an archive, numbering it when something already holds
+ * it, so nothing an archive contains can quietly overwrite anything else.
+ * @param {string} preferred - The name to use if it is free.
+ * @param {Set<string>} used - Names already claimed, added to in place.
+ * @returns {string} The claimed name.
+ */
+function claimName(preferred, used) {
   let name = preferred;
   let attempt = 1;
   while (used.has(name)) {
@@ -508,14 +520,15 @@ function packageEntryName(share, index, used = new Set()) {
     name = `${preferred} (${attempt})`;
   }
   used.add(name);
-  return `${name}.pdf`;
+  return name;
 }
 
 /**
- * The name the package's archive downloads under, and of the folder inside it.
+ * The name of the package's folder inside the archive, and of the archive
+ * itself when that package is the only one in it.
  *
  * Every document in an exported package is named for the package it belongs to
- * -- `X-2026-1338 (AV-2620N_RAK1)` -- so the archive takes that same name
+ * -- `X-2026-1338 (AV-2620N_RAK1)` -- so the folder takes that same name
  * without the per-document `_RAK…` part. A package whose documents were not
  * named that way falls back to the name the sender gave it.
  * @param {Array<Object>} shares - The package's documents.
@@ -566,10 +579,10 @@ function packagesOf(shares) {
 /**
  * The name a multi-package parent archive downloads under.
  *
- * Named by joining the complete child archive names, so both the job reference
- * and voyage number remain visible. Beyond a few that would run past what a
- * file name can usefully hold, the rest are counted instead of listed.
- * @param {Array<string>} packageNames - Child ZIP names without their extension.
+ * Named by joining the complete package folder names, so both the job
+ * reference and voyage number remain visible. Beyond a few that would run past
+ * what a file name can usefully hold, the rest are counted instead of listed.
+ * @param {Array<string>} packageNames - The folder names inside the archive.
  * @returns {string} A file name safe to save under.
  */
 function parentArchiveName(packageNames) {
@@ -609,9 +622,16 @@ function saveFile(bytes, name, mimeType) {
  * only a wrapper, so the recipient gets one download and one browser prompt
  * rather than the burst of them a browser throttles and asks to allow. Entries
  * are named into a folder so the archive unpacks tidily, which is what the
- * workspace's own export does. A document that cannot be rebuilt is left out
- * and named in the button's status line rather than failing the rest of the
- * package.
+ * workspace's own export does, and a link carrying several packages gives each
+ * one a folder of its own inside that same archive. A document that cannot be
+ * rebuilt is left out and named in the button's status line rather than
+ * failing the rest of the package.
+ *
+ * Packages are folders and never archives of their own: a ZIP inside a ZIP has
+ * to be extracted twice before a single PDF can be opened, and the file
+ * managers that preview an archive in place will not look inside the child at
+ * all, so the documents the recipient came for stop being reachable by
+ * double-clicking.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<{saved: number, failed: string[], archiveName: string}>} What was downloaded.
  */
@@ -620,64 +640,40 @@ async function downloadEveryDocument(sharedBundle) {
   const packages = packagesOf(ordered);
   const failed = [];
 
-  // Build each package's own entries once. A single package keeps the layout
-  // it has always had -- its documents inside a folder named for it -- while
-  // several are each sealed into an archive of their own below, where that
-  // folder would only repeat the archive's name.
-  const nested = packages.length > 1;
   const built = [];
   for (const shares of packages) {
     const baseName = packageArchiveName(shares, sharedBundle.bundleName);
     const claimed = new Set();
-    const entries = [];
+    const documents = [];
     for (const [index, share] of shares.entries()) {
       try {
         const data = await sharedDocumentBytes(share);
-        const entryName = packageEntryName(share, index, claimed);
-        entries.push({ name: nested ? entryName : `${baseName}/${entryName}`, data });
+        documents.push({ name: packageEntryName(share, index, claimed), data });
       } catch (error) {
         logDocumentRebuildFailure(error);
         failed.push(share?.reportName || "Untitled report");
       }
     }
-    if (entries.length > 0) built.push({ baseName, entries });
+    if (documents.length > 0) built.push({ baseName, documents });
   }
 
   if (built.length === 0) throw new Error("No document in this package could be rebuilt.");
-  const saved = built.reduce((total, entry) => total + entry.entries.length, 0);
 
-  if (!nested || built.length === 1) {
-    // One package's worth of documents, however many packages were asked for:
-    // wrapping a lone archive inside another would add a click and tell the
-    // recipient nothing.
-    const [only] = built;
-    const flat = nested
-      ? only.entries.map((entry) => ({ ...entry, name: `${only.baseName}/${entry.name}` }))
-      : only.entries;
-    const archiveName = `${only.baseName}.zip`;
-    saveFile(globalThis.docuAlignZip.createArchive(flat), archiveName, "application/zip");
-    return { saved, failed, archiveName };
-  }
-
-  // Each package becomes an archive of its own, and those go into the parent,
-  // so the recipient still takes one download but unpacks the packages apart.
-  const claimedArchives = new Set();
-  const children = built.map(({ baseName, entries }) => {
-    let name = `${baseName}.zip`;
-    let attempt = 1;
-    while (claimedArchives.has(name)) {
-      attempt += 1;
-      name = `${baseName} (${attempt}).zip`;
-    }
-    claimedArchives.add(name);
-    return { name, data: globalThis.docuAlignZip.createArchive(entries) };
+  // Folders are claimed only among the packages that survived, and only once
+  // their documents are in hand: a package that rebuilt nothing must not push
+  // the one after it to a numbered folder for a name it never used.
+  const claimedFolders = new Set();
+  const entries = built.flatMap(({ baseName, documents }) => {
+    const folder = claimName(baseName, claimedFolders);
+    return documents.map((entry) => ({ ...entry, name: `${folder}/${entry.name}` }));
   });
 
-  const archiveName = `${parentArchiveName(
-    children.map((entry) => entry.name.slice(0, -".zip".length)),
-  )}.zip`;
-  saveFile(globalThis.docuAlignZip.createArchive(children), archiveName, "application/zip");
-  return { saved, failed, archiveName };
+  // One surviving package names the archive after itself, however many were
+  // asked for; several are named by joining their folders.
+  const folders = [...claimedFolders];
+  const archiveName = `${folders.length === 1 ? folders[0] : parentArchiveName(folders)}.zip`;
+  saveFile(globalThis.docuAlignZip.createArchive(entries), archiveName, "application/zip");
+  return { saved: entries.length, failed, archiveName };
 }
 
 /**
@@ -775,8 +771,31 @@ async function bundleReportItem(report) {
 }
 
 /**
+ * Show or hide the per-document list, keeping the button that controls it in
+ * step with what it now does.
+ *
+ * The label says what a click will do, not what the list is currently showing,
+ * which is what a recipient reading the button expects of it. `aria-expanded`
+ * carries the opposite -- the list's own state -- for a screen reader.
+ * @param {boolean} visible - Whether the per-document list is shown.
+ * @returns {void}
+ */
+function setBundleListVisible(visible) {
+  bundleList.hidden = !visible;
+  bundleToggle.setAttribute("aria-expanded", String(visible));
+  bundleToggle.textContent = visible
+    ? "Hide individual documents"
+    : "Show individual documents";
+}
+
+/**
  * Render a package link: every document listed separately, plus one button
  * that downloads all of them as one ZIP and one that prints them all.
+ *
+ * The per-document list starts collapsed. A recipient opening a package link
+ * has come for the reports as a set, and the two buttons above deliver exactly
+ * that; a column of a dozen cards ahead of them buries the action most people
+ * want. The list is a disclosure away for anyone who wants one document.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<void>} Settles once the panel has rendered.
  */
@@ -791,6 +810,8 @@ async function renderSharedBundle(sharedBundle) {
     : "Date unavailable";
   const reportItems = await Promise.all(ordered.map(bundleReportItem));
   bundleList.replaceChildren(...reportItems);
+  setBundleListVisible(false);
+  bundleToggle.onclick = () => setBundleListVisible(bundleList.hidden);
 
   bundleDownloadNote.textContent = "";
   bundleDownloadNote.hidden = true;
