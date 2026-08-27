@@ -42,6 +42,7 @@ const bundleName = document.querySelector("#share-bundle-name");
 const bundleCount = document.querySelector("#share-bundle-count");
 const bundlePublished = document.querySelector("#share-bundle-published");
 const bundleList = document.querySelector("#share-bundle-list");
+const bundleToggle = document.querySelector("#share-bundle-toggle");
 const bundleDownload = document.querySelector("#share-bundle-download");
 const bundlePrint = document.querySelector("#share-bundle-print");
 const bundleDownloadNote = document.querySelector("#share-bundle-download-note");
@@ -770,8 +771,31 @@ async function bundleReportItem(report) {
 }
 
 /**
+ * Show or hide the per-document list, keeping the button that controls it in
+ * step with what it now does.
+ *
+ * The label says what a click will do, not what the list is currently showing,
+ * which is what a recipient reading the button expects of it. `aria-expanded`
+ * carries the opposite -- the list's own state -- for a screen reader.
+ * @param {boolean} visible - Whether the per-document list is shown.
+ * @returns {void}
+ */
+function setBundleListVisible(visible) {
+  bundleList.hidden = !visible;
+  bundleToggle.setAttribute("aria-expanded", String(visible));
+  bundleToggle.textContent = visible
+    ? "Hide individual documents"
+    : "Show individual documents";
+}
+
+/**
  * Render a package link: every document listed separately, plus one button
  * that downloads all of them as one ZIP and one that prints them all.
+ *
+ * The per-document list starts collapsed. A recipient opening a package link
+ * has come for the reports as a set, and the two buttons above deliver exactly
+ * that; a column of a dozen cards ahead of them buries the action most people
+ * want. The list is a disclosure away for anyone who wants one document.
  * @param {Object} sharedBundle - The resolved bundle.
  * @returns {Promise<void>} Settles once the panel has rendered.
  */
@@ -786,6 +810,8 @@ async function renderSharedBundle(sharedBundle) {
     : "Date unavailable";
   const reportItems = await Promise.all(ordered.map(bundleReportItem));
   bundleList.replaceChildren(...reportItems);
+  setBundleListVisible(false);
+  bundleToggle.onclick = () => setBundleListVisible(bundleList.hidden);
 
   bundleDownloadNote.textContent = "";
   bundleDownloadNote.hidden = true;

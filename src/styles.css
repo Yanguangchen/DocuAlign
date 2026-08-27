@@ -1875,6 +1875,44 @@ a:focus-visible {
   visibility: hidden;
 }
 
+/* A disclosure, not an action: the package's own two buttons are what most
+   recipients want, and the per-document cards are the long tail behind them.
+   Kept quiet so it never competes with the download and print buttons above. */
+.share-bundle-toggle {
+  align-self: flex-start;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-underline-offset: 3px;
+}
+
+.share-bundle-toggle:hover,
+.share-bundle-toggle:focus-visible {
+  text-decoration: underline;
+}
+
+/* Turns to point down once the list it controls is open. */
+.share-bundle-toggle::before {
+  content: "";
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 8px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  vertical-align: middle;
+  transition: transform var(--hover-in) var(--ease);
+}
+
+.share-bundle-toggle[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
 .share-bundle-list {
   display: flex;
   flex-direction: column;

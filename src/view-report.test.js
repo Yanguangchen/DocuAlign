@@ -89,7 +89,13 @@ describe("view-report module", () => {
         <button id="share-bundle-download" type="button"></button>
         <button id="share-bundle-print" type="button"></button>
         <p id="share-bundle-download-note" hidden></p>
-        <ul id="share-bundle-list"></ul>
+        <button
+          id="share-bundle-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="share-bundle-list"
+        >Show individual documents</button>
+        <ul id="share-bundle-list" hidden></ul>
       </article>
     `;
   });
@@ -872,6 +878,43 @@ describe("view-report module", () => {
       expect(document.querySelectorAll("#share-bundle-list a")[0].getAttribute("rel"))
         .toBe("noopener");
       delete globalThis.docuAlignRakReportPdf;
+    });
+
+    it("keeps the per-document list collapsed until the recipient asks for it", async () => {
+      await stubPackageRuntime();
+      mockFetchSharedBundle.mockResolvedValueOnce(bundle({
+        reports: [
+          { reportId: "doc-1", reportName: "Report one", status: "saved", pdfUrl: null },
+          { reportId: "doc-2", reportName: "Report two", status: "saved", pdfUrl: null },
+        ],
+      }));
+      const { initViewer } = await import("./view-report.js");
+
+      await initViewer(`?bundle=${VALID_TOKEN}`);
+
+      const list = document.querySelector("#share-bundle-list");
+      const toggle = document.querySelector("#share-bundle-toggle");
+
+      // Collapsed on arrival: the download and print buttons are what a
+      // package link is for, and a column of cards above them buries both.
+      // The cards are built regardless, so opening the list costs no wait.
+      expect(list.hidden).toBe(true);
+      expect(list.querySelectorAll("li")).toHaveLength(2);
+      expect(toggle.textContent).toBe("Show individual documents");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      // The count stays visible while the list is closed, so the recipient can
+      // still see how much the package holds.
+      expect(document.querySelector("#share-bundle-count").textContent).toBe("2 documents");
+
+      toggle.click();
+      expect(list.hidden).toBe(false);
+      expect(toggle.textContent).toBe("Hide individual documents");
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+      toggle.click();
+      expect(list.hidden).toBe(true);
+      expect(toggle.textContent).toBe("Show individual documents");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
     });
 
     it("downloads every packaged document as one ZIP from a single button", async () => {
