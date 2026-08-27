@@ -988,7 +988,7 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("nests each package in its own ZIP when a link carries more than one", async () => {
+    it("gives each package its own folder when a link carries more than one", async () => {
       const { blobs } = await stubPackageRuntime();
       globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
       globalThis.docuAlignRakReportPdf = {
@@ -1031,27 +1031,24 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      // One download still, named by joining the complete names of the child
-      // package archives, and holding one archive per package rather than a
-      // single flat pile of documents.
+      // One download still, named by joining the complete package folder
+      // names, and holding one folder per package rather than a single flat
+      // pile of documents.
       expect(anchorClick.mock.contexts[0].download).toBe(
         "X-2026-522 (JH99-96N) + X-2026-113 (JH99-999N).zip",
       );
       const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
-      expect(parent.map((entry) => entry.name)).toEqual([
-        "X-2026-522 (JH99-96N).zip",
-        "X-2026-113 (JH99-999N).zip",
-      ]);
 
-      // Each child holds its own package's documents at its root -- no folder
-      // repeating the archive's own name -- and they are real PDFs, not
-      // placeholders, which the marker width confirms.
-      const [first, second] = parent;
-      expect(readZipEntries(first.data).map((entry) => entry.name))
-        .toEqual(["X-2026-522 (JH99-96N_RAK1).pdf"]);
-      expect(readZipEntries(second.data).map((entry) => entry.name))
-        .toEqual(["X-2026-113 (JH99-999N_RAK1).pdf"]);
-      const firstPdf = await PDFLib.PDFDocument.load(readZipEntries(first.data)[0].data);
+      // Every document sits in its package's folder and is reachable by
+      // opening the archive once: nothing inside is an archive of its own.
+      expect(parent.map((entry) => entry.name)).toEqual([
+        "X-2026-522 (JH99-96N)/X-2026-522 (JH99-96N_RAK1).pdf",
+        "X-2026-113 (JH99-999N)/X-2026-113 (JH99-999N_RAK1).pdf",
+      ]);
+      expect(parent.some((entry) => entry.name.endsWith(".zip"))).toBe(false);
+
+      // They are real PDFs, not placeholders, which the marker width confirms.
+      const firstPdf = await PDFLib.PDFDocument.load(parent[0].data);
       expect(Math.round(firstPdf.getPage(0).getWidth())).toBe(601);
 
       await vi.waitFor(() =>
@@ -1062,13 +1059,13 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("counts the packages a parent archive cannot name, and keeps their ZIPs apart", async () => {
+    it("counts the packages a parent archive cannot name, and keeps their folders apart", async () => {
       const { blobs } = await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
       // Five packages: too many job references to list in a file name. Two of
-      // them share a reference -- the slug-collision case -- so their child
-      // archives would collide unless numbered.
+      // them share a reference -- the slug-collision case -- so their folders
+      // would merge into one unless numbered.
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           ...[1, 2, 3, 4].map((n) => ({
@@ -1096,15 +1093,15 @@ describe("view-report module", () => {
       );
       const parent = readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()));
       expect(parent.map((entry) => entry.name)).toEqual([
-        "X-2026-0001 (AV-2621N).zip",
-        "X-2026-0002 (AV-2622N).zip",
-        "X-2026-0003 (AV-2623N).zip",
-        "X-2026-0004 (AV-2624N).zip",
-        "X-2026-0001 (AV-2621N) (2).zip",
+        "X-2026-0001 (AV-2621N)/X-2026-0001 (AV-2621N_RAK1).pdf",
+        "X-2026-0002 (AV-2622N)/X-2026-0002 (AV-2622N_RAK1).pdf",
+        "X-2026-0003 (AV-2623N)/X-2026-0003 (AV-2623N_RAK1).pdf",
+        "X-2026-0004 (AV-2624N)/X-2026-0004 (AV-2624N_RAK1).pdf",
+        "X-2026-0001 (AV-2621N) (2)/X-2026-0001 (AV-2621N_RAK1).pdf",
       ]);
     });
 
-    it("does not nest when only one of several packages survives", async () => {
+    it("names the archive after the one package that survives of several", async () => {
       const { blobs } = await stubPackageRuntime();
       globalThis.docuAlignSummaryPdf = { createDocument: vi.fn(async () => markerPdf(500)) };
       globalThis.docuAlignRakReportPdf = {
@@ -1140,8 +1137,8 @@ describe("view-report module", () => {
       document.querySelector("#share-bundle-download").click();
       await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledOnce(), { timeout: 5000 });
 
-      // Two packages were asked for and one came back, so there is nothing to
-      // nest: it downloads as that package's own archive, folder and all.
+      // Two packages were asked for and one came back, so the archive is named
+      // after that package rather than joining a list of one.
       expect(anchorClick.mock.contexts[0].download).toBe("X-2026-1338 (AV-2620N).zip");
       expect((await savedDocuments(blobs)).map((entry) => entry.name)).toEqual([
         "X-2026-1338 (AV-2620N)/X-2026-1338 (AV-2620N_RAK SUMMARY).pdf",
@@ -1154,12 +1151,12 @@ describe("view-report module", () => {
       delete globalThis.docuAlignRakReportPdf;
     });
 
-    it("joins the numbered child ZIP names when packages use the sender's link name", async () => {
+    it("joins the numbered folder names when packages use the sender's link name", async () => {
       const { blobs } = await stubPackageRuntime();
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
       // Two packages, neither named the lab's way, share the sender's link
-      // name. The second child ZIP is numbered, and the parent names both.
+      // name. The second folder is numbered, and the parent names both.
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         reports: [
           { reportId: "report-1", reportName: "Legacy one", status: "saved", pdfUrl: null },
@@ -1178,7 +1175,10 @@ describe("view-report module", () => {
       expect(
         readZipEntries(new Uint8Array(await blobs.at(-1).arrayBuffer()))
           .map((entry) => entry.name),
-      ).toEqual(["Customer pack.zip", "Customer pack (2).zip"]);
+      ).toEqual([
+        "Customer pack/Legacy one.pdf",
+        "Customer pack (2)/Legacy two.pdf",
+      ]);
     });
 
     it("uses numbered document fallbacks when neither package has a usable name", async () => {
@@ -1186,7 +1186,7 @@ describe("view-report module", () => {
       const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
         .mockImplementation(() => {});
       // No package names and a link name with nothing savable in it: each
-      // child receives the `documents` fallback and the parent names both.
+      // folder receives the `documents` fallback and the parent names both.
       mockFetchSharedBundle.mockResolvedValueOnce(bundle({
         bundleName: "***",
         reports: [
