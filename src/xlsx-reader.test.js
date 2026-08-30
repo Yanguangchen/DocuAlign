@@ -387,8 +387,81 @@ describe("xlsx reader", () => {
     expect(signature.mimeType).toBe("image/png");
     expect([...signature.bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
 
+    // The authorised signature is a screenshot that caught the neighbouring
+    // cell's gridline down its right edge and along its bottom. Excel hides
+    // that edge; a reader that drops the crop draws it back, as a grey rule
+    // across the sign-off line of a signed report.
+    const authorised = images.find((image) => image.row === 129 && image.column === 23);
+    expect(authorised.crop).toEqual({
+      left: 0,
+      top: 0,
+      right: 0.11923,
+      bottom: 0.08152,
+    });
+    // Nothing else in this workbook is cropped, and an uncropped picture says
+    // so by carrying no crop at all.
+    expect(signature.crop).toBeUndefined();
+    expect(photos.every((photo) => photo.crop === undefined)).toBe(true);
+
     // Sheets without pictures still report an empty list rather than nothing.
     expect(parsed.images.get("coral + org")).toEqual([]);
+  });
+
+  it("reports only a crop Excel could have written", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+    const anchor = (column, sourceRectangle) =>
+      `<twoCellAnchor><from><col>${column}</col><row>3</row></from>`
+      + '<pic><nvPicPr><cNvPr name="Signature"/></nvPicPr><blipFill>'
+      + `<blip r:embed="rId10"/>${sourceRectangle}</blipFill></pic></twoCellAnchor>`;
+    const drawing = [
+      "<xdr:wsDr>",
+      // Cropped the way this lab's authorised signature is.
+      anchor(0, '<a:srcRect r="11923" b="8152"/>'),
+      // Every edge trimmed, prefixless, as a drawing part may also write it.
+      anchor(1, '<srcRect l="1000" t="2000" r="3000" b="4000"/>'),
+      // An empty srcRect hides nothing, so the picture is drawn whole.
+      anchor(2, "<a:srcRect/>"),
+      // A negative edge is OOXML padding rather than a crop.
+      anchor(3, '<a:srcRect l="-4000"/>'),
+      // Opposing edges that would leave nothing of the picture to draw.
+      anchor(4, '<a:srcRect l="60000" r="45000"/>'),
+      anchor(5, '<a:srcRect t="52000" b="50000"/>'),
+      // No srcRect at all.
+      anchor(6, ""),
+      "</xdr:wsDr>",
+    ].join("");
+
+    const archive = buildZip([
+      ...minimalWorkbookParts("<worksheet><sheetData/></worksheet>"),
+      {
+        name: "xl/worksheets/_rels/sheet1.xml.rels",
+        data: '<Relationships><Relationship Id="rId5" '
+          + 'Target="../drawings/drawing1.xml"/></Relationships>',
+      },
+      { name: "xl/drawings/drawing1.xml", data: drawing },
+      {
+        name: "xl/drawings/_rels/drawing1.xml.rels",
+        data: '<Relationships>'
+          + '<Relationship Id="rId10" Target="../media/signature.png"/>'
+          + "</Relationships>",
+      },
+      { name: "xl/media/signature.png", data: png },
+    ]);
+
+    const workbook = await reader.readWorkbook(new Blob([archive]));
+    const crops = workbook.images.get("CV1").map((image) => image.crop);
+
+    expect(crops).toEqual([
+      { left: 0, top: 0, right: 0.11923, bottom: 0.08152 },
+      { left: 0.01, top: 0.02, right: 0.03, bottom: 0.04 },
+      // Everything a crop cannot be draws the picture whole, exactly as a
+      // picture Excel never cropped does.
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 
   it("tolerates the picture shapes a hand-built drawing part can take", async () => {

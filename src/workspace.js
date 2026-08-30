@@ -785,6 +785,10 @@ function withoutPictureBytes(report, groupIndex, pictureUrls) {
       column: asset.column,
       mimeType: asset.mimeType,
     };
+    // The uploaded bytes are the whole picture, including the edge Excel
+    // crops away, so the crop has to travel with them: a share that dropped it
+    // would draw the hidden edge the downloaded report does not.
+    if (asset.crop) described.crop = asset.crop;
     // Absent when the picture had no bytes, or its upload failed; the viewer
     // then keeps the reference artwork for that one image.
     if (url) described.url = url;

@@ -719,6 +719,16 @@ describe("workspace controller", () => {
       expect(photo.bytes).toBeUndefined();
     });
     expect(firstModel.report.assets.preparedSignature.bytes).toBeUndefined();
+    // The uploaded bytes are the whole picture, including the edge Excel
+    // crops away, so the crop has to travel with them -- a share that dropped
+    // it would draw a grey rule across the sign-off the download does not.
+    expect(firstModel.report.assets.authorisedSignature.crop).toEqual({
+      left: 0,
+      top: 0,
+      right: 0.11923,
+      bottom: 0.08152,
+    });
+    expect(firstModel.report.assets.preparedSignature.crop).toBeUndefined();
 
     document.querySelector("#pdf-export").click();
     await vi.waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());

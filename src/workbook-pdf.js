@@ -7,6 +7,15 @@
 (() => {
   const OFFICE_RELATIONSHIPS =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  /** `<a:srcRect>` names its edges with single letters. */
+  const CROP_ATTRIBUTES = Object.freeze({
+    left: "l",
+    top: "t",
+    right: "r",
+    bottom: "b",
+  });
+  /** `<a:srcRect>` states each edge in thousandths of a percent. */
+  const CROP_UNITS_PER_WHOLE = 100000;
   const PDF_OPTIONS = Object.freeze({
     orientation: "landscape",
     unit: "mm",
@@ -120,6 +129,37 @@
     return null;
   }
 
+  /**
+   * The crop Excel applies to one anchored picture, as fractions of the source.
+   *
+   * Excel hides a trimmed edge rather than removing it: the media part still
+   * holds the whole picture and `<a:srcRect>` records what is shown. A reader
+   * that ignores it draws an edge the workbook does not, which on this lab's
+   * authorised signature is a grey rule across the sign-off line. The same
+   * rule is read by `readPictureCrop` in `src/xlsx-reader.js`; the two readers
+   * must agree, since either can produce the model the report renders from.
+   *
+   * Only a crop Excel could have written is reported -- every edge
+   * non-negative, each opposing pair leaving something visible -- so anything
+   * else draws the picture whole, exactly as before.
+   * @param {Element|null} anchor - One drawing anchor.
+   * @returns {{left: number, top: number, right: number, bottom: number}|null} Crop fractions, or null when the picture is drawn whole.
+   */
+  function pictureCrop(anchor) {
+    const source = firstByLocalName(anchor, "srcRect");
+    if (!source) return null;
+
+    const crop = { left: 0, top: 0, right: 0, bottom: 0 };
+    for (const [edge, attribute] of Object.entries(CROP_ATTRIBUTES)) {
+      const value = Number(source.getAttribute(attribute) ?? 0) / CROP_UNITS_PER_WHOLE;
+      if (!Number.isFinite(value) || value < 0) return null;
+      Reflect.set(crop, edge, value);
+    }
+    if (crop.left + crop.right >= 1 || crop.top + crop.bottom >= 1) return null;
+    const cropped = crop.left + crop.top + crop.right + crop.bottom > 0;
+    return cropped ? crop : null;
+  }
+
   function anchoredImages(files, drawingPath) {
     const drawing = parseXml(files, drawingPath);
     const drawingRelationships = relationshipMap(
@@ -145,13 +185,18 @@
         ? Number(firstByLocalName(from, "col")?.textContent)
         : -1;
       const properties = firstByLocalName(anchor, "cNvPr");
-      images.push({
+      const image = {
         name: properties?.getAttribute("name") ?? "Workbook image",
         row,
         column,
         mimeType,
         bytes,
-      });
+      };
+      // The crop belongs to the anchor, not to the media part: the same file
+      // can be placed twice and cropped differently.
+      const crop = pictureCrop(anchor);
+      if (crop) image.crop = crop;
+      images.push(image);
     }
     return images;
   }
