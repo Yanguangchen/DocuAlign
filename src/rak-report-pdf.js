@@ -668,16 +668,81 @@
       fonts, pdfLib);
   }
 
-  async function drawImage(outputDocument, page, operation) {
+  /**
+   * A picture crop this renderer can honour, or null to draw the picture whole.
+   *
+   * Excel hides a trimmed edge of a picture rather than removing it, so the
+   * workbook readers report what `<a:srcRect>` shows. The value reaches this
+   * renderer two ways -- straight from a parsed workbook, or, for a published
+   * share, from JSON that has been out of the app and back -- so it is checked
+   * here rather than trusted: every edge a finite non-negative fraction, and
+   * each opposing pair leaving something visible to draw.
+   * @param {unknown} crop - Crop fractions reported for a picture.
+   * @returns {{left: number, top: number, right: number, bottom: number}|null} Usable crop, or null.
+   */
+  function usableCrop(crop) {
+    if (!crop || typeof crop !== "object") return null;
+
+    const edges = { left: 0, top: 0, right: 0, bottom: 0 };
+    for (const edge of Object.keys(edges)) {
+      const value = Number(Reflect.get(crop, edge) ?? 0);
+      if (!Number.isFinite(value) || value < 0) return null;
+      Reflect.set(edges, edge, value);
+    }
+    if (edges.left + edges.right >= 1 || edges.top + edges.bottom >= 1) return null;
+    return edges.left + edges.top + edges.right + edges.bottom > 0 ? edges : null;
+  }
+
+  /**
+   * Where a picture is drawn for the part Excel shows to fill the overlay box.
+   *
+   * An uncropped picture is simply the box. A cropped one still carries the
+   * hidden edge in its bytes, so the whole picture is enlarged until the
+   * visible part covers the box and offset so that part lands on it; the
+   * caller clips the rest away.
+   * @param {object} operation - Image overlay operation, in top-left coordinates.
+   * @param {{left: number, top: number, right: number, bottom: number}|null} crop - Usable crop, or null.
+   * @returns {{x: number, y: number, width: number, height: number}} pdf-lib placement.
+   */
+  function imagePlacement(operation, crop) {
+    const y = PAGE_HEIGHT - operation.top - operation.height;
+    if (!crop) {
+      return { x: operation.x, y, width: operation.width, height: operation.height };
+    }
+
+    const width = operation.width / (1 - crop.left - crop.right);
+    const height = operation.height / (1 - crop.top - crop.bottom);
+    return {
+      x: operation.x - (crop.left * width),
+      y: y - (crop.bottom * height),
+      width,
+      height,
+    };
+  }
+
+  async function drawImage(outputDocument, page, operation, pdfLib) {
     const image = operation.asset.mimeType === "image/png"
       ? await outputDocument.embedPng(operation.asset.bytes)
       : await outputDocument.embedJpg(operation.asset.bytes);
-    page.drawImage(image, {
-      x: operation.x,
-      y: PAGE_HEIGHT - operation.top - operation.height,
-      width: operation.width,
-      height: operation.height,
-    });
+    // A cropped picture is drawn enlarged, so the enlargement is clipped back
+    // to the overlay's own box -- the rectangle the whiteout has just cleared
+    // -- and the edge Excel hides cannot spill onto the page around it.
+    const crop = usableCrop(operation.asset.crop);
+    if (crop) {
+      page.pushOperators(
+        pdfLib.pushGraphicsState(),
+        pdfLib.rectangle(
+          operation.x,
+          PAGE_HEIGHT - operation.top - operation.height,
+          operation.width,
+          operation.height,
+        ),
+        pdfLib.clip(),
+        pdfLib.endPath(),
+      );
+    }
+    page.drawImage(image, imagePlacement(operation, crop));
+    if (crop) page.pushOperators(pdfLib.popGraphicsState());
   }
 
   async function applyOverlayPlan(outputDocument, pages, plan, fonts, pdfLib) {
@@ -722,7 +787,7 @@
           continue;
         }
         drawWhiteout(page, image, pdfLib);
-        await drawImage(outputDocument, page, image);
+        await drawImage(outputDocument, page, image, pdfLib);
       }
     }
   }

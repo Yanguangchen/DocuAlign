@@ -356,6 +356,16 @@
   const ANCHOR_ROW = /[:<]row>(\d+)<\//;
   const BLIP_EMBED = /[:<]blip[^>]*\sr:embed="([^"]*)"/;
   const PICTURE_NAME = /[:<]cNvPr[^>]*\sname="([^"]*)"/;
+  const SOURCE_RECTANGLE = /[:<]srcRect[^>]*>/;
+  // `<a:srcRect>` names its edges with single letters and carries nothing else.
+  const CROP_EDGES = Object.freeze({
+    left: /\sl="(-?\d+)"/,
+    top: /\st="(-?\d+)"/,
+    right: /\sr="(-?\d+)"/,
+    bottom: /\sb="(-?\d+)"/,
+  });
+  /** `<a:srcRect>` states each edge in thousandths of a percent. */
+  const CROP_UNITS_PER_WHOLE = 100000;
 
   /** Number-format ids that ECMA-376 reserves for dates and times. */
   const BUILT_IN_DATE_FORMATS = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
@@ -665,17 +675,50 @@
   }
 
   /**
+   * The crop Excel applies to one anchored picture, as fractions of the source.
+   *
+   * A picture pasted into these workbooks is commonly a screenshot that caught
+   * the neighbouring cell's gridline in its outermost pixels, and whoever
+   * placed it trimmed that edge away in Excel rather than re-cutting the file.
+   * OOXML keeps the whole picture and records the trim as `<a:srcRect>`, so a
+   * reader that ignores it draws an edge Excel hides. On this lab's authorised
+   * signature that edge is a grey rule sitting across the sign-off line.
+   *
+   * A crop is reported only when it is one Excel could have written: every
+   * edge non-negative, and each opposing pair leaving something visible.
+   * Negative edges (OOXML's padding) and impossible ones are left out, which
+   * draws the picture whole exactly as before.
+   * @param {string} chunk - One anchor's XML.
+   * @returns {{left: number, top: number, right: number, bottom: number}|null} Crop fractions, or null when the picture is drawn whole.
+   */
+  function readPictureCrop(chunk) {
+    const tag = chunk.match(SOURCE_RECTANGLE)?.[0];
+    if (!tag) return null;
+
+    const crop = { left: 0, top: 0, right: 0, bottom: 0 };
+    for (const [edge, pattern] of Object.entries(CROP_EDGES)) {
+      const value = Number(tag.match(pattern)?.[1] ?? 0) / CROP_UNITS_PER_WHOLE;
+      if (value < 0) return null;
+      Reflect.set(crop, edge, value);
+    }
+    if (crop.left + crop.right >= 1 || crop.top + crop.bottom >= 1) return null;
+    const cropped = crop.left + crop.top + crop.right + crop.bottom > 0;
+    return cropped ? crop : null;
+  }
+
+  /**
    * Read every picture anchored on one worksheet, with the cell it sits on.
    *
    * Reports carry their signatures and appendix photographs as embedded
    * pictures rather than cell values, and `src/report-mapping.js` locates them
    * by anchor row and column, so both are reported here. Anchor coordinates
-   * are the zero-based `<from>` values exactly as OOXML stores them.
+   * are the zero-based `<from>` values exactly as OOXML stores them, and a
+   * picture Excel crops carries that crop alongside its bytes.
    * @param {ArrayBuffer} buffer - Raw archive bytes.
    * @param {Map<string, Object>} entries - Central directory entries.
    * @param {string} sheetPath - Archive path of the worksheet part.
    * @param {Map<string, Uint8Array>} mediaCache - Decompressed pictures by path.
-   * @returns {Array<{name: string, row: number, column: number, mimeType: string, bytes: Uint8Array}>} Anchored pictures.
+   * @returns {Array<{name: string, row: number, column: number, mimeType: string, bytes: Uint8Array, crop?: object}>} Anchored pictures.
    */
   function readSheetImages(buffer, entries, sheetPath, mediaCache) {
     const drawingPath = [...readPartRelationships(buffer, entries, sheetPath).values()]
@@ -701,13 +744,19 @@
         mediaCache.set(mediaPath, readEntryBytes(buffer, mediaEntry));
       }
 
-      images.push({
+      const image = {
         name: chunk.match(PICTURE_NAME)?.[1] ?? "Workbook image",
         row: Number(chunk.match(ANCHOR_ROW)?.[1] ?? -1),
         column: Number(chunk.match(ANCHOR_COLUMN)?.[1] ?? -1),
         mimeType,
         bytes: mediaCache.get(mediaPath),
-      });
+      };
+      // The crop belongs to the anchor, not to the media part: the same file
+      // can be placed twice and cropped differently, so it is read per anchor
+      // even though the bytes are shared.
+      const crop = readPictureCrop(chunk);
+      if (crop) image.crop = crop;
+      images.push(image);
     }
     return images;
   }

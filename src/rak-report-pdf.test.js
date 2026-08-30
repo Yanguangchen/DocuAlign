@@ -10,6 +10,8 @@ import * as XLSX from "xlsx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const templateBytes = readFileSync(resolve("SampleDocuments/SampleOutput.pdf"));
+/** The reference pages' own height, which every overlay is measured against. */
+const PAGE_HEIGHT = 841.68;
 
 async function sampleReports() {
   const bytes = readFileSync(resolve("SampleDocuments/SampleInput.xlsx"));
@@ -33,6 +35,43 @@ function templateOptions(overrides = {}) {
     templateBytes,
     ...overrides,
   };
+}
+
+/**
+ * The drawing operators one rendered page carries, as text.
+ * @param {object} document - Loaded output document.
+ * @param {number} index - Zero-based page number.
+ * @returns {string} The page's decoded content streams.
+ */
+function pageOperators(document, index) {
+  const contents = document.getPage(index).node.Contents();
+  const streams = contents instanceof PDFLib.PDFArray
+    ? contents.asArray().map((reference) => document.context.lookup(reference))
+    : [contents];
+  return streams
+    .map((stream) => new TextDecoder().decode(PDFLib.decodePDFRawStream(stream).decode()))
+    .join("\n");
+}
+
+/** Every clipping rectangle a page establishes, as `[x, y, width, height]`. */
+function clipBoxes(operators) {
+  return [...operators.matchAll(/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re\nW\nn/g)]
+    .map((match) => match.slice(1, 5).map(Number));
+}
+
+/** Where each overlaid picture is drawn, as `[x, y, width, height]`. */
+function drawnImages(operators) {
+  const placement = new RegExp(
+    "1 0 0 1 (-?[\\d.]+) (-?[\\d.]+) cm\\n1 0 0 1 0 0 cm\\n"
+    + "(-?[\\d.]+) 0 0 (-?[\\d.]+) 0 0 cm\\n1 0 0 1 0 0 cm\\n/Image-[\\w-]+ Do",
+    "g",
+  );
+  return [...operators.matchAll(placement)].map((match) => [
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+    Number(match[4]),
+  ]);
 }
 
 describe("RAK sample-template PDF renderer", () => {
@@ -244,6 +283,94 @@ describe("RAK sample-template PDF renderer", () => {
     // Signatures are identical across every report RAK issues, so the
     // reference's own are still correct and are deliberately kept.
     expect(plan[3].images.every((image) => image.evidence)).toBe(false);
+  });
+
+  it("draws a signature the way Excel crops it, clipped to the reference's box", async () => {
+    const reports = await sampleReports();
+    const sample = reports.find((report) => report.groupIndex === 2);
+    // The workbook's authorised signature is a screenshot that caught the
+    // neighbouring cell's gridline down its right edge and along its bottom.
+    // Excel hides that edge; drawing the file whole puts a grey rule across
+    // the sign-off line of a signed report.
+    expect(sample.assets.authorisedSignature.crop).toEqual({
+      left: 0,
+      top: 0,
+      right: 0.11923,
+      bottom: 0.08152,
+    });
+    expect(sample.assets.preparedSignature.crop).toBeUndefined();
+
+    const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [sample],
+      templateOptions(),
+    );
+    const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+    const operators = pageOperators(output, 3);
+
+    // The sign-off page's box is the measured one, and the visible part of the
+    // picture fills it exactly: the whole file is enlarged by the crop it
+    // hides, offset so the visible part lands on the box, and clipped back to
+    // it so the hidden edge cannot spill onto the page.
+    const boxTop = PAGE_HEIGHT - 651.39 - 37.16;
+    const clips = clipBoxes(operators);
+    expect(clips).toHaveLength(1);
+    const [clipX, clipY, clipWidth, clipHeight] = clips[0];
+    expect(clipX).toBeCloseTo(378.15, 6);
+    expect(clipY).toBeCloseTo(boxTop, 6);
+    expect(clipWidth).toBeCloseTo(50.23, 6);
+    expect(clipHeight).toBeCloseTo(37.16, 6);
+
+    const [prepared, authorised] = drawnImages(operators);
+    const [preparedX, , preparedWidth, preparedHeight] = prepared;
+    const [authorisedX, authorisedY, authorisedWidth, authorisedHeight] = authorised;
+    // The uncropped signature is still drawn as its box, untouched.
+    expect(preparedX).toBeCloseTo(64.78, 6);
+    expect(preparedWidth).toBeCloseTo(55.53, 6);
+    expect(preparedHeight).toBeCloseTo(23.52, 6);
+    expect(authorisedWidth).toBeCloseTo(50.23 / (1 - 0.11923), 6);
+    expect(authorisedHeight).toBeCloseTo(37.16 / (1 - 0.08152), 6);
+    // Nothing is trimmed from the left, so the enlargement runs rightwards
+    // off the box; the bottom trim pushes the picture down by its own share.
+    expect(authorisedX).toBeCloseTo(378.15, 6);
+    expect(authorisedY).toBeCloseTo(boxTop - (0.08152 * authorisedHeight), 6);
+  });
+
+  it("draws a picture whole when its crop is not one Excel could have written", async () => {
+    const reports = await sampleReports();
+    const sample = reports.find((report) => report.groupIndex === 2);
+    // A published share carries the mapped model as JSON, so a crop reaching
+    // the renderer has been out of the app and back. Anything that is not a
+    // crop draws the picture whole rather than scaling by a nonsense divisor.
+    const rejected = [
+      undefined,
+      "11923",
+      { left: -0.2 },
+      { left: "gridline" },
+      { left: 0.6, right: 0.5 },
+      { top: 0.52, bottom: 0.5 },
+      { left: 0, top: 0, right: 0, bottom: 0 },
+    ];
+
+    for (const crop of rejected) {
+      const report = {
+        ...sample,
+        assets: {
+          ...sample.assets,
+          authorisedSignature: { ...sample.assets.authorisedSignature, crop },
+        },
+      };
+      const blob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+        [report],
+        templateOptions(),
+      );
+      const output = await PDFLib.PDFDocument.load(await blob.arrayBuffer());
+      const operators = pageOperators(output, 3);
+
+      expect(clipBoxes(operators)).toEqual([]);
+      const [, , width, height] = drawnImages(operators).at(1);
+      expect(width).toBeCloseTo(50.23, 6);
+      expect(height).toBeCloseTo(37.16, 6);
+    }
   });
 
   it("draws a workbook requirement's comparison symbol from the Symbol font", async () => {

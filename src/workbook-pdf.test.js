@@ -415,4 +415,84 @@ describe("workbook PDF pipeline", () => {
     expect(extractWorkbookImages({ files: {} })).toEqual(new Map());
     expect(extractWorkbookImages({})).toEqual(new Map());
   });
+
+  it("reports only a crop Excel could have written", async () => {
+    const { extractWorkbookImages } = await loadModule();
+    const relationshipsNamespace =
+      "http://schemas.openxmlformats.org/package/2006/relationships";
+    const officeRelationships =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const drawingNamespace =
+      "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+    const drawingMain = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    // Excel hides a trimmed edge of a picture rather than removing it, so a
+    // reader that drops `<a:srcRect>` draws an edge the workbook does not --
+    // on this lab's authorised signature, a grey rule across the sign-off.
+    const anchor = (sourceRectangle) => `<xdr:twoCellAnchor>
+      <xdr:from><xdr:col>23</xdr:col><xdr:row>129</xdr:row></xdr:from>
+      <xdr:pic>
+        <xdr:nvPicPr><xdr:cNvPr name="Signature"/></xdr:nvPicPr>
+        <xdr:blipFill><a:blip r:embed="img1"/>${sourceRectangle}</xdr:blipFill>
+      </xdr:pic>
+    </xdr:twoCellAnchor>`;
+    const files = {
+      "xl/workbook.xml": {
+        content: `<workbook xmlns:r="${officeRelationships}">
+          <sheets><sheet name="Signatures" r:id="rId1"/></sheets>
+        </workbook>`,
+      },
+      "xl/_rels/workbook.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="rId1" Type="${officeRelationships}/worksheet"
+            Target="/xl/worksheets/sheet1.xml"/>
+        </Relationships>`,
+      },
+      "xl/worksheets/_rels/sheet1.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="drawing" Type="${officeRelationships}/drawing"
+            Target="../drawings/drawing1.xml"/>
+        </Relationships>`,
+      },
+      "xl/drawings/drawing1.xml": {
+        content: `<xdr:wsDr xmlns:xdr="${drawingNamespace}"
+          xmlns:a="${drawingMain}" xmlns:r="${officeRelationships}">
+          ${anchor('<a:srcRect r="11923" b="8152"/>')}
+          ${anchor('<a:srcRect l="1000" t="2000" r="3000" b="4000"/>')}
+          ${anchor("<a:srcRect/>")}
+          ${anchor('<a:srcRect l="-4000"/>')}
+          ${anchor('<a:srcRect t="what"/>')}
+          ${anchor('<a:srcRect l="60000" r="45000"/>')}
+          ${anchor('<a:srcRect t="52000" b="50000"/>')}
+          ${anchor("")}
+        </xdr:wsDr>`,
+      },
+      "xl/drawings/_rels/drawing1.xml.rels": {
+        content: `<Relationships xmlns="${relationshipsNamespace}">
+          <Relationship Id="img1" Type="${officeRelationships}/image"
+            Target="../media/signature.png"/>
+        </Relationships>`,
+      },
+      "xl/media/signature.png": { content: new Uint8Array([1, 2, 3]) },
+    };
+
+    const crops = extractWorkbookImages({ files })
+      .get("Signatures")
+      .map((image) => image.crop);
+
+    // The two readers must agree: this is the same table `src/xlsx-reader.js`
+    // is held to, because either can produce the model a report renders from.
+    expect(crops).toEqual([
+      { left: 0, top: 0, right: 0.11923, bottom: 0.08152 },
+      { left: 0.01, top: 0.02, right: 0.03, bottom: 0.04 },
+      // Everything a crop cannot be -- nothing hidden, a negative edge
+      // (OOXML's padding), an unreadable one, and opposing edges that leave
+      // nothing to draw -- draws the picture whole.
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
 });
