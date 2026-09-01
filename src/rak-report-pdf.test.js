@@ -283,6 +283,26 @@ describe("RAK sample-template PDF renderer", () => {
     // Signatures are identical across every report RAK issues, so the
     // reference's own are still correct and are deliberately kept.
     expect(plan[3].images.every((image) => image.evidence)).toBe(false);
+
+    // A report that maps NO photographs at all is the same defect, and the
+    // one a real client workbook hit: its sample photographs had not been
+    // pasted in. An empty list must still plan -- and clear -- both boxes,
+    // because a box left out of the plan is never whited out and keeps the
+    // reference page's own photograph of another vessel's sample.
+    const withoutAny = { ...sample, appendix: { ...sample.appendix, photos: [] } };
+    const emptyPlan = globalThis.docuAlignRakReportPdf.buildOverlayPlan(withoutAny);
+    expect(emptyPlan[4].images).toHaveLength(2);
+    expect(emptyPlan[4].images.every((image) => image.evidence && image.asset === null))
+      .toBe(true);
+
+    const emptyBlob = await globalThis.docuAlignRakReportPdf.createRakReportPdf(
+      [withoutAny],
+      templateOptions(),
+    );
+    const emptyBytes = Buffer.from(await emptyBlob.arrayBuffer());
+    sample.appendix.photos.forEach((photo) => {
+      expect(emptyBytes.includes(Buffer.from(photo.bytes))).toBe(false);
+    });
   });
 
   it("draws a signature the way Excel crops it, clipped to the reference's box", async () => {

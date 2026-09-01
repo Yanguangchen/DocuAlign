@@ -397,6 +397,113 @@ describe("semantic workbook report mapping", () => {
     expect(report.assets.authorisedSignature?.name).toBe("authorised");
   });
 
+  it("tells the sign-off's signatures from the appendix by the shape they sit in", async () => {
+    const { mapping } = await loadMappingModules();
+    const letterhead = new Uint8Array([1, 2, 3]);
+    // The real client report this exists for: that workbook's sample
+    // photographs had not been pasted in, so once the letterhead is dropped
+    // the only pictures left ARE the two signatures. Taking the last two of
+    // the list printed them, blown up, under "Photographs of sample received"
+    // on a signed report -- and left the sign-off with none of its own.
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1" },
+        {
+          name: "TR1",
+          cells: { AE2: "X-2026-1549-1" },
+          images: [
+            { name: "letterhead", row: 0, column: 0, bytes: letterhead },
+            { name: "letterhead", row: 87, column: 0, bytes: letterhead },
+            // Side by side, a row apart: the sign-off block, wherever it lands.
+            { name: "authorised", row: 129, column: 23, bytes: new Uint8Array([5]) },
+            { name: "prepared", row: 130, column: 2, bytes: new Uint8Array([4]) },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos).toEqual([]);
+    expect(report.assets.preparedSignature?.name).toBe("prepared");
+    expect(report.assets.authorisedSignature?.name).toBe("authorised");
+  });
+
+  it("never reads stacked pictures as a signature pair", async () => {
+    const { mapping } = await loadMappingModules();
+    const letterhead = new Uint8Array([1, 2, 3]);
+    // The appendix stacks its photographs in one column, so two pictures a row
+    // apart in the SAME column are photographs, not a sign-off block -- and a
+    // sheet carrying only those has photographs and no signatures.
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1" },
+        {
+          name: "TR1",
+          cells: { AE2: "X-2026-1549-1" },
+          images: [
+            { name: "letterhead", row: 0, column: 0, bytes: letterhead },
+            { name: "letterhead", row: 87, column: 0, bytes: letterhead },
+            { name: "top-photo", row: 148, column: 5, bytes: new Uint8Array([6]) },
+            { name: "bottom-photo", row: 150, column: 5, bytes: new Uint8Array([7]) },
+          ],
+        },
+      ],
+    });
+
+    expect(report.appendix.photos.map((photo) => photo.name))
+      .toEqual(["top-photo", "bottom-photo"]);
+    expect(report.assets.preparedSignature).toBeNull();
+    expect(report.assets.authorisedSignature).toBeNull();
+  });
+
+  it("names a value that is not of its own kind, and stays quiet otherwise", async () => {
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    // The sample maps cleanly, so the check has to be silent on it -- a
+    // warning that cries wolf on every export is not read on the one that
+    // matters.
+    const reports = mapping.buildMappedReports(parsed);
+    expect(reports.flatMap((report) => mapping.describeAnomalies(report))).toEqual([]);
+
+    // The layout defect this catches: read a row out, and the sampling date
+    // holds a voyage number. The check does not know which row was right --
+    // only what a date looks like, which is enough to say something is wrong.
+    const shifted = {
+      ...reports[0],
+      cover: {
+        ...reports[0].cover,
+        jobRef: "HONG HAI 9",
+        samplingDate: "HH9-638N",
+        dateReceived: "",
+      },
+      moisture: { ...reports[0].moisture, percent: "9,6" },
+    };
+
+    expect(mapping.describeAnomalies(shifted)).toEqual([
+      { field: "cover.jobRef", label: "Job Ref.", value: "HONG HAI 9", reason: "is not a job reference" },
+      { field: "cover.samplingDate", label: "Sampling Date", value: "HH9-638N", reason: "is not a date" },
+      { field: "cover.dateReceived", label: "Date Received", value: "", reason: "is empty" },
+      { field: "moisture.percent", label: "Moisture Content", value: "9,6", reason: "is not a measurement" },
+    ]);
+
+    // A job reference may carry three or four parts; a result may be reported
+    // against a detection limit rather than as a bare number. Neither is an
+    // anomaly, and a report missing whole sections is entirely anomalous.
+    const tolerated = {
+      ...shifted,
+      cover: { ...shifted.cover, jobRef: "X-2026-1549-1", samplingDate: "28/08/2026", dateReceived: "31/08/2026" },
+      siltCoral: { ...shifted.siltCoral, siltPercent: "< 1" },
+      moisture: { percent: "9.6" },
+    };
+    expect(mapping.describeAnomalies(tolerated)).toEqual([]);
+    expect(mapping.describeAnomalies({}).map((anomaly) => anomaly.reason))
+      .toEqual(Array.from({ length: 8 }, () => "is empty"));
+    // A letter code is what opens a job reference, and every other part counts.
+    const badReferences = ["2026-522-1", "X-2026", "X-2026-522-1-9-4", "X-2026-52A-1"];
+    for (const jobRef of badReferences) {
+      expect(mapping.describeAnomalies({ cover: { jobRef } }).at(0).reason)
+        .toBe("is not a job reference");
+    }
+  });
+
   it("keeps the letterhead out of the appendix when it sits below the photographs", async () => {
     const { mapping } = await loadMappingModules();
     // The bottom-most picture is not always a photograph: a footer mark below

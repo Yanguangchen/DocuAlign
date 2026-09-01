@@ -230,6 +230,38 @@ function reportPictureExtraction(models) {
 }
 
 /**
+ * Warn when a mapped report carries a value that is not of its own kind.
+ *
+ * A workbook read at the wrong row is the quietest defect this pipeline has:
+ * the export succeeds, the layout is intact, the report is signed, and the
+ * vessel name is printed as the sample id. `describeAnomalies` does not know
+ * which row was right -- only that a sampling date reading `HH9-638N` is a
+ * voyage number -- which is enough to name the group and the field here,
+ * while the workbook is still on screen.
+ * @param {Map<number, Object>} models - Semantic report models by group index.
+ * @returns {void}
+ */
+function reportValueShapes(models) {
+  const mapper = globalThis.docuAlignReportMapping;
+  const found = [...models.entries()].flatMap(([groupIndex, model]) =>
+    (mapper?.describeAnomalies?.(model) ?? [])
+      .map((anomaly) => `group ${groupIndex}: ${anomaly.label} ${anomaly.reason}`));
+  if (found.length === 0) return;
+
+  globalThis.docuAlignLogger?.logWarn?.(
+    "Some reports carry values that do not look like themselves",
+    new Error(found.join("; ")),
+    {
+      feature: "ReportMapping",
+      function: "mapReportModels",
+      operation: "mapping.valueShapes",
+      category: "ImplausibleReportValues",
+      safeIdentifier: String(found.length),
+    },
+  );
+}
+
+/**
  * Map every worksheet group onto its semantic report model, keyed by group.
  *
  * A workbook whose sheets cannot be mapped is not a pipeline failure: the
@@ -247,6 +279,7 @@ function mapReportModels(workbook, sourceName) {
     const models = mapper.buildMappedReports(toMappingWorkbook(workbook, sourceName));
     const mapped = new Map(models.map((model) => [model.groupIndex, model]));
     reportPictureExtraction(mapped);
+    reportValueShapes(mapped);
     return mapped;
   } catch (error) {
     globalThis.docuAlignLogger?.logWarn?.(

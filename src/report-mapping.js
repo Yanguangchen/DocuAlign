@@ -12,6 +12,31 @@
     SB1: "shearSheetName",
   });
   const STRESS_COLUMNS = Object.freeze(["M", "P", "V", "AB"]);
+  /** The cover writes every date as `DD/MM/YYYY`; `src/xlsx-reader.js` renders serials that way too. */
+  const DATE_SHAPE = /^\d{2}\/\d{2}\/\d{4}$/;
+  /** A result may be reported against a detection limit rather than as a bare number. */
+  const DETECTION_LIMIT = /^[<>\u2264\u2265]\s*/;
+
+  const isDate = (value) => DATE_SHAPE.test(value);
+  const isMeasurement = (value) => {
+    const number = value.replace(DETECTION_LIMIT, "").trim();
+    return number !== "" && Number.isFinite(Number(number));
+  };
+
+  /**
+   * A job reference: a letter code and then two or three numeric parts. Split
+   * rather than matched as one pattern -- the nested repetition that expresses
+   * `-\d+` repeating is exactly the shape `security/detect-unsafe-regex` warns
+   * about, and the parts read more clearly separated anyway.
+   * @param {string} value - Candidate reference.
+   * @returns {boolean} Whether it is shaped like a job reference.
+   */
+  function isJobReference(value) {
+    const parts = value.split("-");
+    if (parts.length < 3 || parts.length > 4) return false;
+    if (!/^[A-Za-z]+$/.test(parts.at(0))) return false;
+    return parts.slice(1).every((part) => /^\d+$/.test(part));
+  }
   const SIGNOFF = Object.freeze({
     preparedByName: "Jocelyn Lee Jia Min",
     preparedByTitle: "Lab Engineer",
@@ -155,6 +180,97 @@
   }
 
   /**
+   * Shapes the values a report cannot be wrong about are recognised by.
+   *
+   * A workbook read at the wrong row does not fail -- it produces a complete,
+   * signed report carrying its neighbour's values, and nothing on the page
+   * says so. These are the fields whose form is unmistakable, so a value that
+   * has landed in the wrong slot gives itself away without the reader having
+   * to know which row was right: a sampling date reading `HH9-638N` is a
+   * voyage number, whatever the sheet's layout turns out to be.
+   *
+   * Only unambiguous shapes belong here. A field a workbook may legitimately
+   * leave blank, or fill with prose, cannot be checked this way and is not.
+   */
+  const VALUE_SHAPES = Object.freeze([
+    ["cover.jobRef", "Job Ref.", isJobReference, "a job reference"],
+    ["cover.samplingDate", "Sampling Date", isDate, "a date"],
+    ["cover.dateReceived", "Date Received", isDate, "a date"],
+    ["cover.dateOfReport", "Date of Report", isDate, "a date"],
+    ["siltCoral.siltPercent", "Silt Content", isMeasurement, "a measurement"],
+    ["siltCoral.totalPercent", "Total Silt and Coral", isMeasurement, "a measurement"],
+    ["moisture.percent", "Moisture Content", isMeasurement, "a measurement"],
+    ["organicMatter.percent", "Organic Matter", isMeasurement, "a measurement"],
+  ]);
+
+  /** Read one dotted path off a report model. */
+  function readPath(report, path) {
+    let value = report;
+    for (const key of path.split(".")) value = Reflect.get(value ?? {}, key);
+    return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  /**
+   * Every value on one report that does not look like what its slot holds.
+   *
+   * This does not know which row is right -- only what a job reference and a
+   * date look like. That is enough: the whole class of layout defect shows up
+   * here as a value of the wrong kind, on the export that produced it, instead
+   * of on a signed PDF nobody re-reads.
+   * @param {object} report - Semantic report model.
+   * @returns {Array<{field: string, label: string, value: string, reason: string}>} Implausible values.
+   */
+  function describeAnomalies(report) {
+    const anomalies = [];
+    for (const [field, label, isPlausible, expected] of VALUE_SHAPES) {
+      const value = readPath(report, field);
+      if (value === "") {
+        anomalies.push({ field, label, value, reason: "is empty" });
+      } else if (!isPlausible(value)) {
+        anomalies.push({ field, label, value, reason: `is not ${expected}` });
+      }
+    }
+    return anomalies;
+  }
+
+  /**
+   * How far apart the sign-off's two signatures may sit and still be a pair:
+   * within a few rows of each other, and at opposite ends of the page. Both
+   * are measured off the document rather than off one workbook -- the sign-off
+   * block is one line of the form, and its two boxes are its full width apart.
+   */
+  const SIGNATURE_ROW_SPAN = 3;
+  const SIGNATURE_COLUMN_SPAN = 10;
+
+  /**
+   * The sign-off's two signatures, told apart from the appendix by shape.
+   *
+   * The signatures sit side by side -- the same row, give or take the drift of
+   * a hand-placed picture, at opposite ends of the page. The appendix never
+   * looks like that: the reference page stacks its two photographs one above
+   * the other in a single column. That difference identifies the sign-off
+   * block wherever it lands, and it holds for a report whose photographs are
+   * missing entirely, which counting from the end of the list does not.
+   *
+   * The search runs upwards so that the bottom-most pair wins, which keeps
+   * anything above the sign-off -- a stray mark, a second letterhead variant --
+   * from being read as a signature.
+   * @param {Array<object>} content - The sheet's own pictures, in row order.
+   * @returns {Array<object>} The pair, left picture first, or an empty list.
+   */
+  function signaturePair(content) {
+    for (let index = content.length - 1; index >= 1; index -= 1) {
+      const lower = content.at(index);
+      const upper = content.at(index - 1);
+      const rows = Math.abs(lower.row - upper.row);
+      const columns = Math.abs(lower.column - upper.column);
+      if (rows > SIGNATURE_ROW_SPAN || columns < SIGNATURE_COLUMN_SPAN) continue;
+      return [upper, lower].sort((left, right) => left.column - right.column);
+    }
+    return [];
+  }
+
+  /**
    * The appendix photographs on one report sheet.
    *
    * The strict anchor is the sample workbook's own: row 147 or below, column 5
@@ -169,15 +285,15 @@
    * report then shows another vessel's sample bag with no error anywhere.
    *
    * The fallback is therefore structural rather than positional. Two facts hold
-   * across layouts: the appendix is the last thing on the sheet, and the
-   * letterhead is the only picture repeated on it. So drop the repeated marks
-   * and the two signatures, and the photographs are what remain at the bottom.
-   * Repetition is detected by `bytes` identity -- the reader inflates each
-   * media part once and hands every anchor the same array (see
-   * `readSheetImages`), so the letterhead's four anchors share one object.
+   * across layouts: the letterhead is the only picture repeated on the sheet,
+   * and the sign-off sets its two signatures SIDE BY SIDE while the appendix
+   * stacks its photographs one above the other. So drop the repeated marks,
+   * take the side-by-side pair as the signatures, and the photographs are what
+   * remain at the bottom. Repetition is detected by `bytes` identity -- the
+   * reader inflates each media part once and hands every anchor the same array
+   * (see `readSheetImages`), so the letterhead's four anchors share one object.
    * @param {{images?: Array<object>}} sheet - Report sheet.
-   * @param {Array<object>} signatures - Pictures already claimed as signatures.
-   * @returns {Array<object>} Up to two photographs, in row order.
+   * @returns {{photos: Array<object>, preparedSignature: object|null, authorisedSignature: object|null}} The sheet's own pictures.
    */
   function reportPictures(sheet) {
     const images = sheet.images ?? [];
@@ -210,11 +326,17 @@
     // What remains is the report's own content, and its order down the sheet is
     // fixed by the document: the sign-off block, then the appendix.
     const content = images.filter((image) => !repeated.has(image.bytes)).sort(byRow);
-    const [preparedSignature = null, authorisedSignature = null] = content
-      .slice(-4, -2)
-      .sort((left, right) => left.column - right.column);
+    const [preparedSignature = null, authorisedSignature = null] = signaturePair(content);
 
-    return { photos: content.slice(-2), preparedSignature, authorisedSignature };
+    // Only what is NOT a signature can be a photograph. Counting from the end
+    // of the list instead cost a real client report its appendix: that
+    // workbook's photographs had not been pasted in yet, so the sign-off's own
+    // two signatures were the last two pictures on the sheet and were printed,
+    // blown up, under "Photographs of sample received".
+    const signatures = new Set([preparedSignature, authorisedSignature]);
+    const photographs = content.filter((image) => !signatures.has(image));
+
+    return { photos: photographs.slice(-2), preparedSignature, authorisedSignature };
   }
 
   function buildPsdRows(reportSheet) {
@@ -382,6 +504,7 @@
   }
 
   globalThis.docuAlignReportMapping = Object.freeze({
+    describeAnomalies,
     buildMappedReports,
     discoverReportGroups,
   });

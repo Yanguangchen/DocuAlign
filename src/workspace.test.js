@@ -770,6 +770,61 @@ describe("workspace controller", () => {
     expect(published.report.appendix.photos).toEqual([]);
   });
 
+  it("names a report value that is not of its own kind", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+    const mapper = globalThis.docuAlignReportMapping;
+    // A workbook read one row out exports without error, in the right layout,
+    // signed -- with the vessel's voyage number printed as its sampling date.
+    // This warning is what says so while the workbook is still on screen.
+    globalThis.docuAlignReportMapping = {
+      describeAnomalies: mapper.describeAnomalies,
+      buildMappedReports: () => [
+        {
+          groupIndex: 1,
+          jobRef: "X-2026-1549-1",
+          appendix: { photos: [{ name: "a" }] },
+          assets: {},
+          cover: {
+            jobRef: "X-2026-1549-1",
+            samplingDate: "HH9-638N",
+            dateReceived: "31/08/2026",
+            dateOfReport: "03/09/2026",
+          },
+          siltCoral: { siltPercent: "0.9", totalPercent: "1.7" },
+          moisture: { percent: "9.6" },
+          organicMatter: { percent: "0.12" },
+        },
+      ],
+    };
+
+    await selectFile(workbook("shifted-cover.xlsx"));
+
+    expect(globalThis.docuAlignLogger.logWarn).toHaveBeenCalledWith(
+      "Some reports carry values that do not look like themselves",
+      expect.objectContaining({ message: "group 1: Sampling Date is not a date" }),
+      expect.objectContaining({
+        category: "ImplausibleReportValues",
+        safeIdentifier: "1",
+      }),
+    );
+  });
+
+  it("stays quiet when every mapped value looks like itself", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+
+    await selectFile(workbook("lab-data.xlsx"));
+
+    // The real sample workbook maps cleanly. A check that warned here would be
+    // ignored on the export that matters.
+    expect(globalThis.docuAlignLogger.logWarn).not.toHaveBeenCalledWith(
+      "Some reports carry values that do not look like themselves",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("names the groups whose appendix photographs were not found", async () => {
     const { selectFile } = await loadMappedWorkspace();
     globalThis.docuAlignLogger = { logWarn: vi.fn() };
