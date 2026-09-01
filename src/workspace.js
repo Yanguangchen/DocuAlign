@@ -241,22 +241,35 @@ function reportPictureExtraction(models) {
  * @param {Map<number, Object>} models - Semantic report models by group index.
  * @returns {void}
  */
+const VALUE_SHAPE_REPORT_LIMIT = 12;
+
 function reportValueShapes(models) {
   const mapper = globalThis.docuAlignReportMapping;
-  const found = [...models.entries()].flatMap(([groupIndex, model]) =>
-    (mapper?.describeAnomalies?.(model) ?? [])
-      .map((anomaly) => `group ${groupIndex}: ${anomaly.label} ${anomaly.reason}`));
+  const affected = [];
+  const found = [...models.entries()].flatMap(([groupIndex, model]) => {
+    const anomalies = mapper?.describeAnomalies?.(model) ?? [];
+    if (anomalies.length > 0) affected.push(groupIndex);
+    return anomalies.map((anomaly) =>
+      `group ${groupIndex}: ${anomaly.label} ${anomaly.reason}`);
+  });
   if (found.length === 0) return;
+
+  // One drifted block is wrong in every group at once, so the message is
+  // capped: the first few name the fault, and the count says how far it runs.
+  const listed = found.slice(0, VALUE_SHAPE_REPORT_LIMIT).join("; ");
+  const summary = found.length > VALUE_SHAPE_REPORT_LIMIT
+    ? `${listed}; and ${found.length - VALUE_SHAPE_REPORT_LIMIT} more`
+    : listed;
 
   globalThis.docuAlignLogger?.logWarn?.(
     "Some reports carry values that do not look like themselves",
-    new Error(found.join("; ")),
+    new Error(summary),
     {
       feature: "ReportMapping",
       function: "mapReportModels",
       operation: "mapping.valueShapes",
       category: "ImplausibleReportValues",
-      safeIdentifier: String(found.length),
+      safeIdentifier: affected.join(","),
     },
   );
 }

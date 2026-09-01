@@ -16,12 +16,23 @@
   const DATE_SHAPE = /^\d{2}\/\d{2}\/\d{4}$/;
   /** A result may be reported against a detection limit rather than as a bare number. */
   const DETECTION_LIMIT = /^[<>\u2264\u2265]\s*/;
+  /** A test the lab did not run is reported, not left blank -- 7 of the 9 known reports say so. */
+  const NOT_TESTED = /^n\/?a$/i;
 
   const isDate = (value) => DATE_SHAPE.test(value);
-  const isMeasurement = (value) => {
+  const measurementValue = (value) => {
     const number = value.replace(DETECTION_LIMIT, "").trim();
-    return number !== "" && Number.isFinite(Number(number));
+    return number === "" ? Number.NaN : Number(number);
   };
+  const isMeasurement = (value) => Number.isFinite(measurementValue(value));
+  const isPercentage = (value) => {
+    const number = measurementValue(value);
+    return number >= 0 && number <= 100;
+  };
+  /** A measured result, or the lab's own note that the test was not run. */
+  const isReportedResult = (value) => NOT_TESTED.test(value) || isMeasurement(value);
+  const isEmail = (value) => value.includes("@") && !/\s/.test(value);
+  const isContactNumber = (value) => /^[\d/+()\-.\s]+$/.test(value) && /\d/.test(value);
 
   /**
    * A job reference: a letter code and then two or three numeric parts. Split
@@ -197,10 +208,73 @@
     ["cover.samplingDate", "Sampling Date", isDate, "a date"],
     ["cover.dateReceived", "Date Received", isDate, "a date"],
     ["cover.dateOfReport", "Date of Report", isDate, "a date"],
+    ["cover.email", "Email", isEmail, "an email address"],
+    ["cover.telephoneFax", "Tel No/Fax No", isContactNumber, "a telephone number"],
     ["siltCoral.siltPercent", "Silt Content", isMeasurement, "a measurement"],
+    ["siltCoral.coralShellPercent", "Coral/Shell Content", isMeasurement, "a measurement"],
     ["siltCoral.totalPercent", "Total Silt and Coral", isMeasurement, "a measurement"],
     ["moisture.percent", "Moisture Content", isMeasurement, "a measurement"],
     ["organicMatter.percent", "Organic Matter", isMeasurement, "a measurement"],
+    ["directShear.maximumDryDensity", "Maximum Dry Density", isMeasurement, "a measurement"],
+    ["directShear.minimumDryDensity", "Minimum Dry Density", isMeasurement, "a measurement"],
+    ["directShear.retainedOn2mmPercent", "Retained on 2.0mm", isMeasurement, "a measurement"],
+    ["directShear.shearingRate", "Shearing Rate", isMeasurement, "a measurement"],
+    ["directShear.initialBulkDensity", "Initial Bulk Density", isMeasurement, "a measurement"],
+    ["directShear.initialDryDensity", "Initial Dry Density", isMeasurement, "a measurement"],
+    ["directShear.angle", "Friction Angle", isMeasurement, "a measurement"],
+  ]);
+
+  /**
+   * The columns whose every row must be of one kind.
+   *
+   * Only the first offending row is reported: a column read off its own rows
+   * is wrong all the way down, and twelve identical warnings say nothing that
+   * the first one does not.
+   */
+  const TABLE_SHAPES = Object.freeze([
+    ["psd.rows.cumulativePassingPercent", "Cumulative passing", isPercentage, "a percentage"],
+    ["psd.rows.lowerLimit", "Grading lower limit", isPercentage, "a percentage"],
+    ["psd.rows.upperLimit", "Grading upper limit", isPercentage, "a percentage"],
+    ["metals.rows.resultPpm", "Metals result", isReportedResult, "a result"],
+    ["directShear.rows.maxShearStressKpa", "Max shear stress", isMeasurement, "a measurement"],
+    ["directShear.rows.horizontalDisplacementMm", "Horizontal displacement", isMeasurement, "a measurement"],
+  ]);
+
+  /**
+   * Values the FORM fixes, which no report varies.
+   *
+   * These are read from the workbook and mostly never drawn -- the sieve
+   * column and the element column exist in the model only as by-products of
+   * reading the tables beside them. That makes them free canaries: a result
+   * has no shape of its own (a shear stress of `45.2` is indistinguishable
+   * from a moisture content of `45.2`, so no per-value check can ever reach
+   * it), but the block it sits in can be checked, because the labels around it
+   * are fixed by the test method. Sixty-four result values are covered this
+   * way by two comparisons.
+   *
+   * Each was identical across all nine reports of the two known workbooks,
+   * which have drifted independently of each other. That is evidence, not
+   * proof: RAK may legitimately revise a sieve set or a JTC limit, so these
+   * stay WARNINGS. When one does change, the warning is the prompt to update
+   * the expected value here.
+   */
+  const BLOCK_CANARIES = Object.freeze([
+    ["psd.rows.sieveSizeMm", "the particle size table's sieve column",
+      ["3.00", "2.00", "1.18", "0.850", "0.600", "0.200", "0.063"]],
+    ["metals.rows.element", "the metals table's element column",
+      ["Arsenic, As", "Barium, Ba", "Cadmium, Cd", "Cobalt, Co", "Chromium, Cr",
+        "Copper, Cu", "Lead, Pb", "Mercury, Hg", "Molybdenum, Mo", "Nickel, Ni",
+        "Selenium, Se", "Zinc, Zn"]],
+    ["metals.rows.upperLimitPpm", "the metals table's limit column",
+      ["30", "200", "2", "20", "100", "35", "100", "0.5", "10", "35", "20", "200"]],
+    ["siltCoral.requirement", "the silt and coral block's requirement",
+      ["Not more than 15%"]],
+    ["directShear.condition", "the direct shear block's test condition",
+      ["Condition for relative density of 35%"]],
+    ["directShear.requirement", "the direct shear block's requirement",
+      ["Limit of 32\u00b0-45\u00b0"]],
+    ["appendix.title", "the appendix heading", ["APPENDIX"]],
+    ["appendix.label", "the appendix caption", ["Photographs of sample received:"]],
   ]);
 
   /** Read one dotted path off a report model. */
@@ -208,6 +282,91 @@
     let value = report;
     for (const key of path.split(".")) value = Reflect.get(value ?? {}, key);
     return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  /**
+   * Read a dotted path that may run through one of the model's row lists, so
+   * `metals.rows.element` reads a whole column rather than a single cell.
+   * @param {object} report - Semantic report model.
+   * @param {string} path - Dotted path, at most one segment of which is a list.
+   * @returns {string[]} Every value on that path.
+   */
+  function readColumn(report, path) {
+    const keys = path.split(".");
+    let node = report;
+    for (let index = 0; index < keys.length; index += 1) {
+      if (Array.isArray(node)) {
+        const rest = keys.slice(index).join(".");
+        return node.map((row) => readPath(row, rest));
+      }
+      // A path that runs out before its list is a section the model does not
+      // carry at all. That is the canaries' to report -- "the metals table's
+      // element column is absent" -- not a per-row complaint about a table
+      // that is not there.
+      if (node === null || node === undefined) return [];
+      node = Reflect.get(node, keys.at(index));
+    }
+    return [node === null || node === undefined ? "" : String(node).trim()];
+  }
+
+  /** Every column whose rows are not all of one kind. */
+  function describeTableShapes(report) {
+    const anomalies = [];
+    for (const [field, label, isPlausible, expected] of TABLE_SHAPES) {
+      const values = readColumn(report, field);
+      const index = values.findIndex((value) => !isPlausible(value));
+      if (index === -1) continue;
+      anomalies.push({
+        field,
+        label: `${label} (row ${index + 1})`,
+        value: values.at(index),
+        reason: `is not ${expected}`,
+      });
+    }
+    return anomalies;
+  }
+
+  /** Every block whose fixed values do not read as the form's own. */
+  function describeCanaries(report) {
+    const anomalies = [];
+    for (const [field, label, expected] of BLOCK_CANARIES) {
+      const values = readColumn(report, field);
+      if (values.length === expected.length
+        && values.every((value, index) => value === expected.at(index))) continue;
+      anomalies.push({
+        field,
+        label,
+        value: values.join(", ").slice(0, 120),
+        reason: "does not read as the form's own",
+      });
+    }
+    return anomalies;
+  }
+
+  /**
+   * The grading curve read out of order.
+   *
+   * Cumulative passing cannot RISE as the sieve gets finer -- less material
+   * passes a smaller mesh, always. That is a property of the test rather than
+   * of this workbook, so a column that climbs has been read off the wrong
+   * rows even when every value in it is a plausible percentage.
+   * @param {object} report - Semantic report model.
+   * @returns {Array<object>} At most one anomaly.
+   */
+  function describeGradingOrder(report) {
+    const passing = readColumn(report, "psd.rows.cumulativePassingPercent")
+      .map(measurementValue);
+    const rise = passing.findIndex((value, index) =>
+      index > 0 && Number.isFinite(value) && Number.isFinite(passing.at(index - 1))
+        && value > passing.at(index - 1));
+    if (rise === -1) return [];
+
+    return [{
+      field: "psd.rows.cumulativePassingPercent",
+      label: `Cumulative passing (row ${rise + 1})`,
+      value: String(passing.at(rise)),
+      reason: "rises as the sieve gets finer",
+    }];
   }
 
   /**
@@ -230,7 +389,12 @@
         anomalies.push({ field, label, value, reason: `is not ${expected}` });
       }
     }
-    return anomalies;
+    return [
+      ...anomalies,
+      ...describeTableShapes(report),
+      ...describeGradingOrder(report),
+      ...describeCanaries(report),
+    ];
   }
 
   /**

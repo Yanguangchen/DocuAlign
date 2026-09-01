@@ -494,14 +494,108 @@ describe("semantic workbook report mapping", () => {
       moisture: { percent: "9.6" },
     };
     expect(mapping.describeAnomalies(tolerated)).toEqual([]);
-    expect(mapping.describeAnomalies({}).map((anomaly) => anomaly.reason))
-      .toEqual(Array.from({ length: 8 }, () => "is empty"));
+    // A model with nothing in it is entirely anomalous: every checked field is
+    // empty, and every block canary reads as absent rather than as the form's.
+    const bare = mapping.describeAnomalies({}).map((anomaly) => anomaly.reason);
+    expect(new Set(bare)).toEqual(new Set(["is empty", "does not read as the form's own"]));
+    expect(bare.filter((reason) => reason === "is empty")).toHaveLength(18);
+    expect(bare.filter((reason) => reason !== "is empty")).toHaveLength(8);
     // A letter code is what opens a job reference, and every other part counts.
     const badReferences = ["2026-522-1", "X-2026", "X-2026-522-1-9-4", "X-2026-52A-1"];
     for (const jobRef of badReferences) {
       expect(mapping.describeAnomalies({ cover: { jobRef } }).at(0).reason)
         .toBe("is not a job reference");
     }
+  });
+
+  it("catches a drifted block through the values the form fixes", async () => {
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    const [report] = mapping.buildMappedReports(parsed);
+
+    // A result has no shape of its own -- a shear stress of 45.2 is
+    // indistinguishable from a moisture content of 45.2 -- so no per-value
+    // check can reach one. The labels around it CAN be checked: the sieve
+    // series and the twelve element names are fixed by the test method, are
+    // already read, and are never drawn. Shifting the metals table by a row
+    // is invisible in its results and unmistakable in its element column.
+    const shiftedMetals = {
+      ...report,
+      metals: {
+        ...report.metals,
+        rows: report.metals.rows.slice(1)
+          .concat({ element: "", resultPpm: "N/A", upperLimitPpm: "" }),
+      },
+    };
+    const metalFaults = mapping.describeAnomalies(shiftedMetals);
+    expect(metalFaults.map((anomaly) => anomaly.label)).toEqual([
+      "the metals table's element column",
+      "the metals table's limit column",
+    ]);
+    expect(metalFaults.every((anomaly) => anomaly.reason === "does not read as the form's own"))
+      .toBe(true);
+
+    // Less material passes a finer mesh, always -- so a grading column that
+    // climbs has been read off the wrong rows even though every value in it is
+    // a perfectly plausible percentage.
+    const reversed = {
+      ...report,
+      psd: { ...report.psd, rows: report.psd.rows.slice().reverse() },
+    };
+    expect(mapping.describeAnomalies(reversed).map((anomaly) => anomaly.reason))
+      .toContain("rises as the sieve gets finer");
+
+    // `N/A` is what the lab writes for a test it did not run -- 7 of the 9
+    // reports in the two known workbooks say so -- and must never be flagged.
+    const notTested = {
+      ...report,
+      metals: {
+        ...report.metals,
+        rows: report.metals.rows.map((row) => ({ ...row, resultPpm: "N/A" })),
+      },
+    };
+    expect(mapping.describeAnomalies(notTested)).toEqual([]);
+
+    // An empty cell in a results column is not a measurement either -- the
+    // lab writes `N/A` for a test it did not run, and leaves nothing blank.
+    const blankResult = {
+      ...report,
+      metals: {
+        ...report.metals,
+        rows: report.metals.rows.map((row, index) =>
+          (index === 0 ? { ...row, resultPpm: "" } : row)),
+      },
+    };
+    expect(mapping.describeAnomalies(blankResult).at(0)).toMatchObject({
+      label: "Metals result (row 1)",
+      reason: "is not a result",
+    });
+
+    // A block the model carries but leaves blank is still not the form's own.
+    expect(mapping.describeAnomalies({ siltCoral: {} })).toContainEqual({
+      field: "siltCoral.requirement",
+      label: "the silt and coral block's requirement",
+      value: "",
+      reason: "does not read as the form's own",
+    });
+
+    // A column read off the wrong rows is wrong all the way down, so only the
+    // first offending row is named.
+    const brokenColumn = {
+      ...report,
+      metals: {
+        ...report.metals,
+        rows: report.metals.rows.map((row, index) =>
+          (index >= 2 ? { ...row, resultPpm: "HONG HAI 9" } : row)),
+      },
+    };
+    expect(mapping.describeAnomalies(brokenColumn)).toEqual([
+      {
+        field: "metals.rows.resultPpm",
+        label: "Metals result (row 3)",
+        value: "HONG HAI 9",
+        reason: "is not a result",
+      },
+    ]);
   });
 
   it("keeps the letterhead out of the appendix when it sits below the photographs", async () => {

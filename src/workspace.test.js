@@ -773,28 +773,18 @@ describe("workspace controller", () => {
   it("names a report value that is not of its own kind", async () => {
     const { selectFile } = await loadMappedWorkspace();
     globalThis.docuAlignLogger = { logWarn: vi.fn() };
-    const mapper = globalThis.docuAlignReportMapping;
     // A workbook read one row out exports without error, in the right layout,
     // signed -- with the vessel's voyage number printed as its sampling date.
     // This warning is what says so while the workbook is still on screen.
+    // Which values count is `describeAnomalies`' business, tested with the
+    // mapper; the workspace's is naming the group and getting it into the log.
     globalThis.docuAlignReportMapping = {
-      describeAnomalies: mapper.describeAnomalies,
+      describeAnomalies: (model) => (model.groupIndex === 2
+        ? [{ label: "Sampling Date", reason: "is not a date" }]
+        : []),
       buildMappedReports: () => [
-        {
-          groupIndex: 1,
-          jobRef: "X-2026-1549-1",
-          appendix: { photos: [{ name: "a" }] },
-          assets: {},
-          cover: {
-            jobRef: "X-2026-1549-1",
-            samplingDate: "HH9-638N",
-            dateReceived: "31/08/2026",
-            dateOfReport: "03/09/2026",
-          },
-          siltCoral: { siltPercent: "0.9", totalPercent: "1.7" },
-          moisture: { percent: "9.6" },
-          organicMatter: { percent: "0.12" },
-        },
+        { groupIndex: 1, jobRef: "X-1", appendix: { photos: [{ name: "a" }] }, assets: {} },
+        { groupIndex: 2, jobRef: "X-2", appendix: { photos: [{ name: "b" }] }, assets: {} },
       ],
     };
 
@@ -802,12 +792,36 @@ describe("workspace controller", () => {
 
     expect(globalThis.docuAlignLogger.logWarn).toHaveBeenCalledWith(
       "Some reports carry values that do not look like themselves",
-      expect.objectContaining({ message: "group 1: Sampling Date is not a date" }),
+      expect.objectContaining({ message: "group 2: Sampling Date is not a date" }),
       expect.objectContaining({
         category: "ImplausibleReportValues",
-        safeIdentifier: "1",
+        safeIdentifier: "2",
       }),
     );
+  });
+
+  it("caps the warning when one drifted block is wrong in every group", async () => {
+    const { selectFile } = await loadMappedWorkspace();
+    globalThis.docuAlignLogger = { logWarn: vi.fn() };
+    // A block read off the wrong rows is wrong in every report at once. The
+    // first few name the fault; a wall of identical lines would only bury it.
+    globalThis.docuAlignReportMapping = {
+      describeAnomalies: () => Array.from({ length: 8 }, (_, index) => ({
+        label: `Field ${index}`,
+        reason: "is empty",
+      })),
+      buildMappedReports: () => [
+        { groupIndex: 1, jobRef: "X-1", appendix: { photos: [{ name: "a" }] }, assets: {} },
+        { groupIndex: 2, jobRef: "X-2", appendix: { photos: [{ name: "b" }] }, assets: {} },
+      ],
+    };
+
+    await selectFile(workbook("drifted-block.xlsx"));
+
+    const [, error, context] = globalThis.docuAlignLogger.logWarn.mock.calls.at(-1);
+    expect(error.message).toContain("and 4 more");
+    expect(error.message.split(";")).toHaveLength(13);
+    expect(context.safeIdentifier).toBe("1,2");
   });
 
   it("stays quiet when every mapped value looks like itself", async () => {
