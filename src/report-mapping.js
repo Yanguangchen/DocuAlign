@@ -80,6 +80,80 @@
     return values;
   }
 
+  /** The column every cover value sits in, on its own label's row. */
+  const COVER_VALUE_COLUMN = "K";
+  const CELL_ADDRESS = /^([A-Z]+)(\d+)$/;
+
+  /** A cover label reduced to what identifies it, ignoring spacing and stops. */
+  function labelKey(value) {
+    return String(value ?? "").toLowerCase().replaceAll(/[^a-z0-9]+/g, "");
+  }
+
+  /** A column letter as its 1-based number, so `A` < `C` < `K` can be compared. */
+  function columnNumber(column) {
+    let number = 0;
+    for (const letter of column) number = (number * 26) + (letter.charCodeAt(0) - 64);
+    return number;
+  }
+
+  /**
+   * Every row of the cover sheet that carries a label, keyed by that label.
+   *
+   * The cover writes each field as a label in column C, a colon, and the value
+   * in column K, so only the columns LEFT of the value column are labels.
+   * @param {object} sheet - Cover sheet.
+   * @returns {Map<string, number[]>} Label key to the rows carrying it.
+   */
+  function coverLabelRows(sheet) {
+    const rows = new Map();
+    const valueColumn = columnNumber(COVER_VALUE_COLUMN);
+    for (const [address, value] of Object.entries(sheet?.cells ?? {})) {
+      const cell = address.match(CELL_ADDRESS);
+      if (!cell || columnNumber(cell[1]) >= valueColumn) continue;
+      const key = labelKey(value);
+      if (!key) continue;
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(Number(cell[2]));
+    }
+    return rows;
+  }
+
+  /**
+   * Read the cover by its own labels rather than by the sample's rows.
+   *
+   * Every cover field used to be a fixed cell address measured from
+   * `SampleInput.xlsx`. Those addresses are that workbook's, not the form's: a
+   * client workbook listing two more test standards pushes the whole identity
+   * block down, and every field from `Job Ref.` on then reads the row above its
+   * own label -- the vessel name printed as the sample id, the sampling date as
+   * the date received, on a signed report with nothing to show for it. The same
+   * lesson as the pictures in AGENTS.md 2a: an absolute row is never the
+   * primary selector.
+   *
+   * The label is what identifies a field, so each value is read from the row
+   * its label sits on, and the sample's row is kept only as the fallback for a
+   * sheet that does not carry that label at all.
+   * @param {object} sheet - Cover sheet.
+   * @returns {{row: Function, value: Function}} Row and value readers.
+   */
+  function coverReader(sheet) {
+    const labelRows = coverLabelRows(sheet);
+    const row = (label, sampleRow) => {
+      const candidates = labelRows.get(labelKey(label));
+      if (!candidates || candidates.length === 0) return sampleRow;
+      // A word repeated elsewhere on the sheet resolves to the occurrence
+      // nearest the row the sample keeps the field on, so a stray match
+      // cannot move a field to the other end of the page.
+      return candidates.reduce((best, candidate) =>
+        (Math.abs(candidate - sampleRow) < Math.abs(best - sampleRow) ? candidate : best));
+    };
+    return {
+      row,
+      value: (label, sampleRow) =>
+        text(sheet, `${COVER_VALUE_COLUMN}${row(label, sampleRow)}`),
+    };
+  }
+
   /**
    * The appendix photographs on one report sheet.
    *
@@ -201,8 +275,15 @@
     const coverSheet = sheetsByName.get(group.coverSheetName);
     const reportSheet = sheetsByName.get(group.reportSheetName);
     const shearSheet = sheetsByName.get(group.shearSheetName);
-    const jobRef = text(coverSheet, "K28") || text(reportSheet, "AE2");
+    const cover = coverReader(coverSheet);
+    const jobRef = cover.value("Job Ref.", 28) || text(reportSheet, "AE2");
     const { photos, preparedSignature, authorisedSignature } = reportPictures(reportSheet);
+    // The address runs onto the row below its label, and each list runs six
+    // rows from its own -- both are the reference page's fixed shape, so only
+    // where they start moves with the sheet.
+    const addressRow = cover.row("Address", 6);
+    const methodRow = cover.row("Test Method", 14);
+    const standardRow = cover.row("Test Standards", 21);
 
     return {
       schemaVersion: 2,
@@ -212,23 +293,26 @@
       sourceSheets: { ...group },
       jobRef,
       cover: {
-        clientName: text(coverSheet, "K5"),
-        addressLines: [text(coverSheet, "K6"), text(coverSheet, "K7")],
-        telephoneFax: text(coverSheet, "K8"),
-        email: text(coverSheet, "K9"),
-        attentionTo: text(coverSheet, "K10"),
-        projectTitle: text(coverSheet, "K12"),
-        testMethods: pairedRows(coverSheet, "K", "L", 14, 19),
-        testStandards: pairedRows(coverSheet, "K", "L", 21, 26),
+        clientName: cover.value("Client Name", 5),
+        addressLines: [
+          text(coverSheet, `K${addressRow}`),
+          text(coverSheet, `K${addressRow + 1}`),
+        ],
+        telephoneFax: cover.value("Tel No/Fax No", 8),
+        email: cover.value("Email", 9),
+        attentionTo: cover.value("Attention to", 10),
+        projectTitle: cover.value("Project Code/Title", 12),
+        testMethods: pairedRows(coverSheet, "K", "L", methodRow, methodRow + 5),
+        testStandards: pairedRows(coverSheet, "K", "L", standardRow, standardRow + 5),
         jobRef,
-        vesselName: text(coverSheet, "K29"),
-        voyageNumber: text(coverSheet, "K30"),
-        sampleId: text(coverSheet, "K31"),
-        samplingDate: text(coverSheet, "K32"),
-        dateReceived: text(coverSheet, "K33"),
-        dateOfReport: text(coverSheet, "K34"),
-        totalPages: text(coverSheet, "K36"),
-        remarks: text(coverSheet, "K37"),
+        vesselName: cover.value("Vessel Name", 29),
+        voyageNumber: cover.value("VOY No.", 30),
+        sampleId: cover.value("Client Ref./Sample ID", 31),
+        samplingDate: cover.value("Sampling Date", 32),
+        dateReceived: cover.value("Date Received", 33),
+        dateOfReport: cover.value("Date of Report", 34),
+        totalPages: cover.value("Total Pages", 36),
+        remarks: cover.value("Remarks", 37),
       },
       psd: {
         rows: buildPsdRows(reportSheet),

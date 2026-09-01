@@ -272,6 +272,98 @@ describe("semantic workbook report mapping", () => {
     });
   });
 
+  it("reads every cover field from its own label's row, not the sample's", async () => {
+    const { mapping } = await loadMappingModules();
+    // The production case: a client workbook carrying two extra rows above the
+    // identity block. Read at the sample's fixed addresses, every field from
+    // `Job Ref.` down came off the row ABOVE its label -- the vessel name
+    // printed as the sample id, the sampling date as the date received -- on a
+    // signed report, with every other value on the page correct.
+    const cells = {
+      C5: "Client Name", J5: ":", K5: "Xinsha Holding Pte Ltd",
+      C6: "Address", J6: ":", K6: "9 Temasek Boulevard #22-03", K7: "Singapore 038989",
+      C8: "Tel No/Fax No", J8: ":", K8: "66630637/66630657",
+      C9: "Email", J9: ":", K9: "shu@xinshaholding.com",
+      C10: "Attention to", J10: ":", K10: "Mr Shu Changhong",
+      C12: "Project Code/Title", J12: ":", K12: "Reclamation Sand Testing",
+      C16: "Test Method", J16: ":", K16: "1)", L16: "Particle Size Distribution",
+      K17: "2)", L17: "Silt and Coral/Shell Content",
+      C23: "Test Standards", J23: ":", K23: "1)", L23: "BS 812-103.1:1985",
+      C30: "Job Ref.", J30: ":", K30: "X-2026-1549-2",
+      C31: "Vessel Name", J31: ":", K31: "HONG HAI 9",
+      C32: "VOY No.", J32: ":", K32: "HH9-638N",
+      C33: "Client Ref./Sample ID", J33: ":", K33: "1-D",
+      C34: "Sampling Date", J34: ":", K34: "28/08/2026",
+      C35: "Date Received", J35: ":", K35: "03/09/2026",
+      C36: "Date of Report", J36: ":", K36: "05/09/2026",
+      C38: "Total Pages", J38: ":", K38: "5 (including cover page)",
+      C39: "Remarks", J39: ":", K39: "Please refer to Appendix",
+      // Nothing that is not a cell address, and no unlabelled cell, may be
+      // mistaken for a label.
+      "!ref": "A1:AE200", C40: null, AE1: "Job Ref.",
+    };
+
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        { name: "CV1", cells },
+        { name: "TR1", cells: { AE2: "X-2026-1549-2" } },
+      ],
+    });
+
+    expect(report.cover).toMatchObject({
+      clientName: "Xinsha Holding Pte Ltd",
+      addressLines: ["9 Temasek Boulevard #22-03", "Singapore 038989"],
+      telephoneFax: "66630637/66630657",
+      email: "shu@xinshaholding.com",
+      attentionTo: "Mr Shu Changhong",
+      projectTitle: "Reclamation Sand Testing",
+      jobRef: "X-2026-1549-2",
+      vesselName: "HONG HAI 9",
+      voyageNumber: "HH9-638N",
+      sampleId: "1-D",
+      samplingDate: "28/08/2026",
+      dateReceived: "03/09/2026",
+      dateOfReport: "05/09/2026",
+      totalPages: "5 (including cover page)",
+      remarks: "Please refer to Appendix",
+    });
+    // Each list still runs the reference page's six rows, from its own label.
+    expect(report.cover.testMethods).toEqual([
+      "1) Particle Size Distribution",
+      "2) Silt and Coral/Shell Content",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    expect(report.cover.testStandards.at(0)).toBe("1) BS 812-103.1:1985");
+  });
+
+  it("resolves a repeated cover label to the row nearest the sample's", async () => {
+    const { mapping } = await loadMappingModules();
+    // "Remarks" is a word a cover can carry more than once. The field still
+    // has to come off the sign-off block's own row rather than whichever
+    // occurrence the sheet happens to list first.
+    const [report] = mapping.buildMappedReports({
+      sheets: [
+        {
+          name: "CV1",
+          cells: {
+            C10: "Remarks", K10: "Handling note",
+            C37: "Remarks", K37: "Please refer to Appendix",
+            C60: "Remarks", K60: "Internal note",
+            // A sheet that never labels this field keeps the sample's row.
+            K32: "08/04/2026",
+          },
+        },
+        { name: "TR1", cells: { AE2: "X-1" } },
+      ],
+    });
+
+    expect(report.cover.remarks).toBe("Please refer to Appendix");
+    expect(report.cover.samplingDate).toBe("08/04/2026");
+  });
+
   it("finds appendix photographs at a layout the sample's anchor never sees", async () => {
     const { mapping } = await loadMappingModules();
     // A client workbook whose report simply ends earlier: nothing sits at the
