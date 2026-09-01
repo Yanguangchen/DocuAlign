@@ -333,12 +333,16 @@
       { x: 105.84, top: 172.08, width: 368.49, height: 260.79 },
       { x: 105.84, top: 475.68, width: 368.49, height: 260.79 },
     ];
-    report.appendix.photos.forEach((asset, index) => {
-      const position = positions.at(index);
-      // `evidence` marks a picture that belongs to THIS sample and to no other
-      // report. If it cannot be drawn, the box must be cleared rather than left
-      // showing whatever the reference page holds -- see the image loop.
-      if (position) plan.images.push({ asset, evidence: true, ...position });
+    // BOTH boxes are planned, whether or not the workbook supplied a
+    // photograph for them. `evidence` marks a picture that belongs to THIS
+    // sample and to no other report, so a box with nothing to draw is cleared
+    // and labelled -- see the image loop. A box left out of the plan entirely
+    // is never cleared, and the reference page's own photograph stays on the
+    // report: a real client workbook whose photographs had not been pasted in
+    // shipped page 5 of another vessel's sample that way.
+    positions.forEach((position, index) => {
+      const asset = report.appendix.photos.at(index) ?? null;
+      plan.images.push({ asset, evidence: true, ...position });
     });
     return plan;
   }
