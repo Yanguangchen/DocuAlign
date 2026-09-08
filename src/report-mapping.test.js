@@ -489,7 +489,13 @@ describe("semantic workbook report mapping", () => {
     // anomaly, and a report missing whole sections is entirely anomalous.
     const tolerated = {
       ...shifted,
-      cover: { ...shifted.cover, jobRef: "X-2026-1549-1", samplingDate: "28/08/2026", dateReceived: "31/08/2026" },
+      cover: {
+        ...shifted.cover,
+        jobRef: "X-2026-1549-1",
+        samplingDate: "28/08/2026",
+        dateReceived: "31/08/2026",
+        dateOfReport: "03/09/2026",
+      },
       siltCoral: { ...shifted.siltCoral, siltPercent: "< 1" },
       moisture: { percent: "9.6" },
     };
@@ -596,6 +602,128 @@ describe("semantic workbook report mapping", () => {
         reason: "is not a result",
       },
     ]);
+  });
+
+  it("cross-checks the values two sheets both carry", async () => {
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    const [report] = mapping.buildMappedReports(parsed);
+
+    // A sample is taken, then received, then reported on. Shift the block by
+    // one slot and every date is still a date -- the shape checks see nothing,
+    // and the order is the only thing left that knows.
+    const slidDates = {
+      ...report,
+      cover: {
+        ...report.cover,
+        samplingDate: report.cover.dateReceived,
+        dateReceived: report.cover.dateOfReport,
+        dateOfReport: report.cover.samplingDate,
+      },
+    };
+    expect(mapping.describeAnomalies(slidDates)).toEqual([{
+      field: "cover.dateOfReport",
+      label: "Date of Report",
+      value: report.cover.samplingDate,
+      reason: "is before Date Received",
+    }]);
+
+    // `CV1` and `TR1!AE2` both carry the job reference and are read
+    // independently. Each reading on its own is a perfectly well-formed job
+    // reference; only the pair is wrong.
+    expect(report.jobRefSources).toEqual({
+      cover: report.jobRef,
+      report: report.jobRef,
+    });
+    const conflicted = {
+      ...report,
+      jobRefSources: { cover: "X-2026-522-1", report: "X-2026-522-4" },
+    };
+    expect(mapping.describeAnomalies(conflicted)).toEqual([{
+      field: "jobRefSources",
+      label: "Job Ref.",
+      value: "X-2026-522-1",
+      reason: "does not match X-2026-522-4 on the results sheet",
+    }]);
+
+    // A report carrying only one of the two readings is not a disagreement.
+    for (const jobRefSources of [{ cover: "X-1", report: "" }, { cover: "", report: "X-1" }]) {
+      expect(mapping.describeAnomalies({ ...report, jobRefSources })).toEqual([]);
+    }
+  });
+
+  it("checks the shear summary against the curve it summarises", async () => {
+    const { parsed, mapping } = await parseReferenceWorkbook();
+    const [report] = mapping.buildMappedReports(parsed);
+
+    // `TR1`'s summary and `SB1`'s plotted series are the same measurement read
+    // from two different worksheets: the summary is its curve's peak to the
+    // nearest whole kPa. Nothing else in the mapper reads `SB1` at all, so a
+    // block that drifted on EITHER sheet shows up here and nowhere else.
+    const values = report.directShear.rows.map((row) => row.maxShearStressKpa);
+    const slid = {
+      ...report,
+      directShear: {
+        ...report.directShear,
+        rows: report.directShear.rows.map((row, index) => ({
+          ...row,
+          maxShearStressKpa: values.at((index + 1) % values.length),
+        })),
+      },
+    };
+    expect(mapping.describeAnomalies(slid).map((anomaly) => anomaly.label)).toEqual([
+      "Max shear stress at 50 kPa",
+      "Max shear stress at 100 kPa",
+      "Max shear stress at 150 kPa",
+    ]);
+
+    // Curves pair to rows by their own normal stress, so a summary listing its
+    // stresses in another order still compares like with like.
+    const reordered = {
+      ...report,
+      directShear: {
+        ...report.directShear,
+        rows: report.directShear.rows.slice().reverse(),
+      },
+    };
+    expect(mapping.describeAnomalies(reordered)).toEqual([]);
+
+    // A curve the summary does not list at all is itself the disagreement.
+    const truncated = {
+      ...report,
+      directShear: { ...report.directShear, rows: report.directShear.rows.slice(0, 2) },
+    };
+    expect(mapping.describeAnomalies(truncated).at(0)).toMatchObject({
+      label: "Max shear stress at 100 kPa",
+      value: "",
+    });
+
+    // A curve with no readable points is not evidence of anything -- neither
+    // an empty one, nor one whose points are unreadable, nor one with no
+    // points at all.
+    const unplotted = {
+      ...report,
+      directShear: {
+        ...report.directShear,
+        series: [
+          { normalStressKpa: "50", points: [] },
+          { normalStressKpa: "100", points: [{ shearStressKpa: "not a number" }] },
+          { normalStressKpa: "150" },
+        ],
+      },
+    };
+    expect(mapping.describeAnomalies(unplotted)).toEqual([]);
+
+    // The function is public, so a model that lost these fields altogether is
+    // reported rather than thrown on.
+    const malformed = mapping.describeAnomalies({
+      directShear: { rows: [{}], series: [{ points: [{ shearStressKpa: "12" }] }] },
+    });
+    expect(malformed).toContainEqual({
+      field: "directShear.rows.maxShearStressKpa",
+      label: "Max shear stress at  kPa",
+      value: "",
+      reason: "does not match the 12 kPa peak of its own curve",
+    });
   });
 
   it("keeps the letterhead out of the appendix when it sits below the photographs", async () => {

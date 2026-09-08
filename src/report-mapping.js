@@ -13,7 +13,7 @@
   });
   const STRESS_COLUMNS = Object.freeze(["M", "P", "V", "AB"]);
   /** The cover writes every date as `DD/MM/YYYY`; `src/xlsx-reader.js` renders serials that way too. */
-  const DATE_SHAPE = /^\d{2}\/\d{2}\/\d{4}$/;
+  const DATE_SHAPE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
   /** A result may be reported against a detection limit rather than as a bare number. */
   const DETECTION_LIMIT = /^[<>\u2264\u2265]\s*/;
   /** A test the lab did not run is reported, not left blank -- 7 of the 9 known reports say so. */
@@ -32,6 +32,13 @@
   /** A measured result, or the lab's own note that the test was not run. */
   const isReportedResult = (value) => NOT_TESTED.test(value) || isMeasurement(value);
   const isEmail = (value) => value.includes("@") && !/\s/.test(value);
+  /** A `DD/MM/YYYY` cover date as a UTC timestamp, or NaN when it is not one. */
+  const dateValue = (value) => {
+    const parts = DATE_SHAPE.exec(value);
+    return parts
+      ? Date.UTC(Number(parts.at(3)), Number(parts.at(2)) - 1, Number(parts.at(1)))
+      : Number.NaN;
+  };
   const isContactNumber = (value) => /^[\d/+()\-.\s]+$/.test(value) && /\d/.test(value);
 
   /**
@@ -344,6 +351,98 @@
   }
 
   /**
+   * The order the cover's three dates can only fall in.
+   *
+   * A sample is taken, then received, then reported on. The shape checks let
+   * a date read off the wrong row through as long as it is a date, so this is
+   * what catches a shifted block whose values all still look like dates --
+   * the case that started this whole class of defect. Only a pair that both
+   * parse is compared; a missing date is already reported as empty.
+   */
+  const DATE_ORDER = Object.freeze([
+    ["cover.samplingDate", "Sampling Date", "cover.dateReceived", "Date Received"],
+    ["cover.dateReceived", "Date Received", "cover.dateOfReport", "Date of Report"],
+  ]);
+
+  function describeDateOrder(report) {
+    const anomalies = [];
+    for (const [earlierField, earlierLabel, laterField, laterLabel] of DATE_ORDER) {
+      const earlier = dateValue(readPath(report, earlierField));
+      const later = dateValue(readPath(report, laterField));
+      if (!Number.isFinite(earlier) || !Number.isFinite(later) || earlier <= later) continue;
+      anomalies.push({
+        field: laterField,
+        label: laterLabel,
+        value: readPath(report, laterField),
+        reason: `is before ${earlierLabel}`,
+      });
+    }
+    return anomalies;
+  }
+
+  /**
+   * The two sheets that both carry the job reference, disagreeing.
+   *
+   * `CV1` holds it and `TR1!AE2` holds it again; the cover's is the one used
+   * and the results sheet's is only its fallback, so today a disagreement is
+   * silent. No single-value check can see it, because each reading on its own
+   * is a perfectly well-formed job reference -- it is the pair that is wrong,
+   * and one of the two sheets was read off the wrong cell.
+   * @param {object} report - Semantic report model.
+   * @returns {Array<object>} At most one anomaly.
+   */
+  function describeJobRefAgreement(report) {
+    const fromCover = readPath(report, "jobRefSources.cover");
+    const fromReport = readPath(report, "jobRefSources.report");
+    if (fromCover === "" || fromReport === "" || fromCover === fromReport) return [];
+
+    return [{
+      field: "jobRefSources",
+      label: "Job Ref.",
+      value: fromCover,
+      reason: `does not match ${fromReport} on the results sheet`,
+    }];
+  }
+
+  /**
+   * The direct shear summary disagreeing with the curve it summarises.
+   *
+   * `TR1`'s summary row and `SB1`'s plotted series are the same measurement
+   * taken from two different worksheets: the summary is its curve's peak to
+   * the nearest whole kPa, exactly, in all nine reports of the two known
+   * workbooks. Nothing else in this file reads `SB1` at all, so a block that
+   * has drifted on EITHER sheet shows up here and nowhere else.
+   *
+   * Curves are paired to rows by their own normal stress rather than by
+   * position, so a summary listing its stresses in another order still
+   * compares like with like, and a curve the summary does not list at all is
+   * itself reported.
+   * @param {object} report - Semantic report model.
+   * @returns {Array<object>} One anomaly per disagreeing curve.
+   */
+  function describeShearAgreement(report) {
+    const rows = new Map((report?.directShear?.rows ?? [])
+      .map((row) => [String(row.normalStressKpa ?? "").trim(), row]));
+    const anomalies = [];
+    for (const curve of report?.directShear?.series ?? []) {
+      const points = (curve.points ?? []).map((point) => Number(point.shearStressKpa));
+      if (points.length === 0 || !points.every((point) => Number.isFinite(point))) continue;
+
+      const stress = String(curve.normalStressKpa ?? "").trim();
+      const row = rows.get(stress);
+      const peak = Math.round(Math.max(...points));
+      if (Number(row?.maxShearStressKpa) === peak) continue;
+      anomalies.push({
+        field: "directShear.rows.maxShearStressKpa",
+        label: `Max shear stress at ${stress} kPa`,
+        value: row === undefined ? "" : String(row.maxShearStressKpa ?? ""),
+        reason: `does not match the ${peak} kPa peak of its own curve`,
+      });
+    }
+    return anomalies;
+  }
+
+  /**
    * The grading curve read out of order.
    *
    * Cumulative passing cannot RISE as the sieve gets finer -- less material
@@ -394,6 +493,9 @@
       ...describeTableShapes(report),
       ...describeGradingOrder(report),
       ...describeCanaries(report),
+      ...describeDateOrder(report),
+      ...describeJobRefAgreement(report),
+      ...describeShearAgreement(report),
     ];
   }
 
@@ -562,7 +664,15 @@
     const reportSheet = sheetsByName.get(group.reportSheetName);
     const shearSheet = sheetsByName.get(group.shearSheetName);
     const cover = coverReader(coverSheet);
-    const jobRef = cover.value("Job Ref.", 28) || text(reportSheet, "AE2");
+    // Both sheets carry the job reference. The cover's is the one used and the
+    // results sheet's is only its fallback, but both readings are kept so a
+    // disagreement between them can be reported: it means one of the two was
+    // read off the wrong cell, which neither reading shows on its own.
+    const jobRefSources = {
+      cover: cover.value("Job Ref.", 28),
+      report: text(reportSheet, "AE2"),
+    };
+    const jobRef = jobRefSources.cover || jobRefSources.report;
     const { photos, preparedSignature, authorisedSignature } = reportPictures(reportSheet);
     // The address runs onto the row below its label, and each list runs six
     // rows from its own -- both are the reference page's fixed shape, so only
@@ -578,6 +688,7 @@
       sourceName,
       sourceSheets: { ...group },
       jobRef,
+      jobRefSources,
       cover: {
         clientName: cover.value("Client Name", 5),
         addressLines: [
