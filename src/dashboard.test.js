@@ -1085,6 +1085,12 @@ describe("dashboard module", () => {
       expect(note()).toBe("Pick a date to package everything saved on it.");
       expect(label()).toBe("Package every document saved on a date");
 
+      // A change event can still fire on a disabled checkbox (clicking the
+      // label, or a test). It must not select anything while no day is set.
+      selectAll().checked = true;
+      selectAll().dispatchEvent(new Event("change", { bubbles: true }));
+      expect(document.querySelector("#bundle-bar").hidden).toBe(true);
+
       pickDay(DAY);
       expect(selectAll().disabled).toBe(false);
       expect(note()).toBe("");

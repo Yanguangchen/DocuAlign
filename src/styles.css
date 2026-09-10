@@ -941,7 +941,7 @@ a:focus-visible {
   min-width: 0;
 }
 
-.report-card-title strong {
+.report-card-head strong {
   font-size: 1rem;
   letter-spacing: -0.01em;
   word-break: break-word;
