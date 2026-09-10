@@ -12,6 +12,7 @@ import {
   fetchReportDocuments,
   fetchReports,
   filterReportsByDate,
+  toDate,
   todayValue,
 } from "./lib/reports.js";
 import {
@@ -259,6 +260,129 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
+const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "long" });
+const monthYearFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "long",
+  year: "numeric",
+});
+
+const UNTITLED_REPORT = "Untitled report";
+const UNKNOWN_MONTH_KEY = "unknown";
+const UNKNOWN_MONTH_LABEL = "Date unavailable";
+
+/**
+ * The name a saved report shows on its card: the stored report name, else the
+ * workbook file name, else a stable untitled fallback so two nameless saves
+ * still compare as the same name.
+ * @param {Object} [report] - A saved report.
+ * @returns {string} Display name.
+ */
+export function reportTitle(report) {
+  const named = String(report?.reportName || report?.sourceFileName || "").trim();
+  return named || UNTITLED_REPORT;
+}
+
+/**
+ * Fold a display name for duplicate comparison: trim and case-fold so
+ * "DOC2" and "doc2" are the same name on the dashboard.
+ * @param {string} name - A report display name.
+ * @returns {string} Comparison key.
+ */
+export function normalizeReportName(name) {
+  return String(name ?? "").trim().toLowerCase();
+}
+
+/**
+ * Names that appear on more than one saved report, as comparison keys.
+ * @param {Array<Object>} reports - Reports to scan, typically every loaded save.
+ * @returns {Set<string>} Duplicate name keys.
+ */
+export function duplicateNameSet(reports) {
+  const counts = new Map();
+  for (const report of reports) {
+    const key = normalizeReportName(reportTitle(report));
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const duplicates = new Set();
+  for (const [key, count] of counts) {
+    if (count > 1) duplicates.add(key);
+  }
+  return duplicates;
+}
+
+/**
+ * Bucket a report into a calendar month, or the undated group.
+ * @param {Object} report - A saved report.
+ * @returns {{key: string, sort: number, year: number|null, month: number|null}}
+ */
+function monthBucket(report) {
+  const date = toDate(report?.createdAt);
+  if (!date) {
+    return { key: UNKNOWN_MONTH_KEY, sort: Number.NEGATIVE_INFINITY, year: null, month: null };
+  }
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  return {
+    key: `${year}-${String(month + 1).padStart(2, "0")}`,
+    sort: year * 12 + month,
+    year,
+    month,
+  };
+}
+
+/**
+ * Group reports by the month they were saved. Months are newest-first to match
+ * the dashboard's newest-first fetch; undated reports sit in a final group.
+ * The label is the month name alone while every dated group shares one year,
+ * and "June 2026" once the list spans years.
+ * @param {Array<Object>} reports - Reports in the order they should keep inside a month.
+ * @returns {Array<{key: string, label: string, reports: Array<Object>}>} Month groups.
+ */
+export function groupReportsByMonth(reports) {
+  const groups = [];
+  const byKey = new Map();
+  const years = new Set();
+
+  for (const report of reports) {
+    const bucket = monthBucket(report);
+    if (bucket.year !== null) years.add(bucket.year);
+    let group = byKey.get(bucket.key);
+    if (!group) {
+      group = { ...bucket, reports: [] };
+      byKey.set(bucket.key, group);
+      groups.push(group);
+    }
+    group.reports.push(report);
+  }
+
+  const includeYear = years.size > 1;
+  for (const group of groups) {
+    if (group.key === UNKNOWN_MONTH_KEY) {
+      group.label = UNKNOWN_MONTH_LABEL;
+    } else {
+      const stamp = new Date(group.year, group.month, 1);
+      group.label = (includeYear ? monthYearFormatter : monthFormatter).format(stamp);
+    }
+  }
+
+  groups.sort((a, b) => b.sort - a.sort);
+  return groups;
+}
+
+/**
+ * A full-width month label that sits in the same grid as the cards, so the
+ * cards of one month still flow DOC1 | DOC2 | DOC2 under it.
+ * @param {string} label - Month name, or "Date unavailable".
+ * @returns {string} List-item markup.
+ */
+export function monthHeading(label) {
+  return `
+    <li class="report-month">
+      <h2 class="report-month-label">${escapeHtml(label)}</h2>
+    </li>
+  `;
+}
+
 export function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -326,8 +450,8 @@ export function documentPicker(report) {
   `;
 }
 
-export function reportCard(report) {
-  const title = report.reportName || report.sourceFileName || "Untitled report";
+export function reportCard(report, { duplicate = false } = {}) {
+  const title = reportTitle(report);
   const created = report.createdAt
     ? dateFormatter.format(report.createdAt)
     : "Date unavailable";
@@ -337,6 +461,9 @@ export function reportCard(report) {
     : "";
   const savedBy = report.createdBy
     ? `<span class="report-meta-item">${escapeHtml(report.createdBy)}</span>`
+    : "";
+  const duplicateFlag = duplicate
+    ? '<span class="report-duplicate" title="Another saved report uses this name">Duplicate name</span>'
     : "";
   // Only saved documents can be shared: the public snapshot references the
   // Firestore id, so a report without one has nothing durable to point at.
@@ -376,9 +503,12 @@ export function reportCard(report) {
     : "";
 
   return `
-    <li class="report-card">
+    <li class="report-card${duplicate ? " is-duplicate" : ""}">
       <div class="report-card-head">
-        <strong>${escapeHtml(title)}</strong>
+        <div class="report-card-title">
+          <strong>${escapeHtml(title)}</strong>
+          ${duplicateFlag}
+        </div>
         <span class="report-status">${escapeHtml(statusLabel)}</span>
       </div>
       ${source}
@@ -660,7 +790,18 @@ export function render() {
   resultCount.textContent = hasFilter
     ? `${filtered.length} of ${allReports.length} reports`
     : `${allReports.length} ${allReports.length === 1 ? "report" : "reports"}`;
-  grid.innerHTML = filtered.map(reportCard).join("");
+  // Duplicates are counted across every loaded save, not just the visible
+  // slice: a copy filtered out of this day is still the reason the one on
+  // screen should not be treated as a unique name.
+  const duplicates = duplicateNameSet(allReports);
+  grid.innerHTML = groupReportsByMonth(filtered)
+    .map((group) => monthHeading(group.label)
+      + group.reports
+        .map((report) => reportCard(report, {
+          duplicate: duplicates.has(normalizeReportName(reportTitle(report))),
+        }))
+        .join(""))
+    .join("");
   // "Everything saved on this day" is a live statement, not a one-off action:
   // while it is ticked, picking another date re-selects against the day now on
   // screen instead of silently keeping the old set.

@@ -31,6 +31,7 @@ vi.mock("./lib/reports.js", async (importOriginal) => {
   return {
     dayRange: actual.dayRange,
     todayValue: actual.todayValue,
+    toDate: actual.toDate,
     fetchReports: (...args) => mockFetchReports(...args),
     fetchReportDocuments: (...args) => mockFetchReportDocuments(...args),
     filterReportsByDate: (...args) => mockFilterReportsByDate(...args),
@@ -44,6 +45,14 @@ vi.mock("./lib/reports.js", async (importOriginal) => {
 const formatDay = (value) =>
   new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", year: "numeric" })
     .format(new Date(`${value}T00:00:00`));
+
+const formatMonth = (year, monthIndex) =>
+  new Intl.DateTimeFormat(undefined, { month: "long" })
+    .format(new Date(year, monthIndex, 1));
+
+const formatMonthYear = (year, monthIndex) =>
+  new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
+    .format(new Date(year, monthIndex, 1));
 
 const SHARE_TOKEN = "aB3dEfGh1JkLmNoPqRsTuVwXyZ012345";
 const SHARE_URL = `https://example.com/view.html?share=${SHARE_TOKEN}`;
@@ -1480,5 +1489,126 @@ describe("dashboard module", () => {
     const { loadReports } = await import("./dashboard.js");
     await loadReports({ uid: "user-empty-unfiltered" });
     expect(document.querySelector("#dashboard-status").textContent).toBe("No saved reports yet.");
+  });
+
+  describe("duplicate names and month labels", () => {
+    it("treats missing and blank titles as Untitled report", async () => {
+      const { reportTitle, normalizeReportName } = await import("./dashboard.js");
+      expect(reportTitle()).toBe("Untitled report");
+      expect(reportTitle({})).toBe("Untitled report");
+      expect(reportTitle({ reportName: "  " })).toBe("Untitled report");
+      expect(reportTitle({ sourceFileName: "raw.xlsx" })).toBe("raw.xlsx");
+      expect(normalizeReportName()).toBe("");
+    });
+
+    it("collects names that appear more than once, ignoring case and padding", async () => {
+      const { duplicateNameSet } = await import("./dashboard.js");
+      expect([...duplicateNameSet([
+        { reportName: "Hold 1" },
+        { reportName: "Hold 2" },
+      ])]).toEqual([]);
+      expect(duplicateNameSet([
+        { reportName: "Hold 1" },
+        { reportName: "  hold 1 " },
+        { reportName: "Hold 2" },
+      ]).has("hold 1")).toBe(true);
+      expect(duplicateNameSet([
+        { reportName: "Hold 1" },
+        { reportName: "  hold 1 " },
+        { reportName: "Hold 2" },
+      ]).has("hold 2")).toBe(false);
+    });
+
+    it("groups reports by month, newest month first, undated last", async () => {
+      const { groupReportsByMonth } = await import("./dashboard.js");
+      const juneEarly = { id: "june-early", reportName: "DOC1", createdAt: new Date(2026, 5, 2) };
+      const juneLate = { id: "june-late", reportName: "DOC2", createdAt: new Date(2026, 5, 20) };
+      const july = { id: "july", reportName: "DOC4", createdAt: new Date(2026, 6, 8) };
+      const undated = { id: "undated", reportName: "DOC-X" };
+
+      const groups = groupReportsByMonth([juneLate, july, juneEarly, undated]);
+
+      expect(groups.map((group) => group.label)).toEqual([
+        formatMonth(2026, 6),
+        formatMonth(2026, 5),
+        "Date unavailable",
+      ]);
+      expect(groups[0].reports.map((report) => report.id)).toEqual(["july"]);
+      // Input order is kept inside a month, so the dashboard's newest-first
+      // fetch still reads left-to-right within June.
+      expect(groups[1].reports.map((report) => report.id)).toEqual([
+        "june-late",
+        "june-early",
+      ]);
+      expect(groups[2].reports.map((report) => report.id)).toEqual(["undated"]);
+    });
+
+    it("names the month with its year once the list spans more than one year", async () => {
+      const { groupReportsByMonth } = await import("./dashboard.js");
+      const groups = groupReportsByMonth([
+        { id: "a", reportName: "A", createdAt: new Date(2026, 5, 15) },
+        { id: "b", reportName: "B", createdAt: new Date(2025, 5, 15) },
+      ]);
+      expect(groups.map((group) => group.label)).toEqual([
+        formatMonthYear(2026, 5),
+        formatMonthYear(2025, 5),
+      ]);
+    });
+
+    it("treats an invalid createdAt as undated", async () => {
+      const { groupReportsByMonth } = await import("./dashboard.js");
+      const groups = groupReportsByMonth([
+        { id: "bad", reportName: "Bad", createdAt: new Date("not-a-date") },
+      ]);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].label).toBe("Date unavailable");
+    });
+
+    it("marks a card when another saved report uses the same name", async () => {
+      const { reportCard } = await import("./dashboard.js");
+      const flagged = reportCard({ id: "doc-1", reportName: "DOC2" }, { duplicate: true });
+      expect(flagged).toContain("is-duplicate");
+      expect(flagged).toContain("Duplicate name");
+      expect(reportCard({ id: "doc-1", reportName: "DOC2" })).not.toContain("Duplicate name");
+    });
+
+    it("renders month headings and flags duplicate names on the grid", async () => {
+      mockFetchReports.mockResolvedValueOnce([
+        { id: "july-a", reportName: "DOC4", matchFilter: true, createdAt: new Date(2026, 6, 8) },
+        { id: "june-a", reportName: "DOC1", matchFilter: true, createdAt: new Date(2026, 5, 2) },
+        { id: "june-b", reportName: "DOC2", matchFilter: true, createdAt: new Date(2026, 5, 10) },
+        { id: "june-c", reportName: "doc2", matchFilter: true, createdAt: new Date(2026, 5, 18) },
+      ]);
+      await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-month-labels" });
+      await new Promise((r) => setTimeout(r, 15));
+
+      const headings = [...document.querySelectorAll(".report-month-label")]
+        .map((heading) => heading.textContent);
+      expect(headings).toEqual([formatMonth(2026, 6), formatMonth(2026, 5)]);
+      expect(document.querySelectorAll(".report-card")).toHaveLength(4);
+
+      const flagged = [...document.querySelectorAll(".report-card.is-duplicate")]
+        .map((card) => card.querySelector("strong").textContent.trim());
+      expect(flagged).toEqual(["DOC2", "doc2"]);
+      expect(document.querySelectorAll(".report-duplicate")).toHaveLength(2);
+    });
+
+    it("still flags a duplicate whose other copy is filtered out of the grid", async () => {
+      mockFetchReports.mockResolvedValueOnce([
+        { id: "visible", reportName: "Same name", matchFilter: true, createdAt: new Date(2026, 5, 10) },
+        { id: "hidden", reportName: "Same name", matchFilter: false, createdAt: new Date(2026, 6, 10) },
+      ]);
+      const { render } = await import("./dashboard.js");
+      if (authStateCallback) authStateCallback({ uid: "user-hidden-duplicate" });
+      await new Promise((r) => setTimeout(r, 15));
+
+      document.querySelector("#filter-day").value = "2026-06-15";
+      render();
+
+      expect(document.querySelectorAll(".report-card")).toHaveLength(1);
+      expect(document.querySelector(".report-card").classList.contains("is-duplicate")).toBe(true);
+      expect(document.querySelector(".report-month-label").textContent).toBe(formatMonth(2026, 5));
+    });
   });
 });

@@ -879,6 +879,38 @@ a:focus-visible {
   gap: 16px;
 }
 
+/* Month labels span the card grid so June's cards still sit in one row
+   under "June------", then July starts a fresh row beneath its own rule. */
+.report-month {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.report-month:not(:first-child) {
+  margin-top: 18px;
+  padding-top: 6px;
+}
+
+.report-month-label {
+  margin: 0;
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.report-month::after {
+  content: "";
+  flex: 1 1 auto;
+  border-bottom: 1px dashed var(--line);
+  transform: translateY(-0.12em);
+}
+
 .report-card {
   display: flex;
   flex-direction: column;
@@ -889,6 +921,11 @@ a:focus-visible {
   animation: rise-in 360ms ease-out both;
 }
 
+.report-card.is-duplicate {
+  border-color: rgba(216, 86, 58, 0.45);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .report-card-head {
   display: flex;
   align-items: baseline;
@@ -896,10 +933,29 @@ a:focus-visible {
   gap: 12px;
 }
 
-.report-card-head strong {
+.report-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.report-card-title strong {
   font-size: 1rem;
   letter-spacing: -0.01em;
   word-break: break-word;
+}
+
+.report-duplicate {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  background: rgba(216, 86, 58, 0.12);
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .report-status {
