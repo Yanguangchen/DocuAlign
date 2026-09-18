@@ -33,9 +33,9 @@ rules_version = '2';
 // Fields: teamId, ownerUserId, userName, contact, details, startTime,
 //         endTime, status(active|cancelled|completed|archived),
 //         collisionStatus(none|open|reviewed|resolved), createdBy,
-//         createdAt, updatedAt + optional coordinates, photo, overruns,
+//         createdAt, updatedAt + optional coordinates, photo, photos, overruns,
 //         jobCompletionStatus, updatedBy, cancelledBy, cancelledAt,
-//         cancellationReason
+//         cancellationReason, worksheetReminderResolvedAt/By
 //   Immutable after create: createdBy, createdAt
 //   Owner (worker) may NOT change: ownerUserId, teamId
 //
@@ -170,7 +170,8 @@ service cloud.firestore {
           'mr8890085@gmail.com',
           'naythulin731@gmail.com',
           'tasinahamedshahadat03@gmail.com',
-          'parbjitsingh718@gmil.com'
+          'parbjitsingh718@gmil.com',
+          'landayanarian@gmail.com'
         ];
     }
 
@@ -437,6 +438,14 @@ service cloud.firestore {
             value.dataUrl.size() <= 950000));
     }
 
+    // Keep element validation bounded. Checking every slot can push a fully
+    // populated booking create over Firestore's 1,000-expression limit.
+    function isValidPhotos(value) {
+      return value is list &&
+        value.size() <= 6 &&
+        (value.size() > 0 ? isValidPhoto(value[0]) : true);
+    }
+
     // NOTE: overruns are only ever written through booking UPDATES, which are
     // diff-only validated (see isValidBookingUpdate). Overrun content shape
     // (minutes, signature data URL, size caps) is enforced client-side; the
@@ -502,13 +511,16 @@ service cloud.firestore {
           'address',
           'coordinates',
           'photo',
+          'photos',
           'jobNumber',
           'jobCompletionStatus',
           'status',
           'collisionStatus',
           'createdBy',
           'createdAt',
-          'updatedAt'
+          'updatedAt',
+          'worksheetReminderResolvedAt',
+          'worksheetReminderResolvedBy'
         ]) &&
         (!('teamId' in data) ||
           (data.teamId is string && data.teamId.size() <= 64)) &&
@@ -532,7 +544,10 @@ service cloud.firestore {
         (!('jobCompletionStatus' in data) ||
           data.jobCompletionStatus in ['pending', 'completed', 'cancelled']) &&
         (!('photo' in data) || isValidPhoto(data.photo)) &&
+        (!('photos' in data) || isValidPhotos(data.photos)) &&
         optStrWithin(data, 'jobNumber', 120) &&
+        optStrWithin(data, 'worksheetReminderResolvedAt', 64) &&
+        optStrWithin(data, 'worksheetReminderResolvedBy', 128) &&
         (!('teamMemberIds' in data) || isValidTeamMemberIds(data.teamMemberIds)) &&
         (!('teamMembers' in data) || isValidTeamMembers(data.teamMembers));
     }
@@ -584,8 +599,11 @@ service cloud.firestore {
           'address',
           'coordinates',
           'photo',
+          'photos',
           'overruns',
           'jobNumber',
+          'worksheetReminderResolvedAt',
+          'worksheetReminderResolvedBy',
           'jobCompletionStatus',
           'jobCompletionRecord',
           'status',
@@ -621,6 +639,10 @@ service cloud.firestore {
           optStrWithin(request.resource.data, 'deletedBy', 128)) &&
         (!changed.hasAny(['deletedAt']) ||
           optStrWithin(request.resource.data, 'deletedAt', 64)) &&
+        (!changed.hasAny(['worksheetReminderResolvedAt']) ||
+          optStrWithin(request.resource.data, 'worksheetReminderResolvedAt', 64)) &&
+        (!changed.hasAny(['worksheetReminderResolvedBy']) ||
+          optStrWithin(request.resource.data, 'worksheetReminderResolvedBy', 128)) &&
         (!changed.hasAny(['status']) ||
           request.resource.data.status != 'archived' ||
           (request.resource.data.deletedBy == request.auth.uid &&
