@@ -171,7 +171,8 @@ service cloud.firestore {
           'naythulin731@gmail.com',
           'tasinahamedshahadat03@gmail.com',
           'parbjitsingh718@gmil.com',
-          'landayanarian@gmail.com'
+          'landayanarian@gmail.com',
+          'woonzile8888@gmail.com'
         ];
     }
 
