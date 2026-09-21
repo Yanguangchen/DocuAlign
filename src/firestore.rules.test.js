@@ -81,6 +81,17 @@ describeWithEmulator("DocuAlign Firestore rules", () => {
     await assertSucceeds(setDoc(report, { status: "draft" }));
   });
 
+  it("grants DocuAlign access to the signed-in staff account woonzile888@gmail.com", async () => {
+    const context = testEnvironment.authenticatedContext("signed-in-staff", {
+      email: "woonzile888@gmail.com",
+      email_verified: true,
+    });
+    const report = doc(context.firestore(), "docuAlignReports", "access-probe");
+
+    await assertSucceeds(getDoc(report));
+    await assertSucceeds(setDoc(report, { status: "draft" }));
+  });
+
   it("denies an authenticated user outside the CubeSync allowlist", async () => {
     const context = testEnvironment.authenticatedContext("outside-user", {
       email: "outside@example.com",
