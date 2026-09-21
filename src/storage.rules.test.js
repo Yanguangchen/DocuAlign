@@ -29,7 +29,7 @@ function emailsInFunction(source, functionName) {
   let depth = 0;
   let end = brace;
   for (let index = brace; index < source.length; index += 1) {
-    const character = source[index];
+    const character = source.charAt(index);
     if (character === "{") depth += 1;
     if (character === "}") {
       depth -= 1;
@@ -53,11 +53,17 @@ function docuAlignPhotoBlock(source) {
   if (start < 0) {
     throw new Error("storage.rules is missing the DocuAlign photo match");
   }
-  const brace = source.indexOf("{", start);
+  // The path itself contains `{reportId}` / `{picture}`; the match body
+  // brace is the one after the picture wildcard, not those.
+  const pathEnd = source.indexOf("{picture}", start);
+  const brace = source.indexOf("{", pathEnd + "{picture}".length);
+  if (pathEnd < 0 || brace < 0) {
+    throw new Error("storage.rules DocuAlign photo match is malformed");
+  }
   let depth = 0;
   let end = brace;
   for (let index = brace; index < source.length; index += 1) {
-    const character = source[index];
+    const character = source.charAt(index);
     if (character === "{") depth += 1;
     if (character === "}") {
       depth -= 1;
