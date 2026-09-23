@@ -836,8 +836,7 @@ service cloud.firestore {
         'rakdurga0000@gmail.com',
         'ilovestudy123456@gmail.com',
         'kirubhashniravendran@gmail.com',
-        'woonzile8888@gmail.com',
-        'woonzile888@gmail.com'
+        'woonzile8888@gmail.com'
       ];
     }
 
