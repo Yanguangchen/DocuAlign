@@ -929,6 +929,7 @@ service cloud.firestore {
         'extraFields',
         'erpStatus',
         'rpaStatus',
+        'rpaSets',
         'template',
         'status',
         'results',
@@ -961,6 +962,8 @@ service cloud.firestore {
           data.status in ['Draft', 'Ready', 'Archived']) &&
         (!('results' in data) ||
           (data.results is list && data.results.size() <= 50)) &&
+        (!('rpaSets' in data) ||
+          (data.rpaSets is map && data.rpaSets.size() <= 50)) &&
         optCubeSyncTimestamp(data, 'submittedAt') &&
         (!('attemptCount' in data) ||
           (data.attemptCount is int && data.attemptCount >= 0 && data.attemptCount <= 10000)) &&
@@ -1016,6 +1019,7 @@ service cloud.firestore {
           'extraFields',
           'erpStatus',
           'rpaStatus',
+          'rpaSets',
           'template',
           'status',
           'results',
@@ -1045,6 +1049,9 @@ service cloud.firestore {
         (!changed.hasAny(['results']) ||
           (request.resource.data.results is list &&
             request.resource.data.results.size() <= 50)) &&
+        (!changed.hasAny(['rpaSets']) ||
+          (request.resource.data.rpaSets is map &&
+            request.resource.data.rpaSets.size() <= 50)) &&
         (!changed.hasAny(['submittedAt']) ||
           isCubeSyncTimestamp(request.resource.data.submittedAt)) &&
         (!changed.hasAny(['updatedAt']) ||
